@@ -445,19 +445,32 @@ export async function handleSplitClipEvenly(
     return { success: false, error: `Parts must be an integer >= 2, got: ${parts}` };
   }
 
+  const trackId = clip.trackId;
   const clipStart = clip.startTime;
   const clipDuration = clip.duration;
   const clipName = clip.name;
   const partDuration = clipDuration / parts;
 
-  // Calculate N-1 split times
+  // Calculate split times (N-1 splits for N parts)
   const splitTimes: number[] = [];
   for (let i = 1; i < parts; i++) {
     splitTimes.push(clipStart + partDuration * i);
   }
 
-  // Single-setState batch split — no stack overflow possible
-  splitClipBatch(clip, splitTimes);
+  // Split from END to START so earlier positions remain valid
+  for (let i = splitTimes.length - 1; i >= 0; i--) {
+    const splitTime = splitTimes[i];
+    const currentClips = useTimelineStore.getState().clips;
+    const targetClip = currentClips.find(c =>
+      c.trackId === trackId &&
+      c.startTime <= splitTime - 0.001 &&
+      c.startTime + c.duration >= splitTime + 0.001
+    );
+
+    if (targetClip) {
+      useTimelineStore.getState().splitClip(targetClip.id, splitTime);
+    }
+  }
 
   return {
     success: true,
@@ -477,6 +490,7 @@ export async function handleSplitClipAtTimes(
     return { success: false, error: `Clip not found: ${clipId}` };
   }
 
+  const trackId = clip.trackId;
   const clipStart = clip.startTime;
   const clipEnd = clip.startTime + clip.duration;
 
@@ -489,84 +503,24 @@ export async function handleSplitClipAtTimes(
     return { success: false, error: `No valid split times within clip range (${clipStart}s - ${clipEnd}s)` };
   }
 
-  // Single-setState batch split — no stack overflow possible
-  splitClipBatch(clip, validTimes);
+  // Split from END to START so earlier positions remain valid
+  for (let i = validTimes.length - 1; i >= 0; i--) {
+    const splitTime = validTimes[i];
+    const currentClips = useTimelineStore.getState().clips;
+    const targetClip = currentClips.find(c =>
+      c.trackId === trackId &&
+      c.startTime <= splitTime - 0.001 &&
+      c.startTime + c.duration >= splitTime + 0.001
+    );
+
+    if (targetClip) {
+      useTimelineStore.getState().splitClip(targetClip.id, splitTime);
+    }
+  }
 
   return {
     success: true,
     data: { splitCount: validTimes.length, splitTimes: validTimes, resultingParts: validTimes.length + 1 },
-  };
-}
-
-export async function handleReorderClips(
-  args: Record<string, unknown>,
-  _timelineStore: TimelineStore
-): Promise<ToolResult> {
-  const clipIds = args.clipIds as string[];
-
-  if (!clipIds || clipIds.length < 2) {
-    return { success: false, error: 'Need at least 2 clip IDs to reorder' };
-  }
-
-  // Get fresh state
-  const state = useTimelineStore.getState();
-  const allClips = state.clips;
-
-  // Resolve all clips and validate
-  const orderedClips = clipIds.map(id => allClips.find(c => c.id === id));
-  const missing = clipIds.filter((_id, i) => !orderedClips[i]);
-  if (missing.length > 0) {
-    return { success: false, error: `Clips not found: ${missing.join(', ')}` };
-  }
-
-  // Find the earliest startTime among the clips to reorder
-  const startPosition = Math.min(...orderedClips.map(c => c!.startTime));
-
-  // Build a map of new positions: clipId -> newStartTime
-  const newPositions = new Map<string, number>();
-  let currentTime = startPosition;
-
-  for (const clip of orderedClips) {
-    newPositions.set(clip!.id, currentTime);
-    currentTime += clip!.duration;
-  }
-
-  // Also move linked audio clips (same delta as their video clip)
-  for (const clip of orderedClips) {
-    if (clip!.linkedClipId) {
-      const linkedClip = allClips.find(c => c.id === clip!.linkedClipId);
-      if (linkedClip && !newPositions.has(linkedClip.id)) {
-        const delta = newPositions.get(clip!.id)! - clip!.startTime;
-        newPositions.set(linkedClip.id, linkedClip.startTime + delta);
-      }
-    }
-  }
-
-  // Apply all position changes in a single set() call
-  useTimelineStore.setState({
-    clips: allClips.map(c => {
-      const newStart = newPositions.get(c.id);
-      if (newStart !== undefined) {
-        return { ...c, startTime: Math.max(0, newStart) };
-      }
-      return c;
-    }),
-  });
-
-  // Update duration and invalidate cache once
-  useTimelineStore.getState().updateDuration();
-  useTimelineStore.getState().invalidateCache();
-
-  return {
-    success: true,
-    data: {
-      reorderedCount: clipIds.length,
-      newOrder: clipIds.map((id, i) => ({
-        clipId: id,
-        newStartTime: newPositions.get(id),
-        position: i + 1,
-      })),
-    },
   };
 }
 
