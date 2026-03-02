@@ -105,10 +105,10 @@ async function initializeFastMode(
       });
       log.debug(`Clip ${clip.name}: Composition with nested clips`);
 
-      // Collect nested video clips (WebCodecs Full Mode or HTMLVideoElement)
+      // Collect nested video clips
       if (clip.nestedClips) {
         for (const nestedClip of clip.nestedClips) {
-          if (nestedClip.source?.type === 'video' && (nestedClip.source.videoElement || nestedClip.source.webCodecsPlayer)) {
+          if (nestedClip.source?.type === 'video' && nestedClip.source.videoElement) {
             nestedVideoClips.push({ clip: nestedClip, parentClip: clip });
           }
         }
@@ -147,7 +147,7 @@ async function initializeFastMode(
     log.debug(`Loaded ${clip.name} (${(fileData.byteLength / 1024 / 1024).toFixed(1)}MB, ${fileType})`);
 
     // Create dedicated WebCodecs player for export
-    const exportPlayer = new WebCodecsPlayer({ loop: false });
+    const exportPlayer = new WebCodecsPlayer({ useSimpleMode: false, loop: false });
 
     const endParse = log.time(`loadArrayBuffer "${clip.name}"`);
     try {
@@ -315,20 +315,17 @@ async function initializeParallelDecoding(
   }
   endPrefetch();
 
-  // Also seek all video sources to their correct start positions as fallback
-  // This ensures correct frame if parallel decoder fails and falls back to video element/WebCodecs
+  // Also seek all HTMLVideoElements to their correct start positions as fallback
+  // This ensures correct frame if parallel decoder fails and falls back to video element
   const seekPromises: Promise<void>[] = [];
   for (const clip of clips) {
-    const clipLocalTime = Math.max(0, _startTime - clip.startTime);
-    const sourceTime = clip.reversed
-      ? clip.outPoint - clipLocalTime
-      : clip.inPoint + clipLocalTime;
-
-    if (clip.source?.webCodecsPlayer && !clip.source.videoElement) {
-      // WebCodecs Full Mode: seek via player
-      seekPromises.push(clip.source.webCodecsPlayer.seekAsync(sourceTime).then(() => {}));
-    } else if (clip.source?.videoElement) {
+    if (clip.source?.videoElement) {
       const video = clip.source.videoElement;
+      const clipLocalTime = Math.max(0, _startTime - clip.startTime);
+      const sourceTime = clip.reversed
+        ? clip.outPoint - clipLocalTime
+        : clip.inPoint + clipLocalTime;
+
       seekPromises.push(new Promise<void>((resolve) => {
         const targetTime = Math.max(0, Math.min(sourceTime, video.duration || 0));
         if (Math.abs(video.currentTime - targetTime) < 0.01) {
@@ -353,7 +350,7 @@ async function initializeParallelDecoding(
     await Promise.all(seekPromises);
     // Wait for frames to be ready after seek
     await new Promise(r => setTimeout(r, 50));
-    log.info(`Seeked ${seekPromises.length} video sources to start positions as fallback`);
+    log.info(`Seeked ${seekPromises.length} video elements to start positions as fallback`);
   }
 
   // Mark clips as using parallel decoding

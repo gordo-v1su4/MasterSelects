@@ -55,12 +55,13 @@ export async function handleSearchVideos(args: Record<string, unknown>): Promise
     }
 
     // Apply duration filters
-    let filtered = results;
+    type SearchResult = typeof results[number];
+    let filtered: SearchResult[] = results;
     if (maxDuration) {
-      filtered = filtered.filter(r => r.duration != null && r.duration <= maxDuration);
+      filtered = filtered.filter((r: SearchResult) => r.duration != null && r.duration <= maxDuration);
     }
     if (minDuration) {
-      filtered = filtered.filter(r => r.duration != null && r.duration >= minDuration);
+      filtered = filtered.filter((r: SearchResult) => r.duration != null && r.duration >= minDuration);
     }
 
     // Limit to requested count

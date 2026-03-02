@@ -3,10 +3,6 @@
 // Export mode delegated to WebCodecsExportMode
 
 import { Logger } from '../services/logger';
-import { playbackMetrics } from '../services/playbackMetrics';
-import { PlaybackDecodeWorkerClient } from './playback/PlaybackDecodeWorkerClient';
-import { DecodedFrameQueue } from './playback/DecodedFrameQueue';
-import { SeekScheduler } from './playback/SeekScheduler';
 const log = Logger.create('WebCodecsPlayer');
 
 import * as MP4BoxModule from 'mp4box';
@@ -15,13 +11,16 @@ const MP4Box = (MP4BoxModule as any).default || MP4BoxModule;
 import type { Sample, MP4VideoTrack, MP4ArrayBuffer, MP4File } from './webCodecsTypes';
 import { WebCodecsExportMode } from './WebCodecsExportMode';
 import type { ExportModePlayer } from './WebCodecsExportMode';
-import type { AudioTrackInfo } from './WebCodecsAudioPlayer';
 
 export interface WebCodecsPlayerOptions {
   loop?: boolean;
   onFrame?: (frame: VideoFrame) => void;
   onReady?: (width: number, height: number) => void;
   onError?: (error: Error) => void;
+  // Use simple VideoFrame extraction from HTMLVideoElement instead of MP4Box demuxing
+  useSimpleMode?: boolean;
+  // Use MediaStreamTrackProcessor for VideoFrame extraction (best performance)
+  useStreamMode?: boolean;
 }
 
 export class WebCodecsPlayer implements ExportModePlayer {
@@ -38,18 +37,11 @@ export class WebCodecsPlayer implements ExportModePlayer {
   private animationId: number | null = null;
   private videoTrack: MP4VideoTrack | null = null;
   private codecConfig: VideoDecoderConfig | null = null;
-  private currentFrameTimeSec = 0;
-  private seekInProgress = false;
-  private pendingSeekTime: number | null = null;
-  private seekToken = 0;
-  private deferredSeekFrame: VideoFrame | null = null;
-  private decodeWorkerClient: PlaybackDecodeWorkerClient | null = null;
-  private frameQueue = new DecodedFrameQueue<VideoFrame>(3);
-  private throttleToggle = false;
-  private seekScheduler: SeekScheduler;
 
-  // Audio track info extracted from MP4Box
-  private audioTrackInfo: AudioTrackInfo | null = null;
+  // Simple mode (VideoFrame from HTMLVideoElement)
+  private useSimpleMode = false;
+  private videoElement: HTMLVideoElement | null = null;
+  private videoFrameCallbackId: number | null = null;
 
   public width = 0;
   public height = 0;
@@ -58,6 +50,10 @@ export class WebCodecsPlayer implements ExportModePlayer {
   private onFrame?: (frame: VideoFrame) => void;
   private onReady?: (width: number, height: number) => void;
   private onError?: (error: Error) => void;
+
+  // Stream mode (MediaStreamTrackProcessor)
+  private streamReader: ReadableStreamDefaultReader<VideoFrame> | null = null;
+  private streamActive = false;
 
   // Export mode (delegated to WebCodecsExportMode)
   private exportMode: WebCodecsExportMode;
@@ -76,10 +72,8 @@ export class WebCodecsPlayer implements ExportModePlayer {
   getFrameRate(): number { return this.frameRate; }
   getCurrentFrame(): VideoFrame | null { return this.currentFrame; }
   setCurrentFrame(frame: VideoFrame | null): void { this.currentFrame = frame; }
-
-  // Audio track info accessors
-  hasAudioTrack(): boolean { return this.audioTrackInfo !== null; }
-  getAudioTrackInfo(): AudioTrackInfo | null { return this.audioTrackInfo; }
+  isSimpleMode(): boolean { return this.useSimpleMode; }
+  getVideoElement(): HTMLVideoElement | null { return this.videoElement; }
 
   constructor(options: WebCodecsPlayerOptions = {}) {
     this.exportMode = new WebCodecsExportMode(this);
@@ -87,23 +81,228 @@ export class WebCodecsPlayer implements ExportModePlayer {
     this.onFrame = options.onFrame;
     this.onReady = options.onReady;
     this.onError = options.onError;
-    this.decodeWorkerClient = new PlaybackDecodeWorkerClient();
-    this.seekScheduler = new SeekScheduler(
-      async (timeSec) => this.enqueueSeek(timeSec, 'preview'),
-      async (timeSec) => this.enqueueSeek(timeSec, 'exact')
-    );
+    this.useSimpleMode = options.useSimpleMode ?? false;
+  }
+
+  // Stream mode: Use captureStream + MediaStreamTrackProcessor for best performance
+  // This gives us VideoFrames without blocking the main thread
+  async attachWithStream(video: HTMLVideoElement): Promise<void> {
+    if (!('MediaStreamTrackProcessor' in window)) {
+      throw new Error('MediaStreamTrackProcessor not supported');
+    }
+
+    this.isAttachedToExternal = true;
+    this.videoElement = video;
+    this.width = video.videoWidth;
+    this.height = video.videoHeight;
+
+    // Capture stream from video
+    // Note: captureStream is not in the standard HTMLVideoElement type but exists in browsers
+    const stream = (video as HTMLVideoElement & { captureStream(): MediaStream }).captureStream();
+    const videoTrack = stream.getVideoTracks()[0];
+
+    if (!videoTrack) {
+      throw new Error('No video track in stream');
+    }
+
+    // Create processor to get VideoFrames
+    const processor = new (window as any).MediaStreamTrackProcessor({ track: videoTrack });
+    this.streamReader = processor.readable.getReader();
+
+    this.ready = true;
+    log.info(`Stream attached: ${this.width}x${this.height}`);
+
+    // Start reading frames
+    this.startStreamCapture();
+
+    this.onReady?.(this.width, this.height);
+  }
+
+  private async startStreamCapture(): Promise<void> {
+    if (!this.streamReader || this.streamActive) return;
+
+    this.streamActive = true;
+    log.debug('Starting stream frame capture');
+
+    try {
+      while (this.streamActive) {
+        const { value: frame, done } = await this.streamReader.read();
+
+        if (done) {
+          log.debug('Stream ended');
+          break;
+        }
+
+        if (frame) {
+          // Close previous frame
+          if (this.currentFrame) {
+            this.currentFrame.close();
+          }
+          this.currentFrame = frame;
+          this.onFrame?.(frame);
+        }
+      }
+    } catch (e) {
+      log.warn('Error reading frames from stream', e);
+    }
+
+    this.streamActive = false;
+  }
+
+  private stopStreamCapture(): void {
+    this.streamActive = false;
+    if (this.streamReader) {
+      this.streamReader.cancel().catch(() => {});
+      this.streamReader = null;
+    }
   }
 
   async loadFile(file: File): Promise<void> {
+    // Check VideoFrame support (needed for both modes)
     if (!('VideoFrame' in window)) {
       throw new Error('VideoFrame API not supported in this browser');
     }
+
+    // Simple mode: use HTMLVideoElement + VideoFrame (no MP4Box parsing needed)
+    if (this.useSimpleMode) {
+      await this.loadFileSimple(file);
+      return;
+    }
+
+    // Full mode: use MP4Box + VideoDecoder
     if (!('VideoDecoder' in window)) {
       throw new Error('WebCodecs VideoDecoder not supported in this browser');
     }
 
     const arrayBuffer = await file.arrayBuffer();
     await this.loadArrayBuffer(arrayBuffer);
+  }
+
+  // Track if we're attached to an external video (Timeline's video element)
+  private isAttachedToExternal = false;
+  private boundOnPlay: (() => void) | null = null;
+  private boundOnPause: (() => void) | null = null;
+  private boundOnSeeked: (() => void) | null = null;
+
+  // Use an existing video element instead of creating one (for timeline integration)
+  attachToVideoElement(video: HTMLVideoElement): void {
+    if (!('VideoFrame' in window)) {
+      throw new Error('VideoFrame API not supported');
+    }
+
+    this.useSimpleMode = true;
+    this.isAttachedToExternal = true;
+    this.videoElement = video;
+    this.width = video.videoWidth;
+    this.height = video.videoHeight;
+    this.ready = true;
+
+    log.info(`Simple mode attached to existing video: ${this.width}x${this.height}`);
+
+    // Listen to video element events - Timeline controls the video, we just capture frames
+    this.boundOnPlay = () => {
+      if (this._isPlaying) return; // Already playing
+      log.debug('Video play event - starting frame capture');
+      this._isPlaying = true;
+      this.startSimpleFrameCapture();
+    };
+    this.boundOnPause = () => {
+      if (!this._isPlaying) return; // Already paused
+      log.debug('Video pause event');
+      this._isPlaying = false;
+      this.stopSimpleFrameCapture();
+      // Capture the paused frame
+      this.captureCurrentFrame();
+    };
+    this.boundOnSeeked = () => {
+      // Only capture on seek if not playing (playing captures continuously)
+      if (!this._isPlaying) {
+        this.captureCurrentFrame();
+      }
+    };
+    // No timeupdate listener - requestVideoFrameCallback is more efficient
+
+    video.addEventListener('play', this.boundOnPlay);
+    video.addEventListener('pause', this.boundOnPause);
+    video.addEventListener('seeked', this.boundOnSeeked);
+
+    // Capture initial frame
+    if (video.readyState >= 2) {
+      this.captureCurrentFrame();
+    }
+
+    // If video is already playing, start capture
+    if (!video.paused) {
+      this._isPlaying = true;
+      this.startSimpleFrameCapture();
+    }
+  }
+
+  // Simple mode: Create VideoFrames directly from HTMLVideoElement
+  private async loadFileSimple(file: File): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(file);
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.loop = this.loop;
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Video load timeout'));
+      }, 10000);
+
+      video.onloadedmetadata = () => {
+        this.width = video.videoWidth;
+        this.height = video.videoHeight;
+        this.videoElement = video;
+
+        // Estimate frame rate (assume 30fps if unknown)
+        this.frameRate = 30;
+        this.frameInterval = 1000 / this.frameRate;
+
+        log.debug(`Video loaded: ${this.width}x${this.height}`);
+      };
+
+      video.oncanplay = () => {
+        clearTimeout(timeout);
+        this.ready = true;
+
+        // Create initial frame
+        this.captureCurrentFrame();
+
+        log.info(`Simple mode READY: ${this.width}x${this.height}`);
+        this.onReady?.(this.width, this.height);
+        resolve();
+      };
+
+      video.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error('Failed to load video'));
+      };
+
+      video.load();
+    });
+  }
+
+  // Capture current video frame as VideoFrame
+  private captureCurrentFrame(): void {
+    if (!this.videoElement || this.videoElement.readyState < 2) return;
+
+    // Close previous frame
+    if (this.currentFrame) {
+      this.currentFrame.close();
+    }
+
+    // Create new VideoFrame from video element
+    try {
+      this.currentFrame = new VideoFrame(this.videoElement, {
+        timestamp: this.videoElement.currentTime * 1_000_000,
+      });
+      this.onFrame?.(this.currentFrame);
+    } catch (e) {
+      // Ignore frame capture errors (can happen during seek)
+    }
   }
 
   async loadArrayBuffer(buffer: ArrayBuffer): Promise<void> {
@@ -121,7 +320,7 @@ export class WebCodecsPlayer implements ExportModePlayer {
       let resolved = false;
 
       mp4File.onReady = (info) => {
-        log.info(`MP4 onReady: ${info.videoTracks.length} video tracks, ${info.audioTracks?.length ?? 0} audio tracks`);
+        log.info(`MP4 onReady: ${info.videoTracks.length} video tracks`);
         const videoTrack = info.videoTracks[0];
         if (!videoTrack) {
           clearTimeout(timeout);
@@ -130,18 +329,6 @@ export class WebCodecsPlayer implements ExportModePlayer {
         }
 
         this.videoTrack = videoTrack;
-
-        // Extract audio track info if present
-        if (info.audioTracks && info.audioTracks.length > 0) {
-          const audioTrack = info.audioTracks[0];
-          this.audioTrackInfo = {
-            codec: audioTrack.codec,
-            sampleRate: audioTrack.audio?.sample_rate ?? 48000,
-            channels: audioTrack.audio?.channel_count ?? 2,
-            duration: audioTrack.duration / audioTrack.timescale,
-          };
-          log.debug('Audio track found', this.audioTrackInfo);
-        }
         this.width = videoTrack.video.width;
         this.height = videoTrack.video.height;
         this.frameRate = videoTrack.nb_samples / (videoTrack.duration / videoTrack.timescale);
@@ -210,8 +397,6 @@ export class WebCodecsPlayer implements ExportModePlayer {
             clearTimeout(timeout);
             endLoad();
             log.info(`Decoder configured: ${this.width}x${this.height} @ ${this.frameRate.toFixed(1)}fps (samples loading in background)`);
-            // Initialize worker-side seek planner asynchronously (non-blocking).
-            void this.initDecodeWorker(buffer);
             resolve();
           }
         });
@@ -276,16 +461,6 @@ export class WebCodecsPlayer implements ExportModePlayer {
     return dominated;
   }
 
-  private async initDecodeWorker(buffer: ArrayBuffer): Promise<void> {
-    if (!this.decodeWorkerClient || !this.decodeWorkerClient.isAvailable()) return;
-    try {
-      await this.decodeWorkerClient.init(buffer.slice(0));
-      log.debug('Playback decode worker initialized');
-    } catch (e) {
-      log.warn('Playback decode worker init failed, using local seek planner', e);
-    }
-  }
-
   private initDecoder(): void {
     if (!this.codecConfig) return;
 
@@ -294,21 +469,13 @@ export class WebCodecsPlayer implements ExportModePlayer {
         // In export mode, buffer ALL frames via export mode handler
         if (this.exportMode.isInExportMode) {
           this.exportMode.handleDecoderOutput(frame);
-        } else if (this.seekInProgress) {
-          // While seeking we suppress intermediate frames and only publish
-          // the final decoded frame when flush() completes.
-          if (this.deferredSeekFrame) {
-            try { this.deferredSeekFrame.close(); } catch {}
-          }
-          this.deferredSeekFrame = frame;
         } else {
-          this.frameQueue.push(frame);
-          const latest = this.frameQueue.popLatest();
-          if (latest) {
-            this.commitFrame(latest);
+          // Normal mode: just keep current frame
+          if (this.currentFrame) {
+            this.currentFrame.close();
           }
-          // Close any stale buffered frames after committing latest.
-          this.frameQueue.clear();
+          this.currentFrame = frame;
+          this.onFrame?.(frame);
         }
 
         // Resolve any pending frame wait
@@ -345,126 +512,95 @@ export class WebCodecsPlayer implements ExportModePlayer {
 
   play(): void {
     if (this._isPlaying || !this.ready) return;
-
-    // Cancel pending preview/exact scheduler jobs from paused/scrub mode.
-    // Otherwise a delayed exact seek can fire right after play() and freeze
-    // realtime preview until that seek completes.
-    this.seekScheduler.reset();
-
-    // If a heavy seek was in progress (paused/scrub mode), abort its continuation
-    // so realtime playback starts immediately.
-    if (this.seekInProgress) {
-      this.seekToken++;
-      this.pendingSeekTime = null;
-      this.seekInProgress = false;
-      if (this.deferredSeekFrame) {
-        try { this.deferredSeekFrame.close(); } catch {}
-        this.deferredSeekFrame = null;
-      }
-      if (this.decoder && this.codecConfig) {
-        try {
-          this.decoder.reset();
-          this.decoder.configure(this.codecConfig);
-        } catch {
-          // Ignore; decoder may already be reconfigured by an obsolete seek.
-        }
-      }
-    }
-
     this._isPlaying = true;
-    this.lastFrameTime = performance.now();
-    log.info('play', {
-      timeSec: Number(this.currentTime.toFixed(3)),
-      sampleIndex: this.sampleIndex,
-      decodeQueueDepth: this.getDecodeQueueDepth(),
-    });
-    this.scheduleNextFrame();
-  }
 
-  /**
-   * Atomic seek + play: resets the decoder, decodes from the nearest keyframe
-   * to the target time, then starts the realtime decode loop from there.
-   *
-   * This avoids the race condition where play() cancels a preceding seek()
-   * via seekScheduler.reset(), causing video to start from the wrong position.
-   */
-  playFrom(timeSec: number): void {
-    if (this._isPlaying || !this.ready) return;
-    if (!this.decoder || !this.codecConfig || !this.videoTrack || this.samples.length === 0) {
-      // Fall back to plain play() if we can't seek
-      this.play();
-      return;
-    }
-
-    // Cancel pending scheduler jobs and abort any in-progress seek
-    this.seekScheduler.reset();
-    if (this.seekInProgress) {
-      this.seekToken++;
-      this.pendingSeekTime = null;
-      this.seekInProgress = false;
-      if (this.deferredSeekFrame) {
-        try { this.deferredSeekFrame.close(); } catch {}
-        this.deferredSeekFrame = null;
+    if (this.useSimpleMode && this.videoElement) {
+      // If attached to external video, don't control it - just ensure frame capture is running
+      // Timeline controls the video element, we get notified via events
+      if (!this.isAttachedToExternal) {
+        this.videoElement.play().catch(() => {});
       }
+      this.startSimpleFrameCapture();
+    } else {
+      this.lastFrameTime = performance.now();
+      this.scheduleNextFrame();
     }
-
-    // Reset decoder and decode from nearest keyframe to target.
-    // Intermediate decoder outputs fire asynchronously (between RAF ticks)
-    // and only the last committed frame is visible on the next render.
-    this.decoder.reset();
-    this.decoder.configure(this.codecConfig);
-
-    const targetIndex = this.findTargetIndex(timeSec);
-    const keyframeIndex = this.findKeyframeIndex(targetIndex);
-
-    for (let i = keyframeIndex; i <= targetIndex; i++) {
-      const sample = this.samples[i];
-      const chunk = new EncodedVideoChunk({
-        type: sample.is_sync ? 'key' : 'delta',
-        timestamp: (sample.cts * 1_000_000) / sample.timescale,
-        duration: (sample.duration * 1_000_000) / sample.timescale,
-        data: sample.data,
-      });
-      try {
-        this.decoder.decode(chunk);
-      } catch {
-        // Skip decode errors during startup seek
-      }
-    }
-
-    this.sampleIndex = targetIndex + 1;
-    this._isPlaying = true;
-    this.lastFrameTime = performance.now();
-    log.info('playFrom', {
-      targetTimeSec: Number(timeSec.toFixed(3)),
-      targetIndex,
-      keyframeIndex,
-      framesToDecode: targetIndex - keyframeIndex + 1,
-    });
-    this.scheduleNextFrame();
   }
 
   pause(): void {
     this._isPlaying = false;
-    if (this.animationId !== null) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
+
+    if (this.useSimpleMode && this.videoElement) {
+      // If attached to external video, don't control it - Timeline controls it
+      if (!this.isAttachedToExternal) {
+        this.videoElement.pause();
+      }
+      this.stopSimpleFrameCapture();
+    } else {
+      if (this.animationId !== null) {
+        cancelAnimationFrame(this.animationId);
+        this.animationId = null;
+      }
     }
-    log.info('pause', {
-      timeSec: Number(this.currentTime.toFixed(3)),
-      sampleIndex: this.sampleIndex,
-      decodeQueueDepth: this.getDecodeQueueDepth(),
-    });
   }
 
   stop(): void {
     this.pause();
-    this.sampleIndex = 0;
-    this.currentFrameTimeSec = 0;
+
+    if (this.useSimpleMode && this.videoElement) {
+      // If attached to external video, don't control it
+      if (!this.isAttachedToExternal) {
+        this.videoElement.currentTime = 0;
+      }
+    } else {
+      this.sampleIndex = 0;
+    }
 
     if (this.currentFrame) {
       this.currentFrame.close();
       this.currentFrame = null;
+    }
+  }
+
+  // Simple mode frame capture using requestVideoFrameCallback
+  private startSimpleFrameCapture(): void {
+    if (!this.videoElement || !('requestVideoFrameCallback' in this.videoElement)) {
+      // Fallback to requestAnimationFrame
+      this.startSimpleFrameCaptureRAF();
+      return;
+    }
+
+    const captureFrame = () => {
+      if (!this._isPlaying || !this.videoElement) return;
+
+      this.captureCurrentFrame();
+
+      this.videoFrameCallbackId = this.videoElement.requestVideoFrameCallback(captureFrame);
+    };
+
+    this.videoFrameCallbackId = this.videoElement.requestVideoFrameCallback(captureFrame);
+  }
+
+  private startSimpleFrameCaptureRAF(): void {
+    const captureFrame = () => {
+      if (!this._isPlaying) return;
+
+      this.captureCurrentFrame();
+
+      this.animationId = requestAnimationFrame(captureFrame);
+    };
+
+    this.animationId = requestAnimationFrame(captureFrame);
+  }
+
+  private stopSimpleFrameCapture(): void {
+    if (this.videoFrameCallbackId !== null && this.videoElement && 'cancelVideoFrameCallback' in this.videoElement) {
+      (this.videoElement as any).cancelVideoFrameCallback(this.videoFrameCallbackId);
+      this.videoFrameCallbackId = null;
+    }
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
     }
   }
 
@@ -507,18 +643,6 @@ export class WebCodecsPlayer implements ExportModePlayer {
 
   private decodeNextFrame(): void {
     if (!this.decoder || this.samples.length === 0) return;
-    if (this.seekInProgress) return;
-
-    const workerPressure = this.decodeWorkerClient?.getBackpressureState() ?? 'NORMAL';
-    if (workerPressure === 'STALL_RECOVERY') {
-      return;
-    }
-    if (workerPressure === 'THROTTLE') {
-      this.throttleToggle = !this.throttleToggle;
-      if (this.throttleToggle) {
-        return;
-      }
-    }
 
     // Get next sample
     if (this.sampleIndex >= this.samples.length) {
@@ -535,9 +659,6 @@ export class WebCodecsPlayer implements ExportModePlayer {
 
     const sample = this.samples[this.sampleIndex];
     this.sampleIndex++;
-    const localDepth = this.getDecodeQueueDepth();
-    const workerPending = this.decodeWorkerClient?.getPendingRequestCount() ?? 0;
-    playbackMetrics.recordDecodeQueueDepth(Math.max(localDepth, workerPending));
 
     // Create EncodedVideoChunk from sample
     const chunk = new EncodedVideoChunk({
@@ -560,12 +681,70 @@ export class WebCodecsPlayer implements ExportModePlayer {
     return this.currentFrame !== null;
   }
 
-  getDecodeQueueDepth(): number {
-    return Math.max(0, this.samples.length - this.sampleIndex);
-  }
-
   seek(timeSeconds: number): void {
-    this.seekScheduler.request(timeSeconds);
+    // Simple mode: direct seek on video element
+    if (this.useSimpleMode && this.videoElement) {
+      this.videoElement.currentTime = timeSeconds;
+      // Capture frame immediately and after seek completes
+      this.captureCurrentFrame();
+
+      // Also capture when seeked event fires
+      const onSeeked = () => {
+        this.captureCurrentFrame();
+        this.videoElement?.removeEventListener('seeked', onSeeked);
+      };
+      this.videoElement.addEventListener('seeked', onSeeked);
+      return;
+    }
+
+    // Full mode: decode from keyframe
+    if (!this.videoTrack || this.samples.length === 0 || !this.decoder) return;
+
+    const targetTime = timeSeconds * this.videoTrack.timescale;
+
+    // Find sample with CTS closest to target time
+    // IMPORTANT: Samples are in DECODE order (DTS), not presentation order (CTS)
+    // due to B-frame reordering. We must search for closest CTS match.
+    let targetIndex = 0;
+    let closestDiff = Infinity;
+
+    for (let i = 0; i < this.samples.length; i++) {
+      const diff = Math.abs(this.samples[i].cts - targetTime);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        targetIndex = i;
+      }
+    }
+
+    // Find the nearest keyframe before the target sample (in decode order)
+    let keyframeIndex = 0;
+    for (let i = 0; i <= targetIndex; i++) {
+      if (this.samples[i].is_sync) {
+        keyframeIndex = i;
+      }
+    }
+
+    // Reset decoder
+    this.decoder.reset();
+    this.decoder.configure(this.codecConfig!);
+
+    // Decode from keyframe up to target frame to get correct frame
+    for (let i = keyframeIndex; i <= targetIndex; i++) {
+      const sample = this.samples[i];
+      const chunk = new EncodedVideoChunk({
+        type: sample.is_sync ? 'key' : 'delta',
+        timestamp: (sample.cts * 1_000_000) / sample.timescale,
+        duration: (sample.duration * 1_000_000) / sample.timescale,
+        data: sample.data,
+      });
+      try {
+        this.decoder.decode(chunk);
+      } catch {
+        // Skip decode errors
+      }
+    }
+
+    this.sampleIndex = targetIndex + 1;
   }
 
   /**
@@ -573,8 +752,148 @@ export class WebCodecsPlayer implements ExportModePlayer {
    * Use this for export where we need guaranteed frame accuracy
    */
   async seekAsync(timeSeconds: number): Promise<void> {
-    this.seekScheduler.request(timeSeconds);
-    await this.seekScheduler.flushExactNow();
+    // Simple mode: seek video element and wait for frame
+    if (this.useSimpleMode && this.videoElement) {
+      return new Promise<void>((resolve) => {
+        const video = this.videoElement!;
+        let resolved = false;
+
+        const doResolve = () => {
+          if (resolved) return;
+          resolved = true;
+          this.captureCurrentFrame();
+          resolve();
+        };
+
+        // Longer timeout for export - we need accurate frames
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            log.warn(`seekAsync timeout at ${timeSeconds}, readyState: ${video.readyState}`);
+            doResolve();
+          }
+        }, 2000);
+
+        // Wait for video to have enough data (readyState >= 2 means HAVE_CURRENT_DATA)
+        const waitForReady = (callback: () => void) => {
+          if (video.readyState >= 2 && !video.seeking) {
+            callback();
+            return;
+          }
+          // Poll until ready or timeout
+          let retries = 0;
+          const maxRetries = 60; // 60 * 16ms ≈ 1 second
+          const checkReady = () => {
+            retries++;
+            if (video.readyState >= 2 && !video.seeking) {
+              callback();
+            } else if (retries < maxRetries) {
+              requestAnimationFrame(checkReady);
+            } else {
+              // Give up waiting for readyState, proceed anyway
+              log.warn(`waitForReady gave up after ${retries} retries, readyState: ${video.readyState}`);
+              callback();
+            }
+          };
+          requestAnimationFrame(checkReady);
+        };
+
+        const waitForFrame = () => {
+          // First ensure video has data, then wait for frame callback
+          waitForReady(() => {
+            // Use requestVideoFrameCallback if available for precise frame timing
+            if ('requestVideoFrameCallback' in video) {
+              (video as any).requestVideoFrameCallback(() => {
+                clearTimeout(timeout);
+                doResolve();
+              });
+              // Also set a shorter backup timeout since rvfc may not fire when paused
+              setTimeout(() => {
+                if (!resolved && video.readyState >= 2) {
+                  clearTimeout(timeout);
+                  doResolve();
+                }
+              }, 100);
+            } else {
+              // Fallback: wait two animation frames
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  clearTimeout(timeout);
+                  doResolve();
+                });
+              });
+            }
+          });
+        };
+
+        const onSeeked = () => {
+          video.removeEventListener('seeked', onSeeked);
+          waitForFrame();
+        };
+
+        if (Math.abs(video.currentTime - timeSeconds) < 0.01 && !video.seeking) {
+          // Already at position, just wait for frame
+          waitForFrame();
+          return;
+        }
+
+        video.addEventListener('seeked', onSeeked);
+        video.currentTime = timeSeconds;
+      });
+    }
+
+    // Full mode: decode and flush
+    if (!this.videoTrack || this.samples.length === 0 || !this.decoder) {
+      return;
+    }
+
+    const targetTime = timeSeconds * this.videoTrack.timescale;
+
+    // Find sample with CTS closest to target time
+    // IMPORTANT: Samples are in DECODE order (DTS), not presentation order (CTS)
+    // due to B-frame reordering. We must search for closest CTS match.
+    let targetIndex = 0;
+    let closestDiff = Infinity;
+
+    for (let i = 0; i < this.samples.length; i++) {
+      const diff = Math.abs(this.samples[i].cts - targetTime);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        targetIndex = i;
+      }
+    }
+
+    // Find the nearest keyframe before the target sample (in decode order)
+    let keyframeIndex = 0;
+    for (let i = 0; i <= targetIndex; i++) {
+      if (this.samples[i].is_sync) {
+        keyframeIndex = i;
+      }
+    }
+
+    // Reset decoder
+    this.decoder.reset();
+    this.decoder.configure(this.codecConfig!);
+
+    // Decode from keyframe up to target frame
+    for (let i = keyframeIndex; i <= targetIndex; i++) {
+      const sample = this.samples[i];
+      const chunk = new EncodedVideoChunk({
+        type: sample.is_sync ? 'key' : 'delta',
+        timestamp: (sample.cts * 1_000_000) / sample.timescale,
+        duration: (sample.duration * 1_000_000) / sample.timescale,
+        data: sample.data,
+      });
+      try {
+        this.decoder.decode(chunk);
+      } catch {
+        // Skip decode errors
+      }
+    }
+
+    // Flush to ensure all frames are decoded
+    await this.decoder.flush();
+
+    this.sampleIndex = targetIndex + 1;
   }
 
   // ==================== EXPORT MODE (delegated to WebCodecsExportMode) ====================
@@ -600,6 +919,9 @@ export class WebCodecsPlayer implements ExportModePlayer {
   }
 
   get duration(): number {
+    if (this.useSimpleMode && this.videoElement) {
+      return this.videoElement.duration || 0;
+    }
     if (!this.videoTrack) return 0;
     return this.videoTrack.duration / this.videoTrack.timescale;
   }
@@ -609,7 +931,9 @@ export class WebCodecsPlayer implements ExportModePlayer {
   }
 
   get currentTime(): number {
-    if (this.currentFrameTimeSec > 0) return this.currentFrameTimeSec;
+    if (this.useSimpleMode && this.videoElement) {
+      return this.videoElement.currentTime;
+    }
     if (!this.videoTrack || this.samples.length === 0 || this.sampleIndex === 0) return 0;
     const sample = this.samples[Math.min(this.sampleIndex - 1, this.samples.length - 1)];
     return sample.cts / sample.timescale;
@@ -617,9 +941,31 @@ export class WebCodecsPlayer implements ExportModePlayer {
 
   destroy(): void {
     this.stop();
-    this.seekScheduler.reset();
-    this.frameQueue.clear();
 
+    // Stream mode cleanup
+    this.stopStreamCapture();
+
+    // Simple mode cleanup
+    if (this.videoElement) {
+      // Remove event listeners if attached to external video
+      if (this.isAttachedToExternal) {
+        if (this.boundOnPlay) this.videoElement.removeEventListener('play', this.boundOnPlay);
+        if (this.boundOnPause) this.videoElement.removeEventListener('pause', this.boundOnPause);
+        if (this.boundOnSeeked) this.videoElement.removeEventListener('seeked', this.boundOnSeeked);
+        this.boundOnPlay = null;
+        this.boundOnPause = null;
+        this.boundOnSeeked = null;
+        // Don't clear src or pause - Timeline owns the video element
+      } else {
+        this.videoElement.pause();
+        this.videoElement.src = '';
+      }
+      this.videoElement = null;
+    }
+
+    this.isAttachedToExternal = false;
+
+    // Full mode cleanup
     if (this.decoder) {
       this.decoder.close();
       this.decoder = null;
@@ -629,6 +975,7 @@ export class WebCodecsPlayer implements ExportModePlayer {
     this.exportMode.destroy();
 
     if (this.currentFrame) {
+      // Only close if not already closed in buffer cleanup
       try {
         this.currentFrame.close();
       } catch {
@@ -636,151 +983,9 @@ export class WebCodecsPlayer implements ExportModePlayer {
       }
       this.currentFrame = null;
     }
-    if (this.deferredSeekFrame) {
-      try {
-        this.deferredSeekFrame.close();
-      } catch {
-        // Already closed
-      }
-      this.deferredSeekFrame = null;
-    }
 
     this.mp4File = null;
     this.samples = [];
     this.ready = false;
-    if (this.decodeWorkerClient) {
-      void this.decodeWorkerClient.shutdown();
-      this.decodeWorkerClient = null;
-    }
-  }
-
-  private commitFrame(frame: VideoFrame): void {
-    if (this.currentFrame) {
-      try { this.currentFrame.close(); } catch {}
-    }
-    this.currentFrame = frame;
-    if (typeof frame.timestamp === 'number') {
-      this.currentFrameTimeSec = frame.timestamp / 1_000_000;
-    }
-    this.onFrame?.(frame);
-  }
-
-  private findTargetIndex(timeSeconds: number): number {
-    if (!this.videoTrack || this.samples.length === 0) return 0;
-    const targetTime = timeSeconds * this.videoTrack.timescale;
-    let targetIndex = 0;
-    let closestDiff = Infinity;
-    for (let i = 0; i < this.samples.length; i++) {
-      const diff = Math.abs(this.samples[i].cts - targetTime);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        targetIndex = i;
-      }
-    }
-    return targetIndex;
-  }
-
-  private findKeyframeIndex(targetIndex: number): number {
-    let keyframeIndex = 0;
-    for (let i = 0; i <= targetIndex; i++) {
-      if (this.samples[i].is_sync) keyframeIndex = i;
-    }
-    return keyframeIndex;
-  }
-
-  private async enqueueSeek(timeSeconds: number, mode: 'preview' | 'exact' = 'exact'): Promise<void> {
-    if (!this.videoTrack || this.samples.length === 0 || !this.decoder || !this.codecConfig) return;
-    const seekStart = performance.now();
-
-    // Coalesce seeks: keep only the latest request while one seek is active.
-    if (this.seekInProgress) {
-      this.pendingSeekTime = timeSeconds;
-      log.debug('seek coalesced', { timeSeconds: Number(timeSeconds.toFixed(3)), mode });
-      return;
-    }
-
-    const token = ++this.seekToken;
-    this.seekInProgress = true;
-
-    try {
-      let targetIndex = this.findTargetIndex(timeSeconds);
-      let keyframeIndex = this.findKeyframeIndex(targetIndex);
-      if (this.decodeWorkerClient?.isAvailable()) {
-        try {
-          const plan = await this.decodeWorkerClient.getSeekPlan(timeSeconds);
-          targetIndex = Math.max(0, Math.min(this.samples.length - 1, plan.targetIndex));
-          keyframeIndex = Math.max(0, Math.min(targetIndex, plan.keyframeIndex));
-        } catch {
-          // Fall back to local seek planning if worker is unavailable.
-        }
-      }
-
-      this.decoder.reset();
-      this.decoder.configure(this.codecConfig);
-      // Wider preview window improves scrub coverage on long-GOP footage.
-      // Exact seek still runs via scheduler settle to land on the precise frame.
-      const previewDecodeWindow = Math.max(1, Math.round(this.frameRate * 2.0));
-      const decodeStopIndex =
-        mode === 'preview'
-          ? Math.min(targetIndex, keyframeIndex + previewDecodeWindow)
-          : targetIndex;
-
-      for (let i = keyframeIndex; i <= decodeStopIndex; i++) {
-        const sample = this.samples[i];
-        const chunk = new EncodedVideoChunk({
-          type: sample.is_sync ? 'key' : 'delta',
-          timestamp: (sample.cts * 1_000_000) / sample.timescale,
-          duration: (sample.duration * 1_000_000) / sample.timescale,
-          data: sample.data,
-        });
-        try {
-          this.decoder.decode(chunk);
-        } catch {
-          // Skip decode errors
-        }
-      }
-
-      try {
-        await this.decoder.flush();
-      } catch (e) {
-        const isAbort =
-          (e instanceof DOMException && e.name === 'AbortError') ||
-          (e instanceof Error && /aborted due to reset/i.test(e.message));
-        if (!isAbort) throw e;
-      }
-
-      // Ignore obsolete seek completion.
-      if (token !== this.seekToken) return;
-
-      this.sampleIndex = decodeStopIndex + 1;
-
-      // Publish only the final seek frame (no fast intermediate playback).
-      if (this.deferredSeekFrame) {
-        const frame = this.deferredSeekFrame;
-        this.deferredSeekFrame = null;
-        this.commitFrame(frame);
-      }
-    } finally {
-      const seekLatencyMs = performance.now() - seekStart;
-      playbackMetrics.recordSeekLatency(seekLatencyMs);
-      if (seekLatencyMs > 120) {
-        log.warn('slow seek', {
-          mode,
-          latencyMs: Math.round(seekLatencyMs),
-          targetTimeSec: Number(timeSeconds.toFixed(3)),
-          sampleIndex: this.sampleIndex,
-        });
-      }
-      this.seekInProgress = false;
-
-      // If another seek arrived during this one, run latest now.
-      const next = this.pendingSeekTime;
-      this.pendingSeekTime = null;
-      if (next !== null) {
-        void this.enqueueSeek(next, mode).catch(() => {
-          // Swallow expected abort/race errors from coalesced seeks.
-        });
-      }
-    }
   }
 }

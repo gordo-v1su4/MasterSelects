@@ -7,7 +7,7 @@ import { fileSystemService } from '../../../services/fileSystemService';
 import { projectDB } from '../../../services/projectDB';
 import { useTimelineStore } from '../../timeline';
 import { Logger } from '../../../services/logger';
-import { initWebCodecsFullMode } from '../../timeline/helpers/webCodecsHelpers';
+import { engine } from '../../../engine/WebGPUEngine';
 
 const log = Logger.create('Reload');
 
@@ -207,28 +207,40 @@ export async function updateTimelineClips(mediaFileId: string, file: File): Prom
     const sourceType = clip.source?.type;
 
     if (sourceType === 'video') {
-      // WebCodecs Full Mode: load via WebCodecsPlayer
-      initWebCodecsFullMode(file).then(({ player, audioPlayer }) => {
-        const naturalDuration = player.duration || clip.duration;
+      // Create video element
+      const video = document.createElement('video');
+      video.src = url;
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      video.preload = 'auto';
+
+      video.addEventListener('canplaythrough', () => {
+        const naturalDuration = video.duration || clip.duration;
         timelineStore.updateClip(clip.id, {
           file,
           needsReload: false,
           isLoading: false,
           source: {
             type: 'video',
-            webCodecsPlayer: player,
-            audioPlayer: audioPlayer ?? undefined,
+            videoElement: video,
             naturalDuration,
             mediaFileId,
           },
         });
-      }).catch((e) => {
-        log.warn('Failed to load video for clip', { name: clip.name, error: e });
+        // Pre-cache frame via createImageBitmap for immediate scrubbing without play()
+        engine.preCacheVideoFrame(video);
+      }, { once: true });
+
+      video.addEventListener('error', () => {
+        log.warn('Failed to load video for clip:', clip.name);
         timelineStore.updateClip(clip.id, {
           needsReload: false,
           isLoading: false,
         });
-      });
+      }, { once: true });
+
+      video.load();
     } else if (sourceType === 'audio') {
       // Create audio element
       const audio = document.createElement('audio');

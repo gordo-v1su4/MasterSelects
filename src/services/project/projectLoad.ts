@@ -1,6 +1,7 @@
 // Project Load — load project file data into stores + background restoration
 
 import { Logger } from '../logger';
+import { engine } from '../../engine/WebGPUEngine';
 import { useMediaStore, type MediaFile, type Composition, type MediaFolder } from '../../stores/mediaStore';
 import { getMediaInfo } from '../../stores/mediaStore/helpers/mediaInfoHelpers';
 import { createThumbnail } from '../../stores/mediaStore/helpers/thumbnailHelpers';
@@ -17,7 +18,6 @@ import {
 } from '../projectFileService';
 import { fileSystemService } from '../fileSystemService';
 import { projectDB } from '../projectDB';
-import { initWebCodecsFullMode } from '../../stores/timeline/helpers/webCodecsHelpers';
 
 const log = Logger.create('ProjectSync');
 
@@ -654,23 +654,30 @@ async function reloadNestedCompositionClips(): Promise<void> {
       const fileUrl = URL.createObjectURL(nestedMediaFile.file);
 
       if (sourceType === 'video') {
-        // WebCodecs Full Mode: load via WebCodecsPlayer
-        initWebCodecsFullMode(nestedMediaFile.file).then(({ player, audioPlayer }) => {
+        const video = document.createElement('video');
+        video.src = fileUrl;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.crossOrigin = 'anonymous';
+
+        video.addEventListener('canplaythrough', () => {
           nestedClip.source = {
             type: 'video',
-            webCodecsPlayer: player,
-            audioPlayer: audioPlayer ?? undefined,
-            naturalDuration: player.duration,
+            videoElement: video,
+            naturalDuration: video.duration,
           };
           nestedClip.isLoading = false;
 
           // Trigger state update
           const currentClips = timelineStore.clips;
           useTimelineStore.setState({ clips: [...currentClips] });
-        }).catch((e) => {
-          log.warn(`Failed to load nested video clip: ${nestedSerializedClip.name}`, e);
-          nestedClip.isLoading = false;
-        });
+
+          // Pre-cache frame via createImageBitmap for immediate scrubbing without play()
+          engine.preCacheVideoFrame(video);
+        }, { once: true });
+
+        video.load();
       } else if (sourceType === 'audio') {
         const audio = document.createElement('audio');
         audio.src = fileUrl;

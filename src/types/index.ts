@@ -74,8 +74,6 @@ export interface LayerSource {
   // WebCodecs support for hardware-accelerated video decode
   webCodecsPlayer?: import('../engine/WebCodecsPlayer').WebCodecsPlayer;
   videoFrame?: VideoFrame;
-  // WebCodecs audio player (replaces HTMLAudioElement)
-  audioPlayer?: import('../engine/WebCodecsAudioPlayer').WebCodecsAudioPlayer;
   // Native Helper decoder for ProRes/DNxHD (turbo mode)
   nativeDecoder?: import('../services/nativeHelper').NativeDecoder;
   // Path to original file (for native helper to access directly)
@@ -287,7 +285,6 @@ export interface TimelineClip {
     audioElement?: HTMLAudioElement;
     imageElement?: HTMLImageElement;
     webCodecsPlayer?: import('../engine/WebCodecsPlayer').WebCodecsPlayer;
-    audioPlayer?: import('../engine/WebCodecsAudioPlayer').WebCodecsAudioPlayer;
     nativeDecoder?: import('../services/nativeHelper/NativeDecoder').NativeDecoder;
     naturalDuration?: number;
     mediaFileId?: string;  // Reference to MediaFile for proxy lookup

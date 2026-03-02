@@ -60,7 +60,7 @@ import {
 } from './media';
 
 import {
-  handleSearchYouTube,
+  handleSearchVideos as handleSearchYouTube,
   handleListVideoFormats,
   handleDownloadAndImportVideo,
   handleGetYouTubeVideos,

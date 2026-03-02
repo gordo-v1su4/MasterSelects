@@ -25,47 +25,15 @@ export const createPlaybackSlice: SliceCreator<PlaybackActions> = (set, get) => 
     const currentRequestId = ++playRequestId;
     const { clips, playheadPosition } = get();
 
-    // Wait for WebCodecs players at playhead to be ready (samples loaded + first frame decoded).
-    // Without this, audio starts immediately while the video decoder is still loading samples,
-    // causing audio to race ahead and video to show a frozen frame for seconds.
-    const wcClipsAtPlayhead = clips.filter(clip => {
-      const isAtPlayhead = playheadPosition >= clip.startTime &&
-                           playheadPosition < clip.startTime + clip.duration;
-      const hasWcPlayer = !!clip.source?.webCodecsPlayer && !clip.source.videoElement;
-      return isAtPlayhead && hasWcPlayer;
-    });
-
-    if (wcClipsAtPlayhead.length > 0) {
-      const waitForWcReady = (clip: typeof wcClipsAtPlayhead[0]): Promise<void> => {
-        const player = clip.source!.webCodecsPlayer!;
-        if (player.ready) return Promise.resolve();
-        return new Promise<void>((resolve) => {
-          let iterations = 0;
-          const check = () => {
-            if (player.ready || ++iterations > 40) { resolve(); return; }
-            setTimeout(check, 50);
-          };
-          check();
-        });
-      };
-      await Promise.race([
-        Promise.all(wcClipsAtPlayhead.map(waitForWcReady)),
-        new Promise(resolve => setTimeout(resolve, 2000)), // Max 2s wait
-      ]);
-    }
-
-    // Guard: if pause() or another play() was called during the WC wait
-    if (playRequestId !== currentRequestId) return;
-
-    // Find all video clips at current playhead position that need HTMLVideoElement readiness check
+    // Find all video clips at current playhead position that need to be ready
     const clipsAtPlayhead = clips.filter(clip => {
       const isAtPlayhead = playheadPosition >= clip.startTime &&
                            playheadPosition < clip.startTime + clip.duration;
-      const hasLegacyVideo = clip.source?.videoElement && !clip.source.webCodecsPlayer;
-      return isAtPlayhead && hasLegacyVideo;
+      const hasVideo = clip.source?.videoElement;
+      return isAtPlayhead && hasVideo;
     });
 
-    // Also check nested composition clips (legacy HTMLVideoElement only)
+    // Also check nested composition clips
     const nestedVideos: HTMLVideoElement[] = [];
     for (const clip of clips) {
       if (clip.isComposition && clip.nestedClips) {
@@ -74,7 +42,7 @@ export const createPlaybackSlice: SliceCreator<PlaybackActions> = (set, get) => 
         if (isAtPlayhead) {
           const compTime = playheadPosition - clip.startTime + clip.inPoint;
           for (const nestedClip of clip.nestedClips) {
-            if (nestedClip.source?.videoElement && !nestedClip.source.webCodecsPlayer) {
+            if (nestedClip.source?.videoElement) {
               const isNestedAtTime = compTime >= nestedClip.startTime &&
                                      compTime < nestedClip.startTime + nestedClip.duration;
               if (isNestedAtTime) {
@@ -86,7 +54,7 @@ export const createPlaybackSlice: SliceCreator<PlaybackActions> = (set, get) => 
       }
     }
 
-    // Collect legacy HTMLVideoElement videos that need readiness check
+    // Collect all videos that need to be ready
     const videosToCheck = [
       ...clipsAtPlayhead.map(c => c.source!.videoElement!),
       ...nestedVideos

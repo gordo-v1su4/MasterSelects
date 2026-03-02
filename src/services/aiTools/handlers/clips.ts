@@ -1,7 +1,7 @@
 // Clip Tool Handlers
 
 import { useTimelineStore } from '../../../stores/timeline';
-import { initWebCodecsFullMode, createAudioElement } from '../../../stores/timeline/helpers/webCodecsHelpers';
+import { createVideoElement, createAudioElement, initWebCodecsPlayer } from '../../../stores/timeline/helpers/webCodecsHelpers';
 import type { TimelineClip } from '../../../types';
 import type { ToolResult } from '../types';
 import { formatClipInfo } from '../utils';
@@ -31,18 +31,26 @@ function cloneSourceForPart(
   clip: TimelineClip,
   partClipId: string
 ): TimelineClip['source'] {
-  if (clip.source?.type === 'video' && clip.file) {
-    // Async WebCodecs Full Mode init — updates the clip source once ready
-    initWebCodecsFullMode(clip.file).then(({ player, audioPlayer }) => {
-      const { clips: currentClips } = useTimelineStore.getState();
-      useTimelineStore.setState({
-        clips: currentClips.map(c => {
-          if (c.id !== partClipId || !c.source) return c;
-          return { ...c, source: { ...c.source, webCodecsPlayer: player, audioPlayer: audioPlayer ?? undefined } };
-        }),
-      });
+  if (clip.source?.type === 'video' && clip.source.videoElement && clip.file) {
+    const newVideo = createVideoElement(clip.file);
+    const newSource = {
+      ...clip.source,
+      videoElement: newVideo,
+      webCodecsPlayer: undefined,
+    };
+    // Async WebCodecs init — updates the clip source once ready
+    initWebCodecsPlayer(newVideo, clip.name).then(player => {
+      if (player) {
+        const { clips: currentClips } = useTimelineStore.getState();
+        useTimelineStore.setState({
+          clips: currentClips.map(c => {
+            if (c.id !== partClipId || !c.source) return c;
+            return { ...c, source: { ...c.source, webCodecsPlayer: player } };
+          }),
+        });
+      }
     });
-    return { ...clip.source, webCodecsPlayer: undefined, audioPlayer: undefined };
+    return newSource;
   } else if (clip.source?.type === 'audio' && clip.source.audioElement && clip.file) {
     return {
       ...clip.source,

@@ -7,10 +7,8 @@ import { LAYER_BUILDER_CONSTANTS } from './types';
 import { createFrameContext, getClipTimeInfo, getMediaFileForClip } from './FrameContext';
 import { layerPlaybackManager } from '../layerPlaybackManager';
 import { engine } from '../../engine/WebGPUEngine';
-import { Logger } from '../logger';
-import { playbackMetrics } from '../playbackMetrics';
-
-const log = Logger.create('VideoSync');
+// import { Logger } from '../logger';
+// const log = Logger.create('VideoSync');
 
 export class VideoSyncManager {
   // Native decoder state
@@ -51,13 +49,6 @@ export class VideoSyncManager {
     outPoint: number;
     endTime: number;
   }>();
-  private wcPlayerModeByClipId = new Map<string, 'realtime' | 'seek'>();
-  private wcLastSeekWarnByClipId = new Map<string, number>();
-  private wcLastSeekTargetByClipId = new Map<string, number>();
-  private wcLastRealtimeResyncByClipId = new Map<string, number>();
-  private wcLastRealtimeTimeByClipId = new Map<string, number>();
-  private wcLastRealtimeTickByClipId = new Map<string, number>();
-  private wcRealtimeStartupUntilByClipId = new Map<string, number>();
 
   /**
    * Pre-render step: finalize prerolled clips that are now active.
@@ -150,6 +141,17 @@ export class VideoSyncManager {
           const isContiguousTimeline = Math.abs(prev.endTime - clip.startTime) < 0.016; // ~1 frame tolerance
           const isContiguousSource = Math.abs(prev.outPoint - clip.inPoint) < 0.02; // ~1 frame
 
+          // TEMPORARY: always log transitions to console for debugging
+          console.warn('[VideoSync] Transition detected:', {
+            isSameSource, isSameFileRef, isSameMediaId, isSameFileName,
+            isContiguousTimeline, isContiguousSource,
+            prevEnd: prev.endTime.toFixed(4), clipStart: clip.startTime.toFixed(4),
+            prevOut: prev.outPoint.toFixed(4), clipIn: clip.inPoint.toFixed(4),
+            clipFile: clip.file?.name, prevFile: prevClip.file?.name,
+            clipMediaId: clip.source.mediaFileId || clip.mediaFileId,
+            prevMediaId: prevClip.source?.mediaFileId || prevClip.mediaFileId,
+          });
+
           if (isSameSource && isContiguousTimeline && isContiguousSource) {
             const playingVideo = prevClip.source.videoElement;
             const idleVideo = clip.source.videoElement;
@@ -169,8 +171,21 @@ export class VideoSyncManager {
 
               // Cancel preroll — video is already playing at the correct position
               this.prerollingClips.delete(clip.id);
+
+              console.warn('[VideoSync] ✓ HANDOFF:', clip.name,
+                'video@', playingVideo.currentTime.toFixed(3),
+                'clipInPoint:', clip.inPoint.toFixed(3),
+                'drift:', Math.abs(playingVideo.currentTime - clip.inPoint).toFixed(4));
+            } else {
+              console.warn('[VideoSync] ✗ Skip handoff: video not ready',
+                'paused:', playingVideo.paused,
+                'readyState:', playingVideo.readyState);
             }
           }
+        } else {
+          console.warn('[VideoSync] ✗ prevClip not found or no videoElement',
+            'prevClipId:', prev.clipId, 'found:', !!prevClip,
+            'hasSource:', !!prevClip?.source, 'hasVideo:', !!prevClip?.source?.videoElement);
         }
       }
 
@@ -191,23 +206,10 @@ export class VideoSyncManager {
   syncVideoElements(): void {
     const ctx = createFrameContext();
 
-    const hasUnstartedWebCodecsAtPlayhead = ctx.isPlaying && (
-      ctx.clipsAtTime.some(
-        c => !!c.source?.webCodecsPlayer && !c.source.videoElement && !c.source.webCodecsPlayer.isPlaying
-      ) ||
-      ctx.clipsAtTime.some(c =>
-        !!c.isComposition &&
-        !!c.nestedClips?.some(
-          nc => !!nc.source?.webCodecsPlayer && !nc.source.videoElement && !nc.source.webCodecsPlayer.isPlaying
-        )
-      )
-    );
-
     // Skip if same frame during playback
     if (ctx.isPlaying && !ctx.isDraggingPlayhead &&
         ctx.frameNumber === this.lastVideoSyncFrame &&
-        ctx.isPlaying === this.lastVideoSyncPlaying &&
-        !hasUnstartedWebCodecsAtPlayhead) {
+        ctx.isPlaying === this.lastVideoSyncPlaying) {
       return;
     }
     this.lastVideoSyncFrame = ctx.frameNumber;
@@ -223,20 +225,11 @@ export class VideoSyncManager {
       }
     }
 
-    // Pause videos/players not at playhead (but skip clips being prerolled or sharing elements)
+    // Pause videos not at playhead (but skip clips being prerolled or sharing elements)
     for (const clip of ctx.clips) {
-      const isAtPlayhead = ctx.clipsByTrackId.has(clip.trackId) &&
-        ctx.clipsByTrackId.get(clip.trackId)?.id === clip.id;
-
-      // Pause WebCodecs players not at playhead
-      if (clip.source?.webCodecsPlayer && !clip.source.videoElement && !isAtPlayhead) {
-        // Stop decoder loop immediately when clip is no longer active.
-        if (clip.source.webCodecsPlayer.isPlaying) {
-          clip.source.webCodecsPlayer.pause();
-        }
-      }
-
       if (clip.source?.videoElement) {
+        const isAtPlayhead = ctx.clipsByTrackId.has(clip.trackId) &&
+          ctx.clipsByTrackId.get(clip.trackId)?.id === clip.id;
         const isPrerolling = this.prerollingClips.has(clip.id);
         if (!isAtPlayhead && !isPrerolling && !clip.source.videoElement.paused) {
           // Don't pause if an active clip shares this video element (split clips)
@@ -339,10 +332,6 @@ export class VideoSyncManager {
 
       if (clip.source?.videoElement) {
         this.preloadVideoElement(clip.id, clip.source.videoElement, clip, timeUntilStart, prerollSec);
-      } else if (clip.source?.webCodecsPlayer && timeUntilStart <= prerollSec) {
-        // WebCodecs: pre-seek to inPoint (instant, no warmup needed)
-        const inPoint = clip.reversed ? clip.outPoint : clip.inPoint;
-        clip.source.webCodecsPlayer.seek(inPoint);
       }
 
       if (clip.source?.nativeDecoder) {
@@ -552,25 +541,14 @@ export class VideoSyncManager {
       return;
     }
 
-    // WebCodecs Full Mode — no HTMLVideoElement needed
-    if (clip.source?.webCodecsPlayer && !clip.source.videoElement) {
-      this.syncWebCodecsPlayer(clip, ctx);
-      return;
-    }
-
     if (!clip.source?.videoElement) return;
 
     const video = clip.source.videoElement;
     const timeInfo = getClipTimeInfo(ctx, clip);
     const mediaFile = getMediaFileForClip(ctx, clip);
 
-    // Check proxy mode based on playback policy.
-    // Stability rule: if "prefer original for playback" is enabled, keep one source
-    // path (original) for both play and pause/scrub to avoid source-hop jitter.
-    const preferNormalizedSource = !ctx.preferOriginalForPlay && (
-      ctx.isPlaying || ctx.preferNormalizedForScrub
-    );
-    const useProxy = ctx.proxyEnabled && preferNormalizedSource && mediaFile?.proxyFps &&
+    // Check proxy mode
+    const useProxy = ctx.proxyEnabled && mediaFile?.proxyFps &&
       (mediaFile.proxyStatus === 'ready' || mediaFile.proxyStatus === 'generating');
 
     if (useProxy) {
@@ -710,135 +688,6 @@ export class VideoSyncManager {
   }
 
   /**
-   * Sync a clip using WebCodecs Full Mode (no HTMLVideoElement).
-   * Much simpler than the HTMLVideoElement path — no warmup, no readyState,
-   * no GPU surface issues, no fastSeek hybrid. Just seek() and the frame is there.
-   */
-  private syncWebCodecsPlayer(clip: TimelineClip, ctx: FrameContext): void {
-    const player = clip.source!.webCodecsPlayer!;
-    const timeInfo = getClipTimeInfo(ctx, clip);
-
-    if (!player.ready) return;
-
-    const drift = Math.abs(player.currentTime - timeInfo.clipTime);
-    playbackMetrics.recordDecodeQueueDepth(player.getDecodeQueueDepth());
-    const canRealtimePlay =
-      ctx.isPlaying &&
-      !ctx.isDraggingPlayhead &&
-      ctx.playbackSpeed > 0 &&
-      Math.abs(ctx.playbackSpeed - 1) < 0.001 &&
-      !clip.reversed;
-
-    if (canRealtimePlay) {
-      if (this.wcPlayerModeByClipId.get(clip.id) !== 'realtime') {
-        this.wcPlayerModeByClipId.set(clip.id, 'realtime');
-        log.info('WC mode -> realtime', {
-          clipId: clip.id,
-          clipName: clip.name,
-          playhead: Number(ctx.playheadPosition.toFixed(3)),
-          driftMs: Math.round(drift * 1000),
-        });
-      }
-      // Real-time 1x forward playback: run decoder continuously.
-      if (!player.isPlaying) {
-        // Use playFrom() for atomic seek + play to avoid the race condition
-        // where play() cancels a preceding seek() via seekScheduler.reset().
-        // playFrom() resets the decoder, decodes from the nearest keyframe to
-        // clipTime, then starts the realtime loop from the correct position.
-        player.playFrom(timeInfo.clipTime);
-        this.lastSeekRef[clip.id] = ctx.now;
-        this.wcLastSeekTargetByClipId.set(clip.id, timeInfo.clipTime);
-        this.wcLastRealtimeTimeByClipId.set(clip.id, player.currentTime);
-        this.wcLastRealtimeTickByClipId.set(clip.id, ctx.now);
-        this.wcRealtimeStartupUntilByClipId.set(clip.id, ctx.now + 2000);
-      } else if (drift > 5.0) {
-        // Emergency-only resync with cooldown.
-        // Without throttling this can issue seek storms and freeze preview.
-        const lastResync = this.wcLastRealtimeResyncByClipId.get(clip.id) ?? 0;
-        if (ctx.now - lastResync > 1500) {
-          this.wcLastRealtimeResyncByClipId.set(clip.id, ctx.now);
-          player.seek(timeInfo.clipTime);
-        }
-      } else {
-        // Early playback: allow sparse corrective seeks while decoder locks in.
-        const startupUntil = this.wcRealtimeStartupUntilByClipId.get(clip.id) ?? 0;
-        if (ctx.now < startupUntil && drift > 0.6) {
-          const lastSeek = this.lastSeekRef[clip.id] || 0;
-          if (ctx.now - lastSeek > 400) {
-            player.seek(timeInfo.clipTime);
-            this.lastSeekRef[clip.id] = ctx.now;
-            this.wcLastSeekTargetByClipId.set(clip.id, timeInfo.clipTime);
-          }
-        }
-
-        // Decoder stall recovery: if WC time is not moving, kick play loop.
-        const current = player.currentTime;
-        const prevTime = this.wcLastRealtimeTimeByClipId.get(clip.id) ?? current;
-        const prevTick = this.wcLastRealtimeTickByClipId.get(clip.id) ?? ctx.now;
-        const advanced = Math.abs(current - prevTime) > 0.001;
-        if (advanced) {
-          this.wcLastRealtimeTimeByClipId.set(clip.id, current);
-          this.wcLastRealtimeTickByClipId.set(clip.id, ctx.now);
-        } else if (ctx.now - prevTick > 700) {
-          const lastResync = this.wcLastRealtimeResyncByClipId.get(clip.id) ?? 0;
-          if (ctx.now - lastResync > 1200) {
-            this.wcLastRealtimeResyncByClipId.set(clip.id, ctx.now);
-            player.pause();
-            player.play();
-          }
-        }
-      }
-    } else {
-      if (this.wcPlayerModeByClipId.get(clip.id) !== 'seek') {
-        this.wcPlayerModeByClipId.set(clip.id, 'seek');
-        log.info('WC mode -> seek', {
-          clipId: clip.id,
-          clipName: clip.name,
-          isPlaying: ctx.isPlaying,
-          isDraggingPlayhead: ctx.isDraggingPlayhead,
-          playbackSpeed: ctx.playbackSpeed,
-          playhead: Number(ctx.playheadPosition.toFixed(3)),
-        });
-      }
-      // Paused/scrub/reverse/variable speed: frame-accurate seek mode.
-      if (player.isPlaying) {
-        player.pause();
-        // Don't seek on the same frame as pause — the current frame is close
-        // enough and an immediate seek would cause a visible jump backwards.
-        // Next sync call will correct if needed (user scrubs, etc.).
-        return;
-      }
-
-      const seekThreshold = ctx.isDraggingPlayhead ? 0.04 : 0.02;
-      if (drift > seekThreshold) {
-        const lastSeek = this.lastSeekRef[clip.id] || 0;
-        const throttle = ctx.isDraggingPlayhead ? 50 : 33;
-        const lastTarget = this.wcLastSeekTargetByClipId.get(clip.id);
-        const targetChanged = lastTarget === undefined || Math.abs(lastTarget - timeInfo.clipTime) > 0.01;
-        const watchdogDue = !ctx.isDraggingPlayhead && drift > 0.25 && ctx.now - lastSeek > 3000;
-        if (ctx.now - lastSeek > throttle && (ctx.isDraggingPlayhead || targetChanged || watchdogDue)) {
-          player.seek(timeInfo.clipTime);
-          this.lastSeekRef[clip.id] = ctx.now;
-          this.wcLastSeekTargetByClipId.set(clip.id, timeInfo.clipTime);
-          engine.requestRender();
-          const prevWarn = this.wcLastSeekWarnByClipId.get(clip.id) ?? 0;
-          if (!ctx.isDraggingPlayhead && drift > 0.2 && ctx.now - prevWarn > 1000) {
-            this.wcLastSeekWarnByClipId.set(clip.id, ctx.now);
-            log.warn('Large WC seek correction while paused', {
-              clipId: clip.id,
-              clipName: clip.name,
-              driftMs: Math.round(drift * 1000),
-              targetTime: Number(timeInfo.clipTime.toFixed(3)),
-              currentTime: Number(player.currentTime.toFixed(3)),
-            });
-          }
-        }
-      }
-    }
-
-  }
-
-  /**
    * Hybrid seeking strategy for smooth scrubbing on all codec types:
    *
    * During drag (fast scrubbing):
@@ -935,10 +784,7 @@ export class VideoSyncManager {
 
       nativeDecoder.seekToFrame(targetFrame, ctx.isDraggingPlayhead)
         .then(() => { state!.isPending = false; })
-        .catch((err: unknown) => {
-          state!.isPending = false;
-          log.warn('Native decoder seek failed', { clipId: clip.id, targetFrame, err });
-        });
+        .catch((err: unknown) => { state!.isPending = false; console.warn('[NH] seek failed frame', targetFrame, err); });
     }
   }
 }

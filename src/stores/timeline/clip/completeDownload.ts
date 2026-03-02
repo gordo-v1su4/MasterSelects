@@ -4,10 +4,11 @@
 import type { TimelineClip } from '../../../types';
 import { DEFAULT_TRANSFORM } from '../constants';
 import { useMediaStore } from '../../mediaStore';
-import { initWebCodecsFullMode, createAudioElement } from '../helpers/webCodecsHelpers';
+import { initWebCodecsPlayer, createAudioElement } from '../helpers/webCodecsHelpers';
 import { generateWaveformForFile } from '../helpers/waveformHelpers';
 import { thumbnailCache } from '../../../services/thumbnailCache';
 import { generateClipId } from '../helpers/idGenerator';
+import { blobUrlManager } from '../helpers/blobUrlManager';
 import { updateClipById } from '../helpers/clipStateHelpers';
 import { Logger } from '../../../services/logger';
 
@@ -49,9 +50,23 @@ export async function completeDownload(params: CompleteDownloadParams): Promise<
 
   log.debug('Completing download', { clipId });
 
-  // WebCodecs Full Mode: load via WebCodecsPlayer
-  const { player: webCodecsPlayer, audioPlayer } = await initWebCodecsFullMode(file);
-  const naturalDuration = webCodecsPlayer.duration || 30;
+  // Create and load video element - track URL for cleanup
+  const video = document.createElement('video');
+  video.preload = 'auto';
+  video.muted = true;
+  video.playsInline = true;
+  video.crossOrigin = 'anonymous';
+  const url = blobUrlManager.create(clipId, file, 'video');
+  video.src = url;
+
+  await new Promise<void>((resolve, reject) => {
+    video.addEventListener('loadedmetadata', () => resolve(), { once: true });
+    video.addEventListener('error', () => reject(new Error('Failed to load video')), { once: true });
+    video.load();
+  });
+
+  const naturalDuration = video.duration || 30;
+  video.currentTime = 0;
 
   // Import to media store in YouTube folder
   const mediaStore = useMediaStore.getState();
@@ -78,8 +93,7 @@ export async function completeDownload(params: CompleteDownloadParams): Promise<
       outPoint: naturalDuration,
       source: {
         type: 'video' as const,
-        webCodecsPlayer,
-        audioPlayer: audioPlayer ?? undefined,
+        videoElement: video,
         naturalDuration,
         mediaFileId: mediaFile.id,
       },
@@ -120,9 +134,26 @@ export async function completeDownload(params: CompleteDownloadParams): Promise<
 
   log.debug('Download complete', { clipId, duration: naturalDuration });
 
-  // Load audio element for linked audio clip
+  // Initialize WebCodecsPlayer
+  const webCodecsPlayer = await initWebCodecsPlayer(video, 'YouTube download');
+  if (webCodecsPlayer) {
+    const currentClips = get().clips;
+    const targetClip = currentClips.find((c: TimelineClip) => c.id === clipId);
+    if (targetClip?.source) {
+      set({
+        clips: updateClipById(currentClips, clipId, {
+          source: { ...targetClip.source, webCodecsPlayer }
+        }),
+      });
+    }
+  }
+
+  // Load audio element for linked clip
   if (audioTrackId && audioClipId) {
     const audio = createAudioElement(file);
+    // Share the same blob URL reference for the audio clip
+    blobUrlManager.share(clipId, audioClipId, 'video');
+    audio.src = url;
 
     set({
       clips: updateClipById(get().clips, audioClipId, {
