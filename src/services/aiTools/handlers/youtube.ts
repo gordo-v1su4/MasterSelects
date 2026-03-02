@@ -6,6 +6,7 @@ import { downloadVideo } from '../../youtubeDownloader';
 import { useYouTubeStore } from '../../../stores/youtubeStore';
 import { useTimelineStore } from '../../../stores/timeline';
 import { useMediaStore } from '../../../stores/mediaStore';
+import { useSettingsStore } from '../../../stores/settingsStore';
 import type { ToolResult } from '../types';
 
 const log = Logger.create('AITool:YouTube');

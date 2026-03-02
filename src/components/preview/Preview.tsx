@@ -13,9 +13,16 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useRenderTargetStore } from '../../stores/renderTargetStore';
 import { MaskOverlay } from './MaskOverlay';
 import { SAM2Overlay } from './SAM2Overlay';
+import { SourceMonitor } from './SourceMonitor';
+import { StatsOverlay } from './StatsOverlay';
+import { PreviewControls } from './PreviewControls';
+import { PreviewBottomControls } from './PreviewBottomControls';
+import { useEditModeOverlay } from './useEditModeOverlay';
+import { useLayerDrag } from './useLayerDrag';
 import { useSAM2Store } from '../../stores/sam2Store';
-import { previewRenderManager } from '../../services/previewRenderManager';
-import type { EngineStats, Layer } from '../../types';
+import { renderScheduler } from '../../services/renderScheduler';
+import { engine } from '../../engine/WebGPUEngine';
+import type { RenderSource } from '../../types/renderTarget';
 
 interface PreviewProps {
   panelId: string;
@@ -29,7 +36,7 @@ export function Preview({ panelId, compositionId, showTransparencyGrid }: Previe
   const { clips, selectedClipIds, selectClip, updateClipTransform, maskEditMode, layers, selectedLayerId, selectLayer, updateLayer } = useTimelineStore();
   const { compositions, activeCompositionId } = useMediaStore();
   const { addPreviewPanel, updatePanelData, closePanelById } = useDockStore();
-  const { previewQuality, setPreviewQuality, showTransparencyGrid, setShowTransparencyGrid } = useSettingsStore();
+  const { previewQuality, setPreviewQuality } = useSettingsStore();
   const sam2Active = useSAM2Store((s) => s.isActive);
 
   // Get first selected clip for preview
@@ -401,39 +408,10 @@ export function Preview({ panelId, compositionId, showTransparencyGrid }: Previe
         closePanelById={closePanelById}
       />
 
-      <div className={`preview-canvas-wrapper ${showTransparencyGrid ? 'show-transparency-grid' : ''}`} style={viewTransform}>
-        {!isEngineReady ? (
-          <div className="loading">
-            <div className="loading-spinner" />
-            <p>Initializing WebGPU...</p>
-          </div>
-        ) : (
-          <>
-            <canvas
-              ref={canvasRef}
-              width={effectiveResolution.width}
-              height={effectiveResolution.height}
-              className="preview-canvas"
-              style={{
-                width: canvasSize.width,
-                height: canvasSize.height,
-              }}
-            />
-            {maskEditMode !== 'none' && (
-              <MaskOverlay
-                canvasWidth={effectiveResolution.width}
-                canvasHeight={effectiveResolution.height}
-              />
-            )}
-            {sam2Active && (
-              <SAM2Overlay
-                canvasWidth={effectiveResolution.width}
-                canvasHeight={effectiveResolution.height}
-              />
-            )}
-          </>
-        )}
-      </div>
+      {/* Source monitor overlay - shown on top when active */}
+      {sourceMonitorActive && (
+        <SourceMonitor file={sourceMonitorFile!} onClose={closeSourceMonitor} />
+      )}
 
       {/* Engine canvas + overlays - always in DOM to keep WebGPU registration alive */}
       <div style={{ display: sourceMonitorActive ? 'none' : 'contents' }}>
@@ -472,8 +450,6 @@ export function Preview({ panelId, compositionId, showTransparencyGrid }: Previe
                 <SAM2Overlay
                   canvasWidth={effectiveResolution.width}
                   canvasHeight={effectiveResolution.height}
-                  displayWidth={canvasSize.width}
-                  displayHeight={canvasSize.height}
                 />
               )}
             </>

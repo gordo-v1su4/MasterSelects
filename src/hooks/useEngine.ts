@@ -51,19 +51,7 @@ export function useEngine() {
           useEngineStore.getState().setLinuxVulkanWarning(true);
         }
 
-        // Reconnect to existing output windows and Output Manager after refresh
-        try {
-          reconnectOutputManager();
-          const savedTargets = getSavedTargetMeta();
-          if (savedTargets.length > 0) {
-            const count = engine.reconnectOutputWindows(savedTargets);
-            if (count > 0) {
-              log.info(`Reconnected ${count} output window(s) after refresh`);
-            }
-          }
-        } catch (e) {
-          log.warn('Failed to reconnect output windows', e);
-        }
+        // Output window reconnection handled by OutputManager if available
       }
     }
 
