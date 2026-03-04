@@ -5,7 +5,7 @@
 export const flags = {
   useRenderGraph: false,  // Render Graph executor (stubs — not ready)
   useDecoderPool: false,  // Shared decoder pool (not wired yet)
-  useFullWebCodecsPlayback: true,   // Echtes WebCodecs (MP4Box + VideoDecoder) für Playback
+  useFullWebCodecsPlayback: false,  // Full WebCodecs nur für Export — Playback via HTMLVideoElement (Simple Mode)
 };
 
 // Expose for runtime toggling from devtools
