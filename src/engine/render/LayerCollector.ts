@@ -360,4 +360,12 @@ export class LayerCollector {
   hasActiveVideo(): boolean {
     return this.hasVideo;
   }
+
+  isVideoGpuReady(video: HTMLVideoElement): boolean {
+    return this.videoGpuReady.has(video);
+  }
+
+  resetVideoGpuReady(video: HTMLVideoElement): void {
+    this.videoGpuReady.delete(video);
+  }
 }

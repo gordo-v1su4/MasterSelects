@@ -438,6 +438,36 @@ export class VideoSyncManager {
     }
   }
 
+  // --- Health Monitor Accessors ---
+
+  getActiveRvfcClipIds(): string[] {
+    return Object.keys(this.rvfcHandles);
+  }
+
+  getActivePreciseSeekClipIds(): string[] {
+    return Object.keys(this.preciseSeekTimers);
+  }
+
+  getForceDecodeClipIds(): string[] {
+    return [...this.forceDecodeInProgress];
+  }
+
+  isVideoWarmingUp(video: HTMLVideoElement): boolean {
+    return this.warmingUpVideos.has(video);
+  }
+
+  cancelRvfcHandle(clipId: string, video?: HTMLVideoElement): void {
+    const handle = this.rvfcHandles[clipId];
+    if (handle !== undefined) {
+      if (video) (video as any).cancelVideoFrameCallback?.(handle);
+      delete this.rvfcHandles[clipId];
+    }
+  }
+
+  clearWarmupState(video: HTMLVideoElement): void {
+    this.warmingUpVideos.delete(video);
+  }
+
   /**
    * Sync native decoder
    */
