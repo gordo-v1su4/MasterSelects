@@ -411,9 +411,13 @@ export async function handleMoveClip(
   timelineStore: TimelineStore
 ): Promise<ToolResult> {
   const clipId = args.clipId as string;
-  const newStartTime = args.newStartTime as number;
-  const newTrackId = args.newTrackId as string | undefined;
+  const newStartTime = (args.newStartTime ?? args.startTime) as number;
+  const newTrackId = (args.newTrackId ?? args.trackId) as string | undefined;
   const withLinked = (args.withLinked as boolean | undefined) ?? true;
+
+  if (newStartTime == null || isNaN(newStartTime)) {
+    return { success: false, error: 'newStartTime is required and must be a valid number' };
+  }
 
   const clip = timelineStore.clips.find(c => c.id === clipId);
   if (!clip) {
