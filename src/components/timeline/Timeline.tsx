@@ -19,6 +19,7 @@ import { useMediaStore } from '../../stores/mediaStore';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineControls } from './TimelineControls';
 import { TimelineHeader } from './TimelineHeader';
+import { TrackContextMenu, type TrackContextMenuState } from './TrackContextMenu';
 import { TimelineTrack } from './TimelineTrack';
 import { TimelineClip } from './TimelineClip';
 import { TimelineKeyframes } from './TimelineKeyframes';
@@ -26,6 +27,7 @@ import { MulticamDialog } from './MulticamDialog';
 import { TimelineNavigator } from './TimelineNavigator';
 import { TimelineOverlays } from './components/TimelineOverlays';
 import { TransitionOverlays } from './components/TransitionOverlays';
+import { AIActionOverlays } from './components/AIActionOverlays';
 import { PickWhipCables } from './components/PickWhipCables';
 import { ParentChildLinksOverlay } from './components/ParentChildLinksOverlay';
 import { VerticalScrollbar } from './VerticalScrollbar';
@@ -183,17 +185,6 @@ export function Timeline() {
 
   // Use store toggle directly (no useCallback needed - stable store reference)
 
-  const handleAddVideoTrack = useCallback(() => addTrack('video'), [addTrack]);
-  const handleAddAudioTrack = useCallback(() => addTrack('audio'), [addTrack]);
-
-  const handleAddTextClip = useCallback(() => {
-    const state = useTimelineStore.getState();
-    const videoTrack = state.tracks.find(t => t.type === 'video');
-    if (videoTrack) {
-      addTextClip(videoTrack.id, state.playheadPosition);
-    }
-  }, [addTextClip]);
-
   // Performance: Create lookup maps for O(1) clip/track access (must be before hooks that use them)
   const clipMap = useMemo(() => new Map(clips.map(c => [c.id, c])), [clips]);
   const trackMap = useMemo(() => new Map(tracks.map(t => [t.id, t])), [tracks]);
@@ -336,6 +327,9 @@ export function Timeline() {
   // Context menu state for clip right-click
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const handleClipContextMenu = useClipContextMenu(selectedClipIds, selectClip, setContextMenu);
+
+  // Context menu state for track header right-click
+  const [trackContextMenu, setTrackContextMenu] = useState<TrackContextMenuState | null>(null);
 
   // Transcript markers visibility toggle (from store for persistence)
   const showTranscriptMarkers = useTimelineStore(s => s.showTranscriptMarkers);
@@ -802,9 +796,6 @@ export function Timeline() {
         onToggleThumbnails={toggleThumbnailsEnabled}
         onToggleWaveforms={toggleWaveformsEnabled}
         onToggleCutTool={toggleCutTool}
-        onAddVideoTrack={handleAddVideoTrack}
-        onAddAudioTrack={handleAddAudioTrack}
-        onAddTextClip={handleAddTextClip}
         onSetDuration={setDuration}
         onFitToWindow={handleFitToWindow}
         formatTime={formatTime}
@@ -902,6 +893,17 @@ export function Timeline() {
                     onSetTrackParent={setTrackParent}
                     onTrackPickWhipDragStart={handleTrackPickWhipDragStart}
                     onTrackPickWhipDragEnd={handleTrackPickWhipDragEnd}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setTrackContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        trackId: track.id,
+                        trackType: track.type as 'video' | 'audio',
+                        trackName: track.name,
+                      });
+                    }}
                   />
               );
             })}
@@ -1016,6 +1018,13 @@ export function Timeline() {
           <TransitionOverlays
             activeJunction={activeJunction}
             clips={clips}
+            tracks={tracks}
+            timeToPixel={timeToPixel}
+            isTrackExpanded={isTrackExpanded}
+            getExpandedTrackHeight={getExpandedTrackHeight}
+          />
+
+          <AIActionOverlays
             tracks={tracks}
             timeToPixel={timeToPixel}
             isTrackExpanded={isTrackExpanded}
@@ -1218,6 +1227,11 @@ export function Timeline() {
         generateWaveformForClip={generateWaveformForClip}
         setMulticamDialogOpen={setMulticamDialogOpen}
         showInExplorer={showInExplorer}
+      />
+
+      <TrackContextMenu
+        menu={trackContextMenu}
+        onClose={() => setTrackContextMenu(null)}
       />
 
       {/* Multicam Dialog */}

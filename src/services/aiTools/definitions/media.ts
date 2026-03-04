@@ -105,7 +105,7 @@ export const mediaToolDefinitions: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'createComposition',
-      description: 'Create a new composition (timeline sequence).',
+      description: 'Create a new composition (timeline sequence). By default opens it immediately so subsequent operations target it.',
       parameters: {
         type: 'object',
         properties: {
@@ -129,8 +129,93 @@ export const mediaToolDefinitions: ToolDefinition[] = [
             type: 'number',
             description: 'Duration in seconds (default: 60)',
           },
+          openAfterCreate: {
+            type: 'boolean',
+            description: 'Open the composition immediately after creation (default: true). Set to false to create without switching.',
+          },
         },
         required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'openComposition',
+      description: 'Open a composition in the timeline and make it the active composition. Use getMediaItems first to find composition IDs.',
+      parameters: {
+        type: 'object',
+        properties: {
+          compositionId: {
+            type: 'string',
+            description: 'ID of the composition to open',
+          },
+        },
+        required: ['compositionId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'importLocalFiles',
+      description: 'Import local files from disk into the media panel. Provide absolute file paths. Files are fetched through the dev server and imported. Works with video, audio, and image files. Can optionally place them on the timeline with full control over track and position.',
+      parameters: {
+        type: 'object',
+        properties: {
+          paths: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of absolute file paths to import (e.g. ["C:/Users/admin/Downloads/video.mp4"]). Use forward slashes.',
+          },
+          addToTimeline: {
+            type: 'boolean',
+            description: 'If true, also add imported files as clips to the timeline (default: false)',
+          },
+          trackId: {
+            type: 'string',
+            description: 'ID of the track to place clips on. Use getTimelineState to find track IDs. If omitted, uses the first video/audio track.',
+          },
+          createTrack: {
+            type: 'boolean',
+            description: 'If true, create a new track for these clips instead of using an existing one (default: false)',
+          },
+          trackType: {
+            type: 'string',
+            enum: ['video', 'audio'],
+            description: 'Type of track to create when createTrack is true (default: "video")',
+          },
+          startTime: {
+            type: 'number',
+            description: 'Timeline position (in seconds) where the first clip should be placed. If omitted, appends after the last clip on the track.',
+          },
+          sequential: {
+            type: 'boolean',
+            description: 'If true (default), place clips one after another. If false, stack all clips at the same startTime (for layering).',
+          },
+        },
+        required: ['paths'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'listLocalFiles',
+      description: 'List media files in a local directory. Returns file names, paths, sizes and modification dates. Useful for discovering files before importing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          directory: {
+            type: 'string',
+            description: 'Absolute path to directory (e.g. "C:/Users/admin/Downloads"). Use forward slashes.',
+          },
+          extensions: {
+            type: 'string',
+            description: 'Comma-separated file extensions to filter (e.g. ".mp4,.webm,.mov"). Default: common media extensions.',
+          },
+        },
+        required: ['directory'],
       },
     },
   },

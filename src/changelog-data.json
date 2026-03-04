@@ -1,5 +1,93 @@
 [
   {
+    "date": "2026-03-04",
+    "type": "new",
+    "title": "Staggered AI Action Execution",
+    "description": "AI tool actions now execute visually step-by-step instead of all at once. Split operations show blue glow lines appearing one by one (300ms apart). Reorder operations move clips sequentially with FLIP animations (150ms apart). Delete shows a red ghost fade-out, trim shows green edge glow.",
+    "section": "AI",
+    "commits": ["4ada510", "a10f766"]
+  },
+  {
+    "date": "2026-03-04",
+    "type": "new",
+    "title": "Transcript Badge & Persistence",
+    "description": "Media panel now shows a transcript badge for files with completed transcriptions. Transcript data is persisted in the project folder.",
+    "section": "Media",
+    "commits": ["0b8753b"]
+  },
+  {
+    "date": "2026-03-03",
+    "type": "new",
+    "title": "addClipSegment API",
+    "description": "New AI tool to import a media segment with specific in/out points directly onto the timeline.",
+    "section": "AI",
+    "commits": ["fb8d7f3"]
+  },
+  {
+    "date": "2026-03-03",
+    "type": "fix",
+    "title": "Word-Level Timestamps for All Languages",
+    "description": "Local Whisper transcription now enables word-level timestamps for all languages, not just English.",
+    "section": "Transcription",
+    "commits": ["6c95d34"]
+  },
+  {
+    "date": "2026-03-02",
+    "type": "new",
+    "title": "window.aiTools API for External Agents",
+    "description": "Exposed window.aiTools.execute() API on the browser window, enabling external agents (Claude Code, browser console, MCP skills) to control the editor directly.",
+    "section": "AI",
+    "commits": ["827288f"]
+  },
+  {
+    "date": "2026-03-02",
+    "type": "new",
+    "title": "Local File Import API & Track Context Menu",
+    "description": "New API for importing local files into the timeline. Track headers now have a right-click context menu for adding tracks, replacing the old toolbar buttons.",
+    "section": "Timeline",
+    "commits": ["4fed8e4", "d821f9b"]
+  },
+  {
+    "date": "2026-03-02",
+    "type": "fix",
+    "title": "Nested Compositions Level 3+",
+    "description": "Compositions nested more than 2 levels deep now render correctly. Sub-nested media elements are loaded directly on clip objects for arbitrary nesting depth.",
+    "section": "Compositions",
+    "commits": ["9ae42ca", "21c0a39"]
+  },
+  {
+    "date": "2026-03-01",
+    "type": "fix",
+    "title": "Auto-Split Large Audio for Transcription",
+    "description": "Audio files larger than 25MB are now automatically split into chunks before sending to OpenAI for transcription, preventing upload failures.",
+    "section": "Transcription",
+    "commits": ["b4554fb"]
+  },
+  {
+    "date": "2026-03-01",
+    "type": "refactor",
+    "title": "Volume Control: dB DraggableNumber",
+    "description": "Volume control changed from a percentage slider to a decibel-based DraggableNumber input for more precise audio control.",
+    "section": "Audio",
+    "commits": ["5cf7f4d"]
+  },
+  {
+    "date": "2026-03-01",
+    "type": "fix",
+    "title": "Transcript & AI Tool Fixes",
+    "description": "Fixed hasTranscript check to also use transcriptStatus field. Fixed moveClip handler to validate NaN values and accept startTime/trackId aliases. Transcription now checks file extension when MIME type is empty.",
+    "section": "AI",
+    "commits": ["b0f08b1", "8066554", "f0fcc83"]
+  },
+  {
+    "date": "2026-02-25",
+    "type": "refactor",
+    "title": "Reverted WebCodecs-Only Migration",
+    "description": "The WebCodecs-only engine migration (Phases 0-6) was reverted due to playback regressions. Staging was reset to match the stable master branch, and selected AI/tool features were cherry-picked back.",
+    "section": "Engine",
+    "commits": ["fea6650", "19bec8d"]
+  },
+  {
     "date": "2026-02-12",
     "type": "fix",
     "title": "Default Layout: Hide WIP panels",

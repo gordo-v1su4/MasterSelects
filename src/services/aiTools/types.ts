@@ -13,8 +13,10 @@ export const MODIFYING_TOOLS = new Set([
   'cutRangesFromClip',
   // Media tools
   'createMediaFolder', 'renameMediaItem', 'deleteMediaItem', 'moveMediaItems',
-  'createComposition',
+  'createComposition', 'importLocalFiles',
   'executeBatch',
+  // YouTube
+  'downloadAndImportVideo',
 ]);
 
 // Tool definition type (OpenAI function calling format)

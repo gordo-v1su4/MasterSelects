@@ -409,6 +409,7 @@ function TimelineHeaderComponent({
   onToggleMuted,
   onToggleVisible,
   onRenameTrack,
+  onContextMenu,
   onWheel,
   clipKeyframes,
   getInterpolatedTransform,
@@ -480,6 +481,7 @@ function TimelineHeaderComponent({
       }`}
       style={{ height: dynamicHeight }}
       onWheel={onWheel}
+      onContextMenu={onContextMenu}
     >
       <div
         className="track-header-top"

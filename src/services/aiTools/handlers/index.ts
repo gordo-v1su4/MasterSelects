@@ -25,6 +25,7 @@ import {
   handleReorderClips,
   handleSelectClips,
   handleClearSelection,
+  handleAddClipSegment,
 } from './clips';
 
 import {
@@ -57,7 +58,16 @@ import {
   handleMoveMediaItems,
   handleCreateComposition,
   handleSelectMediaItems,
+  handleImportLocalFiles,
+  handleListLocalFiles,
 } from './media';
+
+import {
+  handleSearchYouTube,
+  handleListVideoFormats,
+  handleDownloadAndImportVideo,
+  handleGetYouTubeVideos,
+} from './youtube';
 
 // Handler registry - maps tool names to handler functions
 const timelineHandlers: Record<string, (args: Record<string, unknown>, store: ReturnType<typeof useTimelineStore.getState>) => Promise<ToolResult>> = {
@@ -100,6 +110,21 @@ const mediaHandlers: Record<string, (args: Record<string, unknown>, store: Retur
   moveMediaItems: handleMoveMediaItems,
   createComposition: handleCreateComposition,
   selectMediaItems: handleSelectMediaItems,
+  importLocalFiles: handleImportLocalFiles,
+};
+
+// Self-contained handlers (no store dependency, or fetch own stores)
+const selfContainedHandlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
+  listLocalFiles: handleListLocalFiles,
+  addClipSegment: handleAddClipSegment,
+};
+
+// YouTube handlers - self-contained, fetch their own stores
+const youtubeHandlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
+  searchYouTube: handleSearchYouTube,
+  listVideoFormats: handleListVideoFormats,
+  downloadAndImportVideo: handleDownloadAndImportVideo,
+  getYouTubeVideos: handleGetYouTubeVideos,
 };
 
 /**
@@ -120,6 +145,16 @@ export async function executeToolInternal(
   // Check media handlers
   if (toolName in mediaHandlers) {
     return mediaHandlers[toolName](args, mediaStore);
+  }
+
+  // Check self-contained handlers (no store dependency)
+  if (toolName in selfContainedHandlers) {
+    return selfContainedHandlers[toolName](args);
+  }
+
+  // Check YouTube handlers
+  if (toolName in youtubeHandlers) {
+    return youtubeHandlers[toolName](args);
   }
 
   // Unknown tool
@@ -146,6 +181,7 @@ export {
   handleReorderClips,
   handleSelectClips,
   handleClearSelection,
+  handleAddClipSegment,
   // Tracks
   handleCreateTrack,
   handleDeleteTrack,
@@ -170,4 +206,11 @@ export {
   handleMoveMediaItems,
   handleCreateComposition,
   handleSelectMediaItems,
+  handleImportLocalFiles,
+  handleListLocalFiles,
+  // YouTube
+  handleSearchYouTube,
+  handleListVideoFormats,
+  handleDownloadAndImportVideo,
+  handleGetYouTubeVideos,
 };

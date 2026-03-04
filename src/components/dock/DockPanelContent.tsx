@@ -62,6 +62,7 @@ export function DockPanelContent({ panel }: DockPanelContentProps) {
       return <Suspense fallback={<PanelLoading />}><AIVideoPanel /></Suspense>;
     case 'ai-segment':
       return <Suspense fallback={<PanelLoading />}><SAM2Panel /></Suspense>;
+    case 'youtube':
     case 'download':
       return <Suspense fallback={<PanelLoading />}><DownloadPanel /></Suspense>;
     case 'transitions':

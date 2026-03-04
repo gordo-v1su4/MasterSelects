@@ -3,9 +3,11 @@
 
 import { Logger } from './logger';
 import { useTimelineStore } from '../stores/timeline';
-import { triggerTimelineSave } from '../stores/mediaStore';
+import { triggerTimelineSave, useMediaStore } from '../stores/mediaStore';
+import type { MediaFile } from '../stores/mediaStore/types';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { TranscriptWord, TranscriptStatus } from '../types';
+import { projectFileService } from './project/ProjectFileService';
 
 const log = Logger.create('ClipTranscriber');
 
@@ -31,7 +33,7 @@ function getWorker(): Worker {
  * Extract audio from a clip's file and transcribe it
  * Uses the configured provider (local Whisper, OpenAI, AssemblyAI, or Deepgram)
  */
-export async function transcribeClip(clipId: string, language: string = 'de'): Promise<void> {
+export async function transcribeClip(clipId: string, language: string = 'auto'): Promise<void> {
   if (isTranscribing) {
     log.warn('Already transcribing');
     return;
@@ -45,10 +47,14 @@ export async function transcribeClip(clipId: string, language: string = 'de'): P
     return;
   }
 
-  // Check if file has audio
-  const hasAudio = clip.file.type.startsWith('video/') || clip.file.type.startsWith('audio/');
+  // Check if file has audio (also check extension as fallback since file.type can be empty after project reload)
+  const mimeType = clip.file.type || '';
+  const fileName = clip.file.name || '';
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  const audioVideoExts = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a'];
+  const hasAudio = mimeType.startsWith('video/') || mimeType.startsWith('audio/') || audioVideoExts.includes(ext);
   if (!hasAudio) {
-    log.warn('File does not contain audio');
+    log.warn('File does not contain audio', { type: mimeType, name: fileName });
     return;
   }
 
@@ -137,6 +143,13 @@ export async function transcribeClip(clipId: string, language: string = 'de'): P
       message: undefined,
     });
     triggerTimelineSave();
+
+    // Propagate transcript to MediaFile for badge display + carry-over
+    const mediaFileId = clip.source?.mediaFileId || clip.mediaFileId;
+    if (mediaFileId && words.length > 0) {
+      propagateTranscriptToMediaFile(mediaFileId, words);
+    }
+
     log.info(`Complete: ${words.length} words for ${clip.name}`);
 
   } catch (error) {
@@ -248,6 +261,50 @@ function updateClipTranscript(
   });
 
   useTimelineStore.setState({ clips });
+}
+
+/**
+ * Propagate transcript to MediaFile for badge display and carry-over to new clips.
+ * Merges with existing transcript if the MediaFile already has words from a different region.
+ */
+function propagateTranscriptToMediaFile(mediaFileId: string, words: TranscriptWord[]): void {
+  try {
+    const mediaState = useMediaStore.getState();
+    const file = mediaState.files.find((f: MediaFile) => f.id === mediaFileId);
+    if (!file) return;
+
+    // Merge with existing transcript if present
+    let mergedWords = words;
+    if (file.transcript?.length) {
+      const existing = file.transcript;
+      const merged = [...existing];
+      for (const word of words) {
+        const duplicate = merged.some(
+          (w: TranscriptWord) => Math.abs(w.start - word.start) < 0.05 && Math.abs(w.end - word.end) < 0.05
+        );
+        if (!duplicate) {
+          merged.push(word);
+        }
+      }
+      mergedWords = merged.sort((a, b) => a.start - b.start);
+    }
+
+    useMediaStore.setState({
+      files: mediaState.files.map((f: MediaFile) =>
+        f.id === mediaFileId
+          ? { ...f, transcriptStatus: 'ready' as TranscriptStatus, transcript: mergedWords }
+          : f
+      ),
+    });
+    // Persist transcript to project folder (TRANSCRIPTS/{mediaId}.json)
+    projectFileService.saveTranscript(mediaFileId, mergedWords).then(saved => {
+      if (saved) log.debug('Transcript saved to project folder', { mediaFileId });
+    }).catch(() => { /* no project open */ });
+
+    log.debug('Propagated transcript to MediaFile', { mediaFileId, wordCount: mergedWords.length });
+  } catch (e) {
+    log.warn('Failed to propagate transcript to MediaFile', e);
+  }
 }
 
 /**
@@ -416,8 +473,82 @@ async function audioBufferToWav(audioBuffer: AudioBuffer): Promise<Blob> {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+// OpenAI file size limit: 25MB (26214400 bytes). Use 24MB as safe threshold.
+const OPENAI_MAX_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Send a single WAV blob to OpenAI Whisper and return raw word results
+ */
+async function openAISingleRequest(
+  audioBlob: Blob,
+  language: string,
+  apiKey: string,
+): Promise<Array<{ word: string; start: number; end: number }>> {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'audio.wav');
+  formData.append('model', 'whisper-1');
+  if (language !== 'auto') {
+    formData.append('language', language);
+  }
+  formData.append('response_format', 'verbose_json');
+  formData.append('timestamp_granularities[]', 'word');
+
+  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+    throw new Error(`OpenAI API error: ${response.status}: ${error.error?.message || response.statusText}`);
+  }
+
+  const result = await response.json();
+  return result.words || [];
+}
+
+/**
+ * Split an AudioBuffer into chunks that produce WAV files under the size limit
+ */
+function splitAudioBuffer(audioBuffer: AudioBuffer, maxWavBytes: number): AudioBuffer[] {
+  const sampleRate = audioBuffer.sampleRate;
+  const bytesPerSample = 2; // 16-bit PCM mono
+  const headerSize = 44;
+  const maxSamples = Math.floor((maxWavBytes - headerSize) / bytesPerSample);
+  const totalSamples = audioBuffer.length;
+
+  if (totalSamples <= maxSamples) {
+    return [audioBuffer];
+  }
+
+  const chunks: AudioBuffer[] = [];
+  const numChannels = audioBuffer.numberOfChannels;
+  let offset = 0;
+
+  while (offset < totalSamples) {
+    const chunkLength = Math.min(maxSamples, totalSamples - offset);
+    const ctx = new OfflineAudioContext(numChannels, chunkLength, sampleRate);
+    const chunkBuffer = ctx.createBuffer(numChannels, chunkLength, sampleRate);
+
+    for (let ch = 0; ch < numChannels; ch++) {
+      const src = audioBuffer.getChannelData(ch);
+      const dst = chunkBuffer.getChannelData(ch);
+      for (let i = 0; i < chunkLength; i++) {
+        dst[i] = src[offset + i];
+      }
+    }
+
+    chunks.push(chunkBuffer);
+    offset += chunkLength;
+  }
+
+  return chunks;
+}
+
 /**
  * Transcribe using OpenAI Whisper API
+ * Automatically splits audio into chunks if it exceeds the 25MB API limit
  */
 async function transcribeWithOpenAI(
   clipId: string,
@@ -426,49 +557,76 @@ async function transcribeWithOpenAI(
   apiKey: string,
   inPointOffset: number
 ): Promise<TranscriptWord[]> {
-  updateClipTranscript(clipId, {
-    progress: 20,
-    message: 'Sending to OpenAI...',
-  });
+  // If small enough, send directly
+  if (audioBlob.size <= OPENAI_MAX_BYTES) {
+    updateClipTranscript(clipId, { progress: 20, message: 'Sending to OpenAI...' });
 
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'audio.wav');
-  formData.append('model', 'whisper-1');
-  formData.append('language', language);
-  formData.append('response_format', 'verbose_json');
-  formData.append('timestamp_granularities[]', 'word');
+    const rawWords = await openAISingleRequest(audioBlob, language, apiKey);
 
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: formData,
-  });
+    updateClipTranscript(clipId, { progress: 80, message: 'Processing response...' });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
-    throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+    return rawWords.map((word: any, index: number) => ({
+      id: `word-${index}`,
+      text: word.word,
+      start: (word.start || 0) + inPointOffset,
+      end: (word.end || word.start + 0.1) + inPointOffset,
+      confidence: 1,
+      speaker: 'Speaker 1',
+    }));
   }
 
-  updateClipTranscript(clipId, {
-    progress: 80,
-    message: 'Processing response...',
-  });
+  // Audio too large - need to split into chunks
+  log.info(`Audio WAV is ${(audioBlob.size / 1024 / 1024).toFixed(1)}MB, splitting into chunks...`);
+  updateClipTranscript(clipId, { progress: 10, message: 'Audio too large, splitting...' });
 
-  const result = await response.json();
+  // Re-decode the WAV blob to get an AudioBuffer we can split
+  const audioContext = new AudioContext();
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const fullBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  audioContext.close();
 
-  // Convert OpenAI response to TranscriptWord[]
-  const words: TranscriptWord[] = (result.words || []).map((word: any, index: number) => ({
-    id: `word-${index}`,
-    text: word.word,
-    start: (word.start || 0) + inPointOffset,
-    end: (word.end || word.start + 0.1) + inPointOffset,
-    confidence: 1,
-    speaker: 'Speaker 1',
-  }));
+  const chunks = splitAudioBuffer(fullBuffer, OPENAI_MAX_BYTES);
+  log.info(`Split into ${chunks.length} chunks`);
 
-  return words;
+  const allWords: TranscriptWord[] = [];
+  let globalWordIndex = 0;
+  const sampleRate = fullBuffer.sampleRate;
+  let sampleOffset = 0;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkTimeOffset = sampleOffset / sampleRate;
+    const progressBase = 15 + (70 * i / chunks.length);
+    const progressEnd = 15 + (70 * (i + 1) / chunks.length);
+
+    updateClipTranscript(clipId, {
+      progress: Math.round(progressBase),
+      message: `Transcribing chunk ${i + 1}/${chunks.length}...`,
+    });
+
+    const chunkWav = await audioBufferToWav(chunks[i]);
+    const rawWords = await openAISingleRequest(chunkWav, language, apiKey);
+
+    for (const word of rawWords) {
+      allWords.push({
+        id: `word-${globalWordIndex++}`,
+        text: word.word,
+        start: (word.start || 0) + chunkTimeOffset + inPointOffset,
+        end: (word.end || word.start + 0.1) + chunkTimeOffset + inPointOffset,
+        confidence: 1,
+        speaker: 'Speaker 1',
+      });
+    }
+
+    updateClipTranscript(clipId, {
+      progress: Math.round(progressEnd),
+      words: allWords,
+      message: `Chunk ${i + 1}/${chunks.length} done (${allWords.length} words)`,
+    });
+
+    sampleOffset += chunks[i].length;
+  }
+
+  return allWords;
 }
 
 /**
@@ -532,7 +690,10 @@ async function transcribeWithAssemblyAI(
     },
     body: JSON.stringify({
       audio_url: upload_url,
-      language_code: languageMap[language] || language,
+      // Auto-detect: use language_detection, otherwise specify language
+      ...(language === 'auto'
+        ? { language_detection: true }
+        : { language_code: languageMap[language] || language }),
     }),
   });
 
@@ -611,10 +772,15 @@ async function transcribeWithDeepgram(
   // Build query params
   const params = new URLSearchParams({
     model: 'nova-2',
-    language: language,
     punctuate: 'true',
     utterances: 'false',
   });
+  // Auto-detect: use detect_language, otherwise specify language
+  if (language === 'auto') {
+    params.set('detect_language', 'true');
+  } else {
+    params.set('language', language);
+  }
 
   const response = await fetch(`https://api.deepgram.com/v1/listen?${params}`, {
     method: 'POST',

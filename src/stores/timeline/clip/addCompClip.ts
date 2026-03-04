@@ -3,7 +3,7 @@
 
 import type { TimelineClip, TimelineTrack, CompositionTimelineData, SerializableClip, Keyframe } from '../../../types';
 import type { Composition } from '../types';
-import { DEFAULT_TRANSFORM, calculateNativeScale } from '../constants';
+import { DEFAULT_TRANSFORM, calculateNativeScale, MAX_NESTING_DEPTH } from '../constants';
 import { useMediaStore } from '../../mediaStore';
 import { initWebCodecsPlayer } from '../helpers/webCodecsHelpers';
 import { findOrCreateAudioTrack, createCompositionAudioClip } from '../helpers/audioTrackHelpers';
@@ -245,6 +245,7 @@ export interface LoadNestedClipsParams {
   composition: Composition;
   get: CompClipStoreGet;
   set: CompClipStoreSet;
+  depth?: number;
 }
 
 /**
@@ -275,10 +276,135 @@ function updateNestedClipInCompClip(
 }
 
 /**
+ * Recursively load sub-nested clips for compositions at depth > 0.
+ * Unlike loadNestedClips, this loads media elements directly on the clip objects
+ * (since sub-nested clips aren't in the top-level store clips array).
+ */
+async function loadSubNestedClips(
+  composition: Composition,
+  parentClipId: string,
+  depth: number
+): Promise<TimelineClip[]> {
+  if (depth >= MAX_NESTING_DEPTH || !composition.timelineData) return [];
+
+  const mediaStore = useMediaStore.getState();
+  const result: TimelineClip[] = [];
+
+  for (const sc of composition.timelineData.clips) {
+    // Handle sub-nested composition clips
+    if (sc.isComposition && sc.compositionId) {
+      const subComp = mediaStore.compositions.find(c => c.id === sc.compositionId);
+      if (!subComp) continue;
+
+      const clipId = generateNestedClipId(parentClipId, sc.id);
+      const subDuration = subComp.timelineData?.duration ?? subComp.duration;
+      const subNested = await loadSubNestedClips(subComp, clipId, depth + 1);
+
+      result.push({
+        id: clipId,
+        trackId: sc.trackId,
+        name: sc.name,
+        file: new File([], subComp.name),
+        startTime: sc.startTime,
+        duration: sc.duration,
+        inPoint: sc.inPoint,
+        outPoint: sc.outPoint,
+        source: { type: 'video', naturalDuration: subDuration },
+        transform: sc.transform,
+        effects: sc.effects || [],
+        masks: sc.masks || [],
+        isComposition: true,
+        compositionId: sc.compositionId,
+        nestedClips: subNested,
+        nestedTracks: subComp.timelineData?.tracks || [],
+        isLoading: false,
+      });
+      continue;
+    }
+
+    // Regular media clip
+    const mediaFile = mediaStore.files.find(f => f.id === sc.mediaFileId);
+    if (!mediaFile?.file) continue;
+
+    const clipId = generateNestedClipId(parentClipId, sc.id);
+    const clip: TimelineClip = {
+      id: clipId,
+      trackId: sc.trackId,
+      name: sc.name,
+      file: mediaFile.file,
+      startTime: sc.startTime,
+      duration: sc.duration,
+      inPoint: sc.inPoint,
+      outPoint: sc.outPoint,
+      source: null,
+      thumbnails: sc.thumbnails,
+      transform: sc.transform,
+      effects: sc.effects || [],
+      masks: sc.masks || [],
+      isLoading: true,
+    };
+    result.push(clip);
+
+    // Load media directly on the clip object (no store update needed)
+    const type = sc.sourceType;
+    const fileUrl = blobUrlManager.create(clipId, mediaFile.file, (type === 'video' ? 'video' : type === 'audio' ? 'audio' : 'image') as 'video' | 'audio' | 'image');
+
+    if (type === 'video') {
+      const video = document.createElement('video');
+      video.src = fileUrl;
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.crossOrigin = 'anonymous';
+      video.load();
+      video.addEventListener('loadedmetadata', async () => {
+        try {
+          await video.play();
+          video.pause();
+          video.currentTime = 0;
+          await new Promise<void>(resolve => {
+            video.addEventListener('seeked', () => resolve(), { once: true });
+            setTimeout(resolve, 500);
+          });
+        } catch { /* ignore autoplay policy */ }
+        clip.source = { type: 'video', videoElement: video, naturalDuration: video.duration };
+        clip.isLoading = false;
+        // Initialize WebCodecsPlayer
+        const wcp = await initWebCodecsPlayer(video, mediaFile.file!.name);
+        if (wcp) clip.source.webCodecsPlayer = wcp;
+        log.debug('Sub-nested video loaded', { clipId, name: clip.name, depth });
+      }, { once: true });
+    } else if (type === 'image') {
+      const img = new Image();
+      img.src = fileUrl;
+      img.addEventListener('load', () => {
+        clip.source = { type: 'image', imageElement: img };
+        clip.isLoading = false;
+      }, { once: true });
+    } else if (type === 'audio') {
+      const audio = document.createElement('audio');
+      audio.src = fileUrl;
+      audio.preload = 'auto';
+      audio.addEventListener('canplaythrough', () => {
+        clip.source = { type: 'audio', audioElement: audio, naturalDuration: audio.duration };
+        clip.isLoading = false;
+      }, { once: true });
+    }
+  }
+
+  return result;
+}
+
+/**
  * Load nested clips from composition's timeline data.
  */
 export async function loadNestedClips(params: LoadNestedClipsParams): Promise<TimelineClip[]> {
-  const { compClipId, composition, get, set } = params;
+  const { compClipId, composition, get, set, depth = 0 } = params;
+
+  if (depth >= MAX_NESTING_DEPTH) {
+    log.warn('Max nesting depth reached, skipping deeper nesting', { compClipId, depth });
+    return [];
+  }
 
   if (!composition.timelineData) return [];
 
@@ -305,6 +431,59 @@ export async function loadNestedClips(params: LoadNestedClipsParams): Promise<Ti
   });
 
   for (const serializedClip of composition.timelineData.clips) {
+    // Check if this nested clip is itself a composition
+    if (serializedClip.isComposition && serializedClip.compositionId) {
+      const nestedComp = mediaStore.compositions.find(c => c.id === serializedClip.compositionId);
+      if (!nestedComp) {
+        log.warn('Could not find nested composition', {
+          clip: serializedClip.name,
+          compositionId: serializedClip.compositionId,
+        });
+        continue;
+      }
+
+      const nestedClipId = generateNestedClipId(compClipId, serializedClip.id);
+      const compDuration = nestedComp.timelineData?.duration ?? nestedComp.duration;
+
+      const nestedClip: TimelineClip = {
+        id: nestedClipId,
+        trackId: serializedClip.trackId,
+        name: serializedClip.name,
+        file: new File([], nestedComp.name),
+        startTime: serializedClip.startTime,
+        duration: serializedClip.duration,
+        inPoint: serializedClip.inPoint,
+        outPoint: serializedClip.outPoint,
+        source: { type: 'video', naturalDuration: compDuration },
+        thumbnails: serializedClip.thumbnails,
+        transform: serializedClip.transform,
+        effects: serializedClip.effects || [],
+        masks: serializedClip.masks || [],
+        isComposition: true,
+        compositionId: serializedClip.compositionId,
+        nestedClips: [],
+        nestedTracks: nestedComp.timelineData?.tracks || [],
+        isLoading: true,
+      };
+
+      // Recursively load sub-nested clips
+      // For depth > 0, media elements are loaded directly on clip objects
+      // (they aren't in the top-level store clips array, so updateNestedClipInCompClip won't find them)
+      const subNestedClips = await loadSubNestedClips(nestedComp, nestedClipId, depth + 1);
+
+      nestedClip.nestedClips = subNestedClips;
+      nestedClip.isLoading = false;
+      nestedClips.push(nestedClip);
+
+      log.info('Loaded sub-nested composition', {
+        nestedClipId,
+        compositionName: nestedComp.name,
+        subNestedClipCount: subNestedClips.length,
+        depth: depth + 1,
+      });
+      continue;
+    }
+
     const mediaFile = mediaStore.files.find(f => f.id === serializedClip.mediaFileId);
     if (!mediaFile?.file) {
       log.warn('Could not find media file for nested clip', {
