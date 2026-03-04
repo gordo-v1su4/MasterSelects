@@ -42,6 +42,9 @@ export class VideoSyncManager {
   private preciseSeekTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   private latestSeekTargets: Record<string, number> = {};
 
+  // WebCodecs precise seek debounce
+  private wcPreciseSeekTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
   /**
    * Clamp seek time to valid range, preventing EOF decoder stalls.
    * H.264 B-frame decoders stall when seeking to exactly video.duration
@@ -563,13 +566,21 @@ export class VideoSyncManager {
         video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
       }
     } else {
-      // Paused: stop decode loop, seek to exact frame
+      // Paused: stop decode loop, seek to frame
       if (wcp.isPlaying) wcp.pause();
       if (!video.paused) video.pause();
 
       const wcTimeDiff = Math.abs(wcp.currentTime - timeInfo.clipTime);
       if (wcTimeDiff > 0.05) {
-        wcp.seek(timeInfo.clipTime);
+        if (ctx.isDraggingPlayhead) {
+          // Fast scrubbing: keyframe-only for instant feedback
+          wcp.fastSeek(timeInfo.clipTime);
+          // Debounced precise seek when scrubbing pauses
+          this.schedulePreciseWcSeek(clip.id, wcp, timeInfo.clipTime);
+        } else {
+          // Click/arrow: precise seek immediately
+          wcp.seek(timeInfo.clipTime);
+        }
       }
       // Keep audio element at same position
       const timeDiff = Math.abs(video.currentTime - timeInfo.clipTime);
@@ -577,6 +588,22 @@ export class VideoSyncManager {
         video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
       }
     }
+  }
+
+  /**
+   * Schedule a debounced precise WebCodecs seek.
+   * During fast scrubbing, fastSeek shows keyframes instantly.
+   * When scrubbing pauses (120ms), do a full decode for the exact frame.
+   */
+  private schedulePreciseWcSeek(clipId: string, wcp: { seek: (t: number) => void; currentTime: number }, time: number): void {
+    clearTimeout(this.wcPreciseSeekTimers[clipId]);
+    this.wcPreciseSeekTimers[clipId] = setTimeout(() => {
+      // Only seek if still at a different position
+      if (Math.abs(wcp.currentTime - time) > 0.01) {
+        wcp.seek(time);
+        engine.requestRender();
+      }
+    }, 120);
   }
 
   /**

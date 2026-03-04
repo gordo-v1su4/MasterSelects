@@ -858,6 +858,62 @@ export class WebCodecsPlayer implements ExportModePlayer {
   }
 
   /**
+   * Fast seek: decode only the nearest keyframe (1 frame instead of N).
+   * Use during fast scrubbing for instant feedback — shows nearest I-frame.
+   */
+  fastSeek(timeSeconds: number): void {
+    if (this.useSimpleMode && this.videoElement) {
+      const vid = this.videoElement;
+      if (typeof (vid as any).fastSeek === 'function') {
+        (vid as any).fastSeek(timeSeconds);
+      } else {
+        vid.currentTime = timeSeconds;
+      }
+      this.captureCurrentFrame();
+      return;
+    }
+
+    if (!this.videoTrack || this.samples.length === 0 || !this.decoder) return;
+
+    const targetTime = timeSeconds * this.videoTrack.timescale;
+
+    // Find nearest keyframe (before or after target for closest match)
+    let bestKeyframe = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < this.samples.length; i++) {
+      if (this.samples[i].is_sync) {
+        const diff = Math.abs(this.samples[i].cts - targetTime);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestKeyframe = i;
+        }
+      }
+    }
+
+    // Reset decoder and decode just the keyframe
+    this.decoder.reset();
+    this.decoder.configure(this.codecConfig!);
+
+    const sample = this.samples[bestKeyframe];
+    const chunk = new EncodedVideoChunk({
+      type: 'key',
+      timestamp: (sample.cts * 1_000_000) / sample.timescale,
+      duration: (sample.duration * 1_000_000) / sample.timescale,
+      data: sample.data,
+    });
+
+    try {
+      this.decoder.decode(chunk);
+    } catch {
+      // Skip decode errors
+    }
+
+    this.sampleIndex = bestKeyframe;
+    this.feedIndex = bestKeyframe + 1;
+    this.clearFrameBuffer();
+  }
+
+  /**
    * Async seek that waits for the frame to be decoded
    * Use this for export where we need guaranteed frame accuracy
    */
