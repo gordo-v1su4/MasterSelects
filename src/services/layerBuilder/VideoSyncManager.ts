@@ -375,10 +375,20 @@ export class VideoSyncManager {
           const newPlayheadPos = clip.reversed
             ? clip.startTime + (clip.outPoint - videoClipTime) / effectiveSpeed
             : clip.startTime + (videoClipTime - clip.inPoint) / effectiveSpeed;
-          // Update both internal and store playhead to match video position
-          playheadState.position = newPlayheadPos;
-          useTimelineStore.setState({ playheadPosition: newPlayheadPos });
-          return; // Skip seek — video is already showing the correct frame
+          // Only snap if video actually advanced — for very short play/stop cycles
+          // the video may not have moved yet, in which case keep the current playhead
+          // (from the internal clock) so rapid play/stop can inch forward
+          const currentPlayhead = playheadState.isUsingInternalPosition
+            ? playheadState.position
+            : ctx.playheadPosition;
+          const videoAdvanced = Math.abs(newPlayheadPos - currentPlayhead) > 0.01;
+          if (videoAdvanced) {
+            // Video moved meaningfully — snap playhead to video position
+            playheadState.position = newPlayheadPos;
+            useTimelineStore.setState({ playheadPosition: newPlayheadPos });
+          }
+          // Either way, skip the seek — video is at its natural stop position
+          return;
         }
 
         if (!video.paused) {
