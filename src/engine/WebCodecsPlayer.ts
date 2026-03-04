@@ -4,6 +4,7 @@
 
 import { Logger } from '../services/logger';
 import { wcPipelineMonitor } from '../services/wcPipelineMonitor';
+import { vfPipelineMonitor } from '../services/vfPipelineMonitor';
 const log = Logger.create('WebCodecsPlayer');
 
 import * as MP4BoxModule from 'mp4box';
@@ -224,6 +225,10 @@ export class WebCodecsPlayer implements ExportModePlayer {
       this.captureCurrentFrame();
     };
     this.boundOnSeeked = () => {
+      vfPipelineMonitor.record('vf_seek_done', {
+        currentTime: Math.round(video.currentTime * 1000) / 1000,
+        readyState: video.readyState,
+      });
       // Only capture on seek if not playing (playing captures continuously)
       if (!this._isPlaying) {
         this.captureCurrentFrame();
@@ -308,9 +313,16 @@ export class WebCodecsPlayer implements ExportModePlayer {
       this.currentFrame = new VideoFrame(this.videoElement, {
         timestamp: this.videoElement.currentTime * 1_000_000,
       });
+      vfPipelineMonitor.record('vf_capture', {
+        videoTime: Math.round(this.videoElement.currentTime * 1000) / 1000,
+        readyState: this.videoElement.readyState,
+      });
       this.onFrame?.(this.currentFrame);
     } catch (e) {
-      // Ignore frame capture errors (can happen during seek)
+      vfPipelineMonitor.record('vf_drop', {
+        readyState: this.videoElement?.readyState ?? -1,
+        reason: 'capture_error',
+      });
     }
   }
 
@@ -540,6 +552,7 @@ export class WebCodecsPlayer implements ExportModePlayer {
     }
 
     if (this.useSimpleMode && this.videoElement) {
+      vfPipelineMonitor.record('vf_play');
       // If attached to external video, don't control it - just ensure frame capture is running
       // Timeline controls the video element, we get notified via events
       if (!this.isAttachedToExternal) {
@@ -560,6 +573,9 @@ export class WebCodecsPlayer implements ExportModePlayer {
   pause(): void {
     if (this._isPlaying && !this.useSimpleMode) {
       wcPipelineMonitor.record('pause');
+    }
+    if (this._isPlaying && this.useSimpleMode) {
+      vfPipelineMonitor.record('vf_pause');
     }
     this._isPlaying = false;
 
@@ -866,8 +882,14 @@ export class WebCodecsPlayer implements ExportModePlayer {
       const vid = this.videoElement;
       if (typeof (vid as any).fastSeek === 'function') {
         (vid as any).fastSeek(timeSeconds);
+        vfPipelineMonitor.record('vf_seek_fast', {
+          target: Math.round(timeSeconds * 1000) / 1000,
+        });
       } else {
         vid.currentTime = timeSeconds;
+        vfPipelineMonitor.record('vf_seek_precise', {
+          target: Math.round(timeSeconds * 1000) / 1000,
+        });
       }
       this.captureCurrentFrame();
       return;

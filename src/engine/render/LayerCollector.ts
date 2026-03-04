@@ -5,6 +5,7 @@ import type { TextureManager } from '../texture/TextureManager';
 import type { ScrubbingCache } from '../texture/ScrubbingCache';
 import { Logger } from '../../services/logger';
 import { wcPipelineMonitor } from '../../services/wcPipelineMonitor';
+import { vfPipelineMonitor } from '../../services/vfPipelineMonitor';
 
 const log = Logger.create('LayerCollector');
 
@@ -155,6 +156,10 @@ export class LayerCollector {
             if (extTex) {
               if (source.webCodecsPlayer.isFullMode()) {
                 wcPipelineMonitor.record('frame_read', {
+                  frameTs: frame.timestamp,
+                });
+              } else {
+                vfPipelineMonitor.record('vf_read', {
                   frameTs: frame.timestamp,
                 });
               }

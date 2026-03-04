@@ -1,6 +1,8 @@
 // PlayheadState - High-frequency playhead position management
 // Updated every frame by playback loop to avoid store update overhead
 
+import { vfPipelineMonitor } from '../vfPipelineMonitor';
+
 /**
  * Playhead state data structure
  * Accessed directly without React/Zustand overhead for performance
@@ -65,11 +67,18 @@ export function setMasterAudio(
   clipInPoint: number,
   speed: number
 ): void {
+  const prevElement = playheadState.masterAudioElement;
   playheadState.hasMasterAudio = true;
   playheadState.masterAudioElement = element;
   playheadState.masterClipStartTime = clipStartTime;
   playheadState.masterClipInPoint = clipInPoint;
   playheadState.masterClipSpeed = speed;
+  if (prevElement !== element) {
+    vfPipelineMonitor.record('audio_master_change', {
+      clipStartTime: Math.round(clipStartTime * 1000) / 1000,
+      speed: Math.round(speed * 100) / 100,
+    });
+  }
 }
 
 /**

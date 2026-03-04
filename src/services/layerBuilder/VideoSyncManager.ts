@@ -11,6 +11,7 @@ import { engine } from '../../engine/WebGPUEngine';
 import { useTimelineStore } from '../../stores/timeline';
 import { MAX_NESTING_DEPTH } from '../../stores/timeline/constants';
 import { wcPipelineMonitor } from '../wcPipelineMonitor';
+import { vfPipelineMonitor } from '../vfPipelineMonitor';
 
 export class VideoSyncManager {
   // Native decoder state
@@ -288,6 +289,7 @@ export class VideoSyncManager {
     if (!ctx.isPlaying && !video.seeking && hasSrc && cooldownOk &&
         video.played.length === 0 && !this.warmingUpVideos.has(video)) {
       this.warmingUpVideos.add(video);
+      vfPipelineMonitor.record('vf_gpu_cold', { clipId: clip.id });
       const targetTime = timeInfo.clipTime;
       video.play().then(() => {
         // Wait for actual frame presentation via requestVideoFrameCallback
@@ -299,6 +301,7 @@ export class VideoSyncManager {
             video.pause();
             video.currentTime = this.safeSeekTime(video, targetTime);
             this.warmingUpVideos.delete(video);
+            vfPipelineMonitor.record('vf_gpu_ready', { clipId: clip.id });
             engine.requestRender();
           });
         } else {
@@ -308,6 +311,7 @@ export class VideoSyncManager {
             video.pause();
             video.currentTime = this.safeSeekTime(video, targetTime);
             this.warmingUpVideos.delete(video);
+            vfPipelineMonitor.record('vf_gpu_ready', { clipId: clip.id, fallback: 'true' });
             engine.requestRender();
           }, 100);
         }
@@ -377,9 +381,15 @@ export class VideoSyncManager {
             video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
           }
           video.play().catch(() => {});
+          vfPipelineMonitor.record('vf_play', { clipId: clip.id });
         }
         // Drift correction during playback (especially needed for speed-adjusted clips)
         if (timeDiff > 0.3) {
+          vfPipelineMonitor.record('vf_drift', {
+            clipId: clip.id,
+            driftMs: Math.round(timeDiff * 1000),
+            target: Math.round(timeInfo.clipTime * 1000) / 1000,
+          });
           video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
         }
       } else {
@@ -392,6 +402,7 @@ export class VideoSyncManager {
           this.clipWasPlaying.delete(clip.id);
           if (!video.paused) {
             video.pause();
+            vfPipelineMonitor.record('vf_pause', { clipId: clip.id });
           }
           // Convert video.currentTime back to timeline position
           // clipTime = startPoint + sourceTime, where for speed=1: clipTime = inPoint + localTime
@@ -431,6 +442,10 @@ export class VideoSyncManager {
 
         // Force decode if readyState dropped after seek
         if (video.readyState < 2 && !video.seeking) {
+          vfPipelineMonitor.record('vf_readystate_drop', {
+            clipId: clip.id,
+            readyState: video.readyState,
+          });
           this.forceVideoFrameDecode(clip.id, video);
         }
       }
@@ -463,6 +478,10 @@ export class VideoSyncManager {
         // For all-intra codecs this IS the exact frame. For long-GOP codecs
         // this shows the nearest keyframe — better than a stale cached frame.
         video.fastSeek(this.safeSeekTime(video, time));
+        vfPipelineMonitor.record('vf_seek_fast', {
+          clipId,
+          target: Math.round(time * 1000) / 1000,
+        });
 
         // Phase 2: Schedule deferred precise seek for exact frame.
         // Debounced: resets on each new scrub position, only fires when
@@ -475,6 +494,11 @@ export class VideoSyncManager {
           // (i.e., this is a long-GOP video where fastSeek shows a different frame)
           if (target !== undefined && Math.abs(video.currentTime - target) > 0.01) {
             video.currentTime = this.safeSeekTime(video, target);
+            vfPipelineMonitor.record('vf_seek_precise', {
+              clipId,
+              target: Math.round(target * 1000) / 1000,
+              deferred: 'true',
+            });
             // Register RVFC for when the precise frame arrives
             this.registerRVFC(clipId, video);
           }
@@ -482,6 +506,10 @@ export class VideoSyncManager {
       } else {
         // Not dragging: precise seek immediately (click, arrow keys, etc.)
         video.currentTime = this.safeSeekTime(video, time);
+        vfPipelineMonitor.record('vf_seek_precise', {
+          clipId,
+          target: Math.round(time * 1000) / 1000,
+        });
         clearTimeout(this.preciseSeekTimers[clipId]);
       }
       this.lastSeekRef[clipId] = ctx.now;
@@ -500,6 +528,7 @@ export class VideoSyncManager {
       }
       this.rvfcHandles[clipId] = rvfc.call(video, () => {
         delete this.rvfcHandles[clipId];
+        vfPipelineMonitor.record('vf_seek_done', { clipId });
         // Bypass the scrub rate limiter — a fresh decoded frame should be displayed immediately
         engine.requestNewFrameRender();
       });

@@ -8,6 +8,7 @@ import { LAYER_BUILDER_CONSTANTS } from './types';
 import { playheadState, setMasterAudio } from './PlayheadState';
 import { audioManager, audioStatusTracker } from '../audioManager';
 import { audioRoutingManager } from '../audioRoutingManager';
+import { vfPipelineMonitor } from '../vfPipelineMonitor';
 
 const log = Logger.create('AudioSyncHandler');
 
@@ -102,6 +103,11 @@ export class AudioSyncHandler {
     const targetRate = absSpeed > 0.1 ? absSpeed : 1;
     if (Math.abs(element.playbackRate - targetRate) > 0.01) {
       element.playbackRate = Math.max(0.25, Math.min(4, targetRate));
+      vfPipelineMonitor.record('audio_rate_change', {
+        type,
+        rate: Math.round(targetRate * 100) / 100,
+        clipId: clip.id,
+      });
     }
 
     // Check if we have EQ to apply (any non-zero gain)
@@ -137,6 +143,13 @@ export class AudioSyncHandler {
 
     // Track drift for stats (informational only)
     const timeDiff = element.currentTime - clipTime;
+    if (Math.abs(timeDiff) > 0.05) {
+      vfPipelineMonitor.record('audio_drift', {
+        type,
+        driftMs: Math.round(timeDiff * 1000),
+        clipId: clip.id,
+      });
+    }
     if (Math.abs(timeDiff) > state.maxAudioDrift) {
       state.maxAudioDrift = Math.abs(timeDiff);
     }
@@ -212,6 +225,14 @@ export function finalizeAudioSync(state: AudioSyncState, isPlaying: boolean): vo
     state.maxAudioDrift,
     state.hasAudioError
   );
+
+  // Record to VF pipeline monitor
+  const audioStatus = audioStatusTracker.getStatus();
+  vfPipelineMonitor.record('audio_status', {
+    status: audioStatus.status,
+    playing: audioStatus.playing,
+    driftMs: audioStatus.drift,
+  });
 }
 
 /**
