@@ -19,6 +19,7 @@ import { useMediaStore } from '../../stores/mediaStore';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineControls } from './TimelineControls';
 import { TimelineHeader } from './TimelineHeader';
+import { TrackContextMenu, type TrackContextMenuState } from './TrackContextMenu';
 import { TimelineTrack } from './TimelineTrack';
 import { TimelineClip } from './TimelineClip';
 import { TimelineKeyframes } from './TimelineKeyframes';
@@ -336,6 +337,9 @@ export function Timeline() {
   // Context menu state for clip right-click
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const handleClipContextMenu = useClipContextMenu(selectedClipIds, selectClip, setContextMenu);
+
+  // Context menu state for track header right-click
+  const [trackContextMenu, setTrackContextMenu] = useState<TrackContextMenuState | null>(null);
 
   // Transcript markers visibility toggle (from store for persistence)
   const showTranscriptMarkers = useTimelineStore(s => s.showTranscriptMarkers);
@@ -902,6 +906,17 @@ export function Timeline() {
                     onSetTrackParent={setTrackParent}
                     onTrackPickWhipDragStart={handleTrackPickWhipDragStart}
                     onTrackPickWhipDragEnd={handleTrackPickWhipDragEnd}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setTrackContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        trackId: track.id,
+                        trackType: track.type as 'video' | 'audio',
+                        trackName: track.name,
+                      });
+                    }}
                   />
               );
             })}
@@ -1218,6 +1233,11 @@ export function Timeline() {
         generateWaveformForClip={generateWaveformForClip}
         setMulticamDialogOpen={setMulticamDialogOpen}
         showInExplorer={showInExplorer}
+      />
+
+      <TrackContextMenu
+        menu={trackContextMenu}
+        onClose={() => setTrackContextMenu(null)}
       />
 
       {/* Multicam Dialog */}

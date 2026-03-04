@@ -57,6 +57,8 @@ import {
   handleMoveMediaItems,
   handleCreateComposition,
   handleSelectMediaItems,
+  handleImportLocalFiles,
+  handleListLocalFiles,
 } from './media';
 
 import {
@@ -107,6 +109,12 @@ const mediaHandlers: Record<string, (args: Record<string, unknown>, store: Retur
   moveMediaItems: handleMoveMediaItems,
   createComposition: handleCreateComposition,
   selectMediaItems: handleSelectMediaItems,
+  importLocalFiles: handleImportLocalFiles,
+};
+
+// Self-contained handlers (no store dependency)
+const selfContainedHandlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
+  listLocalFiles: handleListLocalFiles,
 };
 
 // YouTube handlers - self-contained, fetch their own stores
@@ -135,6 +143,11 @@ export async function executeToolInternal(
   // Check media handlers
   if (toolName in mediaHandlers) {
     return mediaHandlers[toolName](args, mediaStore);
+  }
+
+  // Check self-contained handlers (no store dependency)
+  if (toolName in selfContainedHandlers) {
+    return selfContainedHandlers[toolName](args);
   }
 
   // Check YouTube handlers
@@ -190,6 +203,8 @@ export {
   handleMoveMediaItems,
   handleCreateComposition,
   handleSelectMediaItems,
+  handleImportLocalFiles,
+  handleListLocalFiles,
   // YouTube
   handleSearchYouTube,
   handleListVideoFormats,

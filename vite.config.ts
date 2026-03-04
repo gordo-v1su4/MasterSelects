@@ -4,6 +4,116 @@ import { APP_VERSION } from './src/version'
 import fs from 'fs'
 import path from 'path'
 
+// Local File Server - serves local files for AI-driven import
+function localFileServer(): Plugin {
+  return {
+    name: 'local-file-server',
+    configureServer(server) {
+      // Serve a local file by absolute path
+      server.middlewares.use('/api/local-file', (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end('Method not allowed');
+          return;
+        }
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        const filePath = url.searchParams.get('path');
+        if (!filePath) {
+          res.statusCode = 400;
+          res.end('Missing path parameter');
+          return;
+        }
+
+        const resolved = path.resolve(filePath);
+        if (!fs.existsSync(resolved) || fs.statSync(resolved).isDirectory()) {
+          res.statusCode = 404;
+          res.end('File not found');
+          return;
+        }
+
+        const stat = fs.statSync(resolved);
+        const ext = path.extname(resolved).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+          '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
+          '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.aac': 'audio/aac', '.ogg': 'audio/ogg',
+          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+          '.gif': 'image/gif', '.webp': 'image/webp',
+        };
+        res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        // Support range requests for video seeking
+        const range = req.headers.range;
+        if (range) {
+          const parts = range.replace(/bytes=/, '').split('-');
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+          res.statusCode = 206;
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+          res.setHeader('Content-Length', end - start + 1);
+          res.setHeader('Accept-Ranges', 'bytes');
+          fs.createReadStream(resolved, { start, end }).pipe(res);
+        } else {
+          res.setHeader('Content-Length', stat.size);
+          res.setHeader('Accept-Ranges', 'bytes');
+          fs.createReadStream(resolved).pipe(res);
+        }
+      });
+
+      // List media files in a directory
+      server.middlewares.use('/api/local-files', (req, res) => {
+        if (req.method !== 'GET') {
+          res.statusCode = 405;
+          res.end('Method not allowed');
+          return;
+        }
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+        const dirPath = url.searchParams.get('dir');
+        const extFilter = url.searchParams.get('ext')?.split(',') ||
+          ['.mp4', '.webm', '.mov', '.mkv', '.avi', '.mp3', '.wav', '.png', '.jpg', '.jpeg'];
+
+        if (!dirPath) {
+          res.statusCode = 400;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Missing dir parameter' }));
+          return;
+        }
+
+        const resolved = path.resolve(dirPath);
+        if (!fs.existsSync(resolved)) {
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Directory not found' }));
+          return;
+        }
+
+        try {
+          const entries = fs.readdirSync(resolved);
+          const files = entries
+            .filter(f => extFilter.some(ext => f.toLowerCase().endsWith(ext)))
+            .map(f => {
+              const fullPath = path.join(resolved, f);
+              const stat = fs.statSync(fullPath);
+              return {
+                name: f,
+                path: fullPath.replace(/\\/g, '/'),
+                size: stat.size,
+                modified: stat.mtime.toISOString(),
+              };
+            });
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ files }));
+        } catch {
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Failed to list directory' }));
+        }
+      });
+    },
+  };
+}
+
 // Browser Log Bridge - allows AI agents to read browser console logs
 function browserLogBridge(): Plugin {
   const logFile = path.resolve(__dirname, '.browser-logs.json');
@@ -51,6 +161,7 @@ function browserLogBridge(): Plugin {
 export default defineConfig(({ command, mode }) => ({
   plugins: [
     react(),
+    localFileServer(),
     browserLogBridge(),
     // Replace __APP_VERSION__ in index.html during build
     {

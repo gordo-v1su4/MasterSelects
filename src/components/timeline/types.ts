@@ -155,6 +155,7 @@ export interface TimelineHeaderProps {
   onToggleMuted: () => void;
   onToggleVisible: () => void;
   onRenameTrack: (name: string) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   onWheel: (e: React.WheelEvent) => void;
   // For property labels - clipKeyframes map triggers re-render when keyframes change
   clipKeyframes: Map<string, Array<{ id: string; clipId: string; time: number; property: AnimatableProperty; value: number; easing: string }>>;
