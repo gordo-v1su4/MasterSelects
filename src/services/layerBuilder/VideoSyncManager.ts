@@ -42,6 +42,17 @@ export class VideoSyncManager {
   private latestSeekTargets: Record<string, number> = {};
 
   /**
+   * Clamp seek time to valid range, preventing EOF decoder stalls.
+   * H.264 B-frame decoders stall when seeking to exactly video.duration
+   * because they wait for reference frames that don't exist.
+   */
+  private safeSeekTime(video: HTMLVideoElement, time: number): number {
+    const dur = video.duration;
+    if (!isFinite(dur) || dur <= 0) return Math.max(0, time);
+    return Math.max(0, Math.min(time, dur - 0.001));
+  }
+
+  /**
    * Sync video elements to current playhead
    */
   syncVideoElements(): void {
@@ -143,7 +154,7 @@ export class VideoSyncManager {
         }
         // Only seek if significantly out of sync (>0.5s)
         if (timeDiff > 0.5) {
-          video.currentTime = nestedClipTime;
+          video.currentTime = this.safeSeekTime(video, nestedClipTime);
         }
       } else {
         // When paused: pause video and seek to exact time
@@ -275,7 +286,7 @@ export class VideoSyncManager {
             // Frame is now presented to GPU — capture it
             engine.ensureVideoFrameCached(video);
             video.pause();
-            video.currentTime = targetTime;
+            video.currentTime = this.safeSeekTime(video, targetTime);
             this.warmingUpVideos.delete(video);
             engine.requestRender();
           });
@@ -284,7 +295,7 @@ export class VideoSyncManager {
           setTimeout(() => {
             engine.ensureVideoFrameCached(video);
             video.pause();
-            video.currentTime = targetTime;
+            video.currentTime = this.safeSeekTime(video, targetTime);
             this.warmingUpVideos.delete(video);
             engine.requestRender();
           }, 100);
@@ -352,13 +363,13 @@ export class VideoSyncManager {
           // an unnecessary seek forces the decoder to re-decode from the last
           // keyframe which causes a visible backward jitter on long-GOP codecs.
           if (timeDiff > 0.05) {
-            video.currentTime = timeInfo.clipTime;
+            video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
           }
           video.play().catch(() => {});
         }
         // Drift correction during playback (especially needed for speed-adjusted clips)
         if (timeDiff > 0.3) {
-          video.currentTime = timeInfo.clipTime;
+          video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
         }
       } else {
         // Playing → Paused transition: snap playhead to where the video actually is
@@ -440,7 +451,7 @@ export class VideoSyncManager {
         // Phase 1: Instant keyframe feedback via fastSeek.
         // For all-intra codecs this IS the exact frame. For long-GOP codecs
         // this shows the nearest keyframe — better than a stale cached frame.
-        video.fastSeek(time);
+        video.fastSeek(this.safeSeekTime(video, time));
 
         // Phase 2: Schedule deferred precise seek for exact frame.
         // Debounced: resets on each new scrub position, only fires when
@@ -452,14 +463,14 @@ export class VideoSyncManager {
           // Only do precise seek if the fastSeek landed far from the target
           // (i.e., this is a long-GOP video where fastSeek shows a different frame)
           if (target !== undefined && Math.abs(video.currentTime - target) > 0.01) {
-            video.currentTime = target;
+            video.currentTime = this.safeSeekTime(video, target);
             // Register RVFC for when the precise frame arrives
             this.registerRVFC(clipId, video);
           }
         }, 120);
       } else {
         // Not dragging: precise seek immediately (click, arrow keys, etc.)
-        video.currentTime = time;
+        video.currentTime = this.safeSeekTime(video, time);
         clearTimeout(this.preciseSeekTimers[clipId]);
       }
       this.lastSeekRef[clipId] = ctx.now;

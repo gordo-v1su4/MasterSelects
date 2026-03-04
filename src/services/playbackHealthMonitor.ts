@@ -268,6 +268,14 @@ export class PlaybackHealthMonitor {
 
   private recoverFrameStall(video: HTMLVideoElement): void {
     const time = video.currentTime;
+    const dur = video.duration;
+    // EOF stall: seeking past end is futile — clamp back
+    if (isFinite(dur) && time >= dur - 0.002) {
+      video.currentTime = dur - 0.001;
+      engine.requestRender();
+      return;
+    }
+    // Normal mid-file recovery
     video.play().then(() => {
       video.pause();
       video.currentTime = time;
