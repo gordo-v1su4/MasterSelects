@@ -71,6 +71,10 @@ export class WebCodecsPlayer implements ExportModePlayer {
   private pendingDecodeFirstFrame = false;
   private loadResolve: (() => void) | null = null;
 
+  // CTS-sorted sample index for O(log n) time lookup (built lazily)
+  private ctsSorted: { idx: number; cts: number }[] = [];
+  private ctsSortedSampleCount = 0;
+
   // ExportModePlayer interface implementation
   getDecoder(): VideoDecoder | null { return this.decoder; }
   getSamples(): Sample[] { return this.samples; }
@@ -751,6 +755,140 @@ export class WebCodecsPlayer implements ExportModePlayer {
     this.frameBuffer.length = 0;
   }
 
+  // === Render-loop-driven playback (replaces internal animation loop) ===
+
+  /** Lazy-build CTS-sorted index for O(log n) sample lookup */
+  private ensureCtsIndex(): void {
+    if (this.ctsSortedSampleCount === this.samples.length) return;
+    this.ctsSorted = this.samples.map((s, i) => ({ idx: i, cts: s.cts }));
+    this.ctsSorted.sort((a, b) => a.cts - b.cts);
+    this.ctsSortedSampleCount = this.samples.length;
+  }
+
+  /** Binary search for sample index whose CTS is closest to target */
+  private findSampleNearCts(targetCts: number): number {
+    this.ensureCtsIndex();
+    const sorted = this.ctsSorted;
+    if (sorted.length === 0) return 0;
+
+    let lo = 0, hi = sorted.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid].cts < targetCts) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(sorted[lo - 1].cts - targetCts) < Math.abs(sorted[lo].cts - targetCts)) {
+      return sorted[lo - 1].idx;
+    }
+    return sorted[lo].idx;
+  }
+
+  /** Find nearest keyframe at or before the given sample index (DTS order) */
+  private findKeyframeBefore(sampleIndex: number): number {
+    for (let i = Math.min(sampleIndex, this.samples.length - 1); i >= 0; i--) {
+      if (this.samples[i].is_sync) return i;
+    }
+    return 0;
+  }
+
+  /**
+   * Advance playback to the given source time.
+   * Called by the render loop each frame instead of an internal animation loop.
+   * Handles: decoder feeding, timestamp-based frame selection, position tracking.
+   */
+  advanceToTime(timeSeconds: number): void {
+    if (this.useSimpleMode || !this.decoder || this.samples.length === 0 || !this.videoTrack) return;
+
+    // Auto-enter playing state so decoder output routes to frame buffer
+    if (!this._isPlaying) {
+      this._isPlaying = true;
+      this.clearFrameBuffer();
+      if (this.feedIndex < this.sampleIndex) {
+        this.feedIndex = this.sampleIndex;
+      }
+    }
+
+    // Cancel internal animation loop if running — we're externally driven
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+
+    const targetCts = timeSeconds * this.videoTrack.timescale;
+    const targetIdx = this.findSampleNearCts(targetCts);
+    const targetUs = timeSeconds * 1_000_000;
+
+    // Check if decoder needs repositioning:
+    // - target is behind current position (backward jump)
+    // - target is far ahead of what we've fed (gap/skip/clip start)
+    const needsSeek = targetIdx < this.sampleIndex - 1 ||
+                      targetIdx > this.feedIndex + Math.ceil(this.frameRate);
+
+    if (needsSeek) {
+      const keyframe = this.findKeyframeBefore(targetIdx);
+      this.decoder.reset();
+      this.decoder.configure(this.codecConfig!);
+      this.clearFrameBuffer();
+      this.feedIndex = keyframe;
+      wcPipelineMonitor.record('advance_seek', {
+        target: timeSeconds,
+        keyframeDist: targetIdx - keyframe,
+      });
+    }
+
+    // Pump decoder: feed samples ahead of target position
+    const feedTarget = Math.min(
+      targetIdx + WebCodecsPlayer.FEED_LOOKAHEAD,
+      this.samples.length
+    );
+    while (
+      this.feedIndex < feedTarget &&
+      this.decoder.decodeQueueSize < WebCodecsPlayer.FEED_QUEUE_TARGET
+    ) {
+      const sample = this.samples[this.feedIndex];
+      const chunk = new EncodedVideoChunk({
+        type: sample.is_sync ? 'key' : 'delta',
+        timestamp: (sample.cts * 1_000_000) / sample.timescale,
+        duration: (sample.duration * 1_000_000) / sample.timescale,
+        data: sample.data,
+      });
+      try {
+        this.decoder.decode(chunk);
+      } catch { /* skip decode errors */ }
+      this.feedIndex++;
+    }
+
+    this.sampleIndex = targetIdx;
+
+    // Pick the frame closest to target time from the decode buffer
+    if (this.frameBuffer.length > 0) {
+      let bestIdx = 0;
+      let bestDiff = Math.abs(this.frameBuffer[0].timestamp - targetUs);
+      for (let i = 1; i < this.frameBuffer.length; i++) {
+        const diff = Math.abs(this.frameBuffer[i].timestamp - targetUs);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestIdx = i;
+        }
+      }
+
+      // Close frames before the best one (they're in the past)
+      for (let i = 0; i < bestIdx; i++) {
+        this.frameBuffer[i].close();
+      }
+
+      const frame = this.frameBuffer[bestIdx];
+      if (this.currentFrame && this.currentFrame !== frame) {
+        this.currentFrame.close();
+      }
+      this.currentFrame = frame;
+      this.onFrame?.(frame);
+
+      // Remove consumed frames from buffer
+      this.frameBuffer.splice(0, bestIdx + 1);
+    }
+  }
+
   private decodeFirstFrame(): void {
     if (!this.decoder || this.samples.length === 0) return;
 
@@ -814,28 +952,9 @@ export class WebCodecsPlayer implements ExportModePlayer {
     const seekStart = performance.now();
     const targetTime = timeSeconds * this.videoTrack.timescale;
 
-    // Find sample with CTS closest to target time
-    // IMPORTANT: Samples are in DECODE order (DTS), not presentation order (CTS)
-    // due to B-frame reordering. We must search for closest CTS match.
-    let targetIndex = 0;
-    let closestDiff = Infinity;
-
-    for (let i = 0; i < this.samples.length; i++) {
-      const diff = Math.abs(this.samples[i].cts - targetTime);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        targetIndex = i;
-      }
-    }
-
-    // Find the nearest keyframe before the target sample (in decode order)
-    let keyframeIndex = 0;
-    for (let i = 0; i <= targetIndex; i++) {
-      if (this.samples[i].is_sync) {
-        keyframeIndex = i;
-      }
-    }
-
+    // Binary search for closest CTS match (O(log n) instead of O(n))
+    const targetIndex = this.findSampleNearCts(targetTime);
+    const keyframeIndex = this.findKeyframeBefore(targetIndex);
     const framesDecoded = targetIndex - keyframeIndex + 1;
     wcPipelineMonitor.record('seek_start', {
       target: timeSeconds,
@@ -899,16 +1018,17 @@ export class WebCodecsPlayer implements ExportModePlayer {
 
     const targetTime = timeSeconds * this.videoTrack.timescale;
 
-    // Find nearest keyframe (before or after target for closest match)
-    let bestKeyframe = 0;
-    let bestDiff = Infinity;
-    for (let i = 0; i < this.samples.length; i++) {
+    // Find nearest keyframe: check before AND after target for closest match
+    const targetIdx = this.findSampleNearCts(targetTime);
+    const kfBefore = this.findKeyframeBefore(targetIdx);
+    let bestKeyframe = kfBefore;
+    // Check if a keyframe after target is closer
+    for (let i = targetIdx + 1; i < this.samples.length; i++) {
       if (this.samples[i].is_sync) {
-        const diff = Math.abs(this.samples[i].cts - targetTime);
-        if (diff < bestDiff) {
-          bestDiff = diff;
+        if (Math.abs(this.samples[i].cts - targetTime) < Math.abs(this.samples[kfBefore].cts - targetTime)) {
           bestKeyframe = i;
         }
+        break;
       }
     }
 
@@ -1036,27 +1156,9 @@ export class WebCodecsPlayer implements ExportModePlayer {
 
     const targetTime = timeSeconds * this.videoTrack.timescale;
 
-    // Find sample with CTS closest to target time
-    // IMPORTANT: Samples are in DECODE order (DTS), not presentation order (CTS)
-    // due to B-frame reordering. We must search for closest CTS match.
-    let targetIndex = 0;
-    let closestDiff = Infinity;
-
-    for (let i = 0; i < this.samples.length; i++) {
-      const diff = Math.abs(this.samples[i].cts - targetTime);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        targetIndex = i;
-      }
-    }
-
-    // Find the nearest keyframe before the target sample (in decode order)
-    let keyframeIndex = 0;
-    for (let i = 0; i <= targetIndex; i++) {
-      if (this.samples[i].is_sync) {
-        keyframeIndex = i;
-      }
-    }
+    // Binary search for closest CTS match
+    const targetIndex = this.findSampleNearCts(targetTime);
+    const keyframeIndex = this.findKeyframeBefore(targetIndex);
 
     // Reset decoder
     this.decoder.reset();

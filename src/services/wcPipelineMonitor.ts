@@ -14,7 +14,8 @@ export type PipelineEventType =
   | 'stall'
   | 'rAF_gap'
   | 'play'
-  | 'pause';
+  | 'pause'
+  | 'advance_seek';
 
 export interface PipelineEvent {
   type: PipelineEventType;
