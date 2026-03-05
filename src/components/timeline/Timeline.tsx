@@ -449,16 +449,22 @@ export function Timeline() {
     return () => window.removeEventListener('resize', updateViewportHeight);
   }, []);
 
-  // Auto-scroll to bottom when audio drop zone appears during drag
+  // Auto-scroll to show relevant drop zone during drag
   useEffect(() => {
     if (!externalDrag) return;
-    // Audio drop zone is visible when dragging audio files or videos with audio
-    const audioDropZoneVisible = externalDrag.isAudio || externalDrag.hasAudio !== false;
-    if (audioDropZoneVisible && contentRef.current) {
-      const actualHeight = contentRef.current.scrollHeight;
-      const maxScroll = Math.max(0, actualHeight - viewportHeight);
-      if (maxScroll > scrollY) {
-        setScrollY(maxScroll);
+    if (externalDrag.isAudio) {
+      // Audio files: scroll to bottom to show audio drop zone
+      if (contentRef.current) {
+        const actualHeight = contentRef.current.scrollHeight;
+        const maxScroll = Math.max(0, actualHeight - viewportHeight);
+        if (maxScroll > scrollY) {
+          setScrollY(maxScroll);
+        }
+      }
+    } else {
+      // Video files: scroll to top to show video drop zone
+      if (scrollY > 0) {
+        setScrollY(0);
       }
     }
   }, [externalDrag, contentHeight, viewportHeight, scrollY]);
