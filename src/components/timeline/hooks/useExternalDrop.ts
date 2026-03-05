@@ -114,15 +114,12 @@ export function useExternalDrop({
 
       if (e.dataTransfer.types.includes('application/x-media-file-id')) {
         const isAudioDrag = e.dataTransfer.types.includes('application/x-media-is-audio');
-        // Audio files only on audio tracks, non-audio only on video tracks
+        // Audio-only files can only go on audio tracks
         if (isAudioDrag && isVideoTrack) {
           setExternalDrag((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { trackId: '', startTime, x: e.clientX, y: e.clientY, duration: 5, isVideo: false, isAudio: true });
           return;
         }
-        if (!isAudioDrag && isAudioTrack) {
-          setExternalDrag((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : { trackId: '', startTime, x: e.clientX, y: e.clientY, duration: 5, isVideo: true });
-          return;
-        }
+        // Video+audio files are allowed on both track types (linked preview on the other)
         setExternalDrag({ trackId, startTime, x: e.clientX, y: e.clientY, duration: 5, isVideo: !isAudioDrag, isAudio: isAudioDrag });
         return;
       }
@@ -220,7 +217,7 @@ export function useExternalDrop({
         // Detect audio-only drag (from media panel marker or from externalDrag state)
         const isAudioDrag = e.dataTransfer.types.includes('application/x-media-is-audio') || externalDrag?.isAudio;
 
-        // Audio files can only go on audio tracks
+        // Audio-only files can only go on audio tracks
         if (isAudioDrag && isVideoTrack) {
           e.dataTransfer.dropEffect = 'none';
           // Keep externalDrag alive (so drop zones stay visible) but clear trackId
@@ -240,13 +237,14 @@ export function useExternalDrop({
 
         // Check if video has audio - default to true if not yet determined
         const videoHasAudio = externalDrag?.hasAudio ?? dragMetadataCacheRef.current?.hasAudio ?? true;
+        const endTime = startTime + previewDuration;
 
         let audioTrackId: string | undefined;
-        // Only show audio preview if video has audio tracks
-        if (isVideoTrack && videoHasAudio) {
-          const audioTracks = tracks.filter((t) => t.type === 'audio');
-          const endTime = startTime + previewDuration;
+        let videoTrackId: string | undefined;
 
+        if (isVideoTrack && videoHasAudio) {
+          // Hovering video track → find audio track for linked audio preview
+          const audioTracks = tracks.filter((t) => t.type === 'audio');
           for (const aTrack of audioTracks) {
             const trackClips = clips.filter((c) => c.trackId === aTrack.id);
             const hasOverlap = trackClips.some((clip) => {
@@ -261,6 +259,23 @@ export function useExternalDrop({
           if (!audioTrackId) {
             audioTrackId = '__new_audio_track__';
           }
+        } else if (isAudioTrack && !isAudioDrag) {
+          // Hovering audio track with video+audio file → find video track for linked video preview
+          const videoTracks = tracks.filter((t) => t.type === 'video');
+          for (const vTrack of videoTracks) {
+            const trackClips = clips.filter((c) => c.trackId === vTrack.id);
+            const hasOverlap = trackClips.some((clip) => {
+              const clipEnd = clip.startTime + clip.duration;
+              return !(endTime <= clip.startTime || startTime >= clipEnd);
+            });
+            if (!hasOverlap) {
+              videoTrackId = vTrack.id;
+              break;
+            }
+          }
+          if (!videoTrackId) {
+            videoTrackId = '__new_video_track__';
+          }
         }
 
         setExternalDrag((prev) => ({
@@ -269,7 +284,8 @@ export function useExternalDrop({
           x: e.clientX,
           y: e.clientY,
           audioTrackId,
-          isVideo: isVideoTrack,
+          videoTrackId,
+          isVideo: prev?.isVideo ?? !isAudioDrag,
           isAudio: prev?.isAudio ?? isAudioDrag,
           hasAudio: prev?.hasAudio ?? dragMetadataCacheRef.current?.hasAudio,
           duration: prev?.duration ?? dragMetadataCacheRef.current?.duration,
@@ -531,14 +547,12 @@ export function useExternalDrop({
         const mediaFile = mediaStore.files.find((f) => f.id === mediaFileId);
         if (mediaFile?.file) {
           const fileIsAudio = isAudioFile(mediaFile.file);
+          // Audio-only files can only go on audio tracks
           if (fileIsAudio && isVideoTrack) {
             log.debug('Audio files can only be dropped on audio tracks');
             return;
           }
-          if (!fileIsAudio && isAudioTrack) {
-            log.debug('Video/image files can only be dropped on video tracks');
-            return;
-          }
+          // Video+audio files are allowed on both track types
 
           const rect = e.currentTarget.getBoundingClientRect();
           const x = e.clientX - rect.left + scrollX;
@@ -577,14 +591,10 @@ export function useExternalDrop({
                 }
                 log.debug('File from handle:', { name: file.name, type: file.type, size: file.size, path: filePath });
                 if (isMediaFile(file)) {
-                  // Validate track type
+                  // Audio-only files can only go on audio tracks
                   const fileIsAudio = isAudioFile(file);
                   if (fileIsAudio && isVideoTrack) {
                     log.debug('Audio files can only be dropped on audio tracks');
-                    return;
-                  }
-                  if (!fileIsAudio && isAudioTrack) {
-                    log.debug('Video/image files can only be dropped on video tracks');
                     return;
                   }
 
@@ -608,13 +618,10 @@ export function useExternalDrop({
           }
           log.debug('Fallback file:', { name: file?.name, type: file?.type, path: filePath });
           if (file && isMediaFile(file)) {
+            // Audio-only files can only go on audio tracks
             const fileIsAudio = isAudioFile(file);
             if (fileIsAudio && isVideoTrack) {
               log.debug('Audio files can only be dropped on audio tracks');
-              return;
-            }
-            if (!fileIsAudio && isAudioTrack) {
-              log.debug('Video/image files can only be dropped on video tracks');
               return;
             }
 

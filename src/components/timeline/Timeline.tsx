@@ -1016,7 +1016,8 @@ export function Timeline() {
                 isDragTarget={clipDrag?.currentTrackId === track.id}
                 isExternalDragTarget={
                   externalDrag?.trackId === track.id ||
-                  externalDrag?.audioTrackId === track.id
+                  externalDrag?.audioTrackId === track.id ||
+                  externalDrag?.videoTrackId === track.id
                 }
                 selectedClipIds={selectedClipIds}
                 selectedKeyframeIds={selectedKeyframeIds}
@@ -1062,13 +1063,29 @@ export function Timeline() {
             getExpandedTrackHeight={getExpandedTrackHeight}
           />
 
+          {/* New video track preview for linked audio-to-video */}
+          {/* When hovering audio track, show linked video preview as new track */}
+          {externalDrag &&
+            externalDrag.videoTrackId === '__new_video_track__' && (
+              <div className="track-lane video new-track-preview" style={{ height: 60 }}>
+                <div
+                  className="timeline-clip-preview video"
+                  style={{
+                    left: timeToPixel(externalDrag.startTime),
+                    width: timeToPixel(externalDrag.duration ?? 5),
+                  }}
+                >
+                  <div className="clip-content">
+                    <span className="clip-name">+ New Video Track</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
           {/* New audio track preview for linked video audio */}
           {/* Only show if video has audio (hasAudio !== false) */}
           {externalDrag &&
-            externalDrag.isVideo &&
-            externalDrag.hasAudio !== false &&
-            externalDrag.audioTrackId === '__new_audio_track__' &&
-            externalDrag.newTrackType !== 'video' && (
+            externalDrag.audioTrackId === '__new_audio_track__' && (
               <div className="track-lane audio new-track-preview" style={{ height: 40 }}>
                 <div
                   className="timeline-clip-preview audio"

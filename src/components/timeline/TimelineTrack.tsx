@@ -187,9 +187,8 @@ function TimelineTrackComponent({
             </div>
           </div>
         )}
-        {/* External file drag preview - linked audio clip */}
+        {/* External file drag preview - linked audio clip (when hovering video track) */}
         {externalDrag &&
-          externalDrag.isVideo &&
           externalDrag.audioTrackId === track.id && (
             <div
               className="timeline-clip-preview audio"
@@ -200,6 +199,21 @@ function TimelineTrackComponent({
             >
               <div className="clip-content">
                 <span className="clip-name">Audio</span>
+              </div>
+            </div>
+          )}
+        {/* External file drag preview - linked video clip (when hovering audio track) */}
+        {externalDrag &&
+          externalDrag.videoTrackId === track.id && (
+            <div
+              className="timeline-clip-preview video"
+              style={{
+                left: timeToPixel(externalDrag.startTime),
+                width: timeToPixel(externalDrag.duration ?? 5),
+              }}
+            >
+              <div className="clip-content">
+                <span className="clip-name">Video</span>
               </div>
             </div>
           )}

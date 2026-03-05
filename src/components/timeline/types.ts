@@ -57,7 +57,8 @@ export interface ExternalDragState {
   startTime: number;
   x: number;
   y: number;
-  audioTrackId?: string;  // Preview for linked audio clip
+  audioTrackId?: string;  // Preview for linked audio clip (when hovering video track)
+  videoTrackId?: string;  // Preview for linked video clip (when hovering audio track)
   isVideo?: boolean;      // Is the dragged file a video?
   isAudio?: boolean;      // Is the dragged file audio-only?
   hasAudio?: boolean;     // Does the video file have audio tracks?
