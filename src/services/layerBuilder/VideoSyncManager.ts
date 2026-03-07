@@ -358,14 +358,15 @@ export class VideoSyncManager {
       return;
     }
 
-    if (!clip.source?.videoElement) return;
-
     // Full-mode WebCodecs: player handles its own decode loop,
-    // HTMLVideoElement is only used for audio. Sync both.
-    if (clip.source.webCodecsPlayer?.isFullMode()) {
+    // HTMLVideoElement is only used for audio. Can sync even without videoElement
+    // (fast-attach path sets WCP before canplaythrough).
+    if (clip.source?.webCodecsPlayer?.isFullMode()) {
       this.syncFullWebCodecs(clip, ctx);
       return;
     }
+
+    if (!clip.source?.videoElement) return;
 
     // Use handoff element if available (seamless cut transition)
     const video = this.activeHandoffs.get(clip.id) ?? clip.source.videoElement;
@@ -784,7 +785,7 @@ export class VideoSyncManager {
    * The HTMLVideoElement is kept for audio playback.
    */
   private syncFullWebCodecs(clip: TimelineClip, ctx: FrameContext): void {
-    const video = clip.source!.videoElement!;
+    const video = clip.source!.videoElement; // May be undefined (fast-attach before canplaythrough)
     const wcp = clip.source!.webCodecsPlayer!;
     const timeInfo = getClipTimeInfo(ctx, clip);
 
@@ -796,16 +797,18 @@ export class VideoSyncManager {
       // No internal animation loop — advanceToTime handles decode feeding + frame selection.
       wcp.advanceToTime(timeInfo.clipTime);
 
-      // Keep video element in sync (muted, but may serve as audio fallback)
-      if (video.paused) video.play().catch(() => {});
-      const audioDrift = Math.abs(video.currentTime - timeInfo.clipTime);
-      if (audioDrift > 0.3) {
-        video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
+      // Keep video element in sync for audio (if available)
+      if (video) {
+        if (video.paused) video.play().catch(() => {});
+        const audioDrift = Math.abs(video.currentTime - timeInfo.clipTime);
+        if (audioDrift > 0.3) {
+          video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
+        }
       }
     } else {
       // Paused: stop decode loop, seek to frame
       if (wcp.isPlaying) wcp.pause();
-      if (!video.paused) video.pause();
+      if (video && !video.paused) video.pause();
 
       // Use pending seek target if one is in flight — avoids resetting the decoder
       // repeatedly before it can output a frame (seek resets decoder each call).
@@ -828,10 +831,15 @@ export class VideoSyncManager {
           wcp.seek(timeInfo.clipTime);
         }
       }
-      // Keep audio element at same position
-      const timeDiff = Math.abs(video.currentTime - timeInfo.clipTime);
-      if (timeDiff > 0.05) {
-        video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
+      // Keep audio element at same position — but NOT during scrubbing.
+      // video.currentTime triggers the browser's internal decoder (heavy for long-GOP).
+      // During scrubbing, audio feedback is handled by proxyFrameCache.playScrubAudio()
+      // via Web Audio API, so the video element seek is wasted work.
+      if (video && !ctx.isDraggingPlayhead) {
+        const timeDiff = Math.abs(video.currentTime - timeInfo.clipTime);
+        if (timeDiff > 0.05) {
+          video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
+        }
       }
     }
   }
