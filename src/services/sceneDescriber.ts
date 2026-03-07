@@ -8,11 +8,9 @@ import type { SceneSegment, SceneDescriptionStatus } from '../types';
 const log = Logger.create('SceneDescriber');
 
 const OLLAMA_URL = 'http://localhost:11434';
-const MODEL = 'qwen3.5:9b';
+const MODEL = 'qwen3-vl:8b';
 // Sample every N seconds for frame extraction
-const SAMPLE_INTERVAL_SEC = 3;
-// How many frames to send per batch to the model
-const FRAMES_PER_BATCH = 6;
+const SAMPLE_INTERVAL_SEC = 2;
 // Canvas size for frame capture (smaller = faster, less VRAM)
 const CAPTURE_WIDTH = 512;
 const CAPTURE_HEIGHT = 288;
@@ -31,7 +29,7 @@ export async function checkOllamaStatus(): Promise<{ available: boolean; modelLo
 
     const data = await response.json();
     const models = data.models || [];
-    const hasModel = models.some((m: { name: string }) => m.name.startsWith('qwen3.5'));
+    const hasModel = models.some((m: { name: string }) => m.name.startsWith('qwen3-vl'));
 
     return { available: true, modelLoaded: hasModel };
   } catch {
@@ -72,25 +70,27 @@ function extractFrameAsBase64(
 }
 
 /**
- * Send frames to Ollama and get scene description
+ * Send a single frame to Ollama and get scene description
+ * Qwen3-VL works best with one image per request for reliable output
  */
-async function describeFrameBatch(
-  frames: { base64: string; timestamp: number }[],
-  isFirstBatch: boolean,
+async function describeSingleFrame(
+  frame: { base64: string; timestamp: number },
+  prevDescription: string,
+  totalDuration: number,
 ): Promise<string> {
-  const timeLabels = frames.map(f => {
-    const mins = Math.floor(f.timestamp / 60);
-    const secs = Math.floor(f.timestamp % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }).join(', ');
+  const mins = Math.floor(frame.timestamp / 60);
+  const secs = Math.floor(frame.timestamp % 60);
+  const timeLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
 
-  const prompt = isFirstBatch
-    ? `These are ${frames.length} frames from a video at timestamps: ${timeLabels}. ` +
-      `Describe what happens in each frame concisely. For each frame write exactly one line in this format:\n` +
-      `[MM:SS] Description of what is visible.\n` +
-      `Focus on actions, people, objects, camera movement, and scene changes. Be specific and brief (max 20 words per line). Do not add any other text.`
-    : `Continuation - ${frames.length} more frames at timestamps: ${timeLabels}. ` +
-      `Same format: [MM:SS] Description. One line per frame, max 20 words each. No other text.`;
+  const contextHint = prevDescription
+    ? `Previous scene was: "${prevDescription}". `
+    : '';
+
+  const prompt = `/no_think\nThis is a frame from a video (${Math.round(totalDuration)}s total) at timestamp ${timeLabel}. ` +
+    `${contextHint}` +
+    `Describe what is happening in this frame in ONE concise sentence (max 20 words). ` +
+    `Focus on actions, subjects, camera angle, and any motion you can infer. ` +
+    `Output ONLY the description, nothing else.`;
 
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
@@ -100,10 +100,9 @@ async function describeFrameBatch(
       messages: [{
         role: 'user',
         content: prompt,
-        images: frames.map(f => f.base64),
+        images: [frame.base64],
       }],
       stream: false,
-      think: false,
       options: {
         num_predict: 512,
         temperature: 0.3,
@@ -117,50 +116,20 @@ async function describeFrameBatch(
   }
 
   const data = await response.json();
-  return data.message?.content || '';
-}
+  let content = data.message?.content || '';
 
-/**
- * Parse model response into SceneSegment objects
- */
-function parseResponse(
-  text: string,
-  frameTimestamps: number[],
-  segmentInterval: number,
-): SceneSegment[] {
-  const segments: SceneSegment[] = [];
-  const lines = text.split('\n').filter(l => l.trim());
-
-  for (const line of lines) {
-    // Match patterns like [0:00], [00:00], [1:30], etc.
-    const match = line.match(/\[(\d{1,2}):(\d{2})\]\s*(.+)/);
-    if (!match) continue;
-
-    const mins = parseInt(match[1], 10);
-    const secs = parseInt(match[2], 10);
-    const description = match[3].trim();
-    const timestamp = mins * 60 + secs;
-
-    // Find the closest frame timestamp
-    let closest = frameTimestamps[0];
-    let minDist = Math.abs(closest - timestamp);
-    for (const ft of frameTimestamps) {
-      const dist = Math.abs(ft - timestamp);
-      if (dist < minDist) {
-        minDist = dist;
-        closest = ft;
-      }
+  // Fallback: if content empty but thinking has useful text, extract it
+  if (!content.trim() && data.message?.thinking) {
+    const thinking = data.message.thinking as string;
+    // Try to find a descriptive sentence in the thinking
+    const sentences = thinking.split(/[.!]\s/).filter(s => s.trim().length > 10);
+    if (sentences.length > 0) {
+      content = sentences[sentences.length - 1].trim();
+      if (!content.endsWith('.')) content += '.';
     }
-
-    segments.push({
-      id: `scene-${segments.length}`,
-      text: description,
-      start: closest,
-      end: closest + segmentInterval,
-    });
   }
 
-  return segments;
+  return content.trim();
 }
 
 /**
@@ -300,46 +269,36 @@ export async function describeClip(clipId: string): Promise<void> {
       });
     }
 
-    // Process in batches
+    // Process frame by frame (Qwen3-VL works best with single images)
     const allSegments: SceneSegment[] = [];
-    const totalBatches = Math.ceil(frames.length / FRAMES_PER_BATCH);
+    let prevDescription = '';
 
-    for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+    for (let i = 0; i < frames.length; i++) {
       if (shouldCancel) throw new Error('Cancelled');
 
-      const batchStart = batchIdx * FRAMES_PER_BATCH;
-      const batchFrames = frames.slice(batchStart, batchStart + FRAMES_PER_BATCH);
-
       updateClipSceneDescription(clipId, {
-        progress: Math.round(40 + (50 * batchIdx / totalBatches)),
-        message: `AI analyzing batch ${batchIdx + 1}/${totalBatches}...`,
+        progress: Math.round(40 + (50 * (i + 1) / frames.length)),
+        message: `AI analyzing frame ${i + 1}/${frames.length}...`,
       });
 
-      log.info(`Sending batch ${batchIdx + 1}/${totalBatches} (${batchFrames.length} frames) to Ollama`);
+      log.info(`Describing frame ${i + 1}/${frames.length} at ${frames[i].timestamp.toFixed(1)}s`);
 
-      const response = await describeFrameBatch(batchFrames, batchIdx === 0);
-      const batchTimestamps = batchFrames.map(f => f.timestamp);
-      const batchSegments = parseResponse(response, batchTimestamps, SAMPLE_INTERVAL_SEC);
+      const description = await describeSingleFrame(frames[i], prevDescription, clipDuration);
 
-      // If parsing failed, create segments from raw response lines
-      if (batchSegments.length === 0 && response.trim()) {
-        const lines = response.split('\n').filter(l => l.trim());
-        for (let i = 0; i < Math.min(lines.length, batchFrames.length); i++) {
-          batchSegments.push({
-            id: `scene-${allSegments.length + i}`,
-            text: lines[i].replace(/^\[.*?\]\s*/, '').trim(),
-            start: batchFrames[i].timestamp,
-            end: batchFrames[i].timestamp + SAMPLE_INTERVAL_SEC,
-          });
-        }
+      if (description) {
+        allSegments.push({
+          id: `scene-${allSegments.length}`,
+          text: description,
+          start: frames[i].timestamp,
+          end: frames[i].timestamp + SAMPLE_INTERVAL_SEC,
+        });
+        prevDescription = description;
+
+        // Update with partial results
+        updateClipSceneDescription(clipId, {
+          segments: [...allSegments],
+        });
       }
-
-      allSegments.push(...batchSegments);
-
-      // Update with partial results
-      updateClipSceneDescription(clipId, {
-        segments: allSegments.map((s, i) => ({ ...s, id: `scene-${i}` })),
-      });
     }
 
     // Finalize: adjust end times so segments don't overlap

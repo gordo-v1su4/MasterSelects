@@ -282,7 +282,7 @@ export function SceneDescriptionPanel() {
       {/* Footer */}
       <div className="scene-description-footer">
         <span className="scene-description-hint">
-          Click segment to seek. Powered by Ollama ({descStatus === 'ready' ? 'local AI' : 'qwen3.5:9b'}).
+          Click segment to seek. Powered by Ollama ({descStatus === 'ready' ? 'local AI' : 'qwen3-vl:8b'}).
         </span>
       </div>
     </div>
