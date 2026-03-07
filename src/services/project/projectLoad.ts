@@ -21,6 +21,25 @@ import { projectDB } from '../projectDB';
 
 const log = Logger.create('ProjectSync');
 
+/**
+ * Calculate coverage ratio from time ranges vs total duration (0-1).
+ */
+function calcRangeCoverage(ranges: [number, number][], totalDuration: number): number {
+  if (totalDuration <= 0 || ranges.length === 0) return 0;
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i][0] <= last[1]) {
+      last[1] = Math.max(last[1], sorted[i][1]);
+    } else {
+      merged.push([...sorted[i]]);
+    }
+  }
+  const covered = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
+  return Math.min(1, covered / totalDuration);
+}
+
 // ============================================
 // REVERSE CONVERTERS (project format → store)
 // ============================================
@@ -70,24 +89,37 @@ async function convertProjectMediaToStore(projectMedia: ProjectMediaFile[]): Pro
       }
     }
 
-    // Check for existing transcript on disk
+    // Check for existing transcript on disk + calculate coverage
     let transcriptStatus: import('../../types').TranscriptStatus = 'none';
+    let transcriptCoverage = 0;
     if (projectFileService.isProjectOpen()) {
       try {
         const saved = await projectFileService.getTranscript(pm.id);
         if (saved && Array.isArray(saved) && saved.length > 0) {
           transcriptStatus = 'ready';
+          if (pm.duration && pm.duration > 0) {
+            const words = saved as { start: number; end: number }[];
+            transcriptCoverage = calcRangeCoverage(words.map(w => [w.start, w.end]), pm.duration);
+          }
         }
       } catch { /* no transcript file */ }
     }
 
-    // Check for existing analysis on disk
+    // Check for existing analysis on disk + calculate coverage
     let analysisStatus: import('../../types').AnalysisStatus = 'none';
+    let analysisCoverage = 0;
     if (projectFileService.isProjectOpen()) {
       try {
         const ranges = await projectFileService.getAnalysisRanges(pm.id);
         if (ranges.length > 0) {
           analysisStatus = 'ready';
+          if (pm.duration && pm.duration > 0) {
+            const parsed: [number, number][] = ranges.map(key => {
+              const [s, e] = key.split('-').map(Number);
+              return [s, e];
+            });
+            analysisCoverage = calcRangeCoverage(parsed, pm.duration);
+          }
         }
       } catch { /* no analysis file */ }
     }
@@ -115,7 +147,9 @@ async function convertProjectMediaToStore(projectMedia: ProjectMediaFile[]): Pro
       hasFileHandle: !!handle,
       filePath: pm.sourcePath,
       transcriptStatus,
+      transcriptCoverage,
       analysisStatus,
+      analysisCoverage,
     });
   }
 
@@ -751,39 +785,56 @@ async function reloadNestedCompositionClips(): Promise<void> {
 }
 
 /**
- * Sync transcript/analysis status from timeline clips to MediaFiles.
+ * Sync transcript/analysis status + coverage from timeline clips to MediaFiles.
  * Ensures badges show correctly after project load.
  */
 function syncStatusFromClipsToMedia(): void {
   const clips = useTimelineStore.getState().clips;
-  const transcriptIds = new Set<string>();
-  const analysisIds = new Set<string>();
+  const transcriptWords = new Map<string, { start: number; end: number }[]>();
+  const analysisRanges = new Map<string, [number, number][]>();
 
   for (const clip of clips) {
     const mediaFileId = clip.source?.mediaFileId || clip.mediaFileId;
     if (!mediaFileId) continue;
+
     if (clip.transcriptStatus === 'ready' && clip.transcript?.length) {
-      transcriptIds.add(mediaFileId);
+      const existing = transcriptWords.get(mediaFileId) || [];
+      for (const w of clip.transcript) existing.push({ start: w.start, end: w.end });
+      transcriptWords.set(mediaFileId, existing);
     }
+
     if (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') {
-      analysisIds.add(mediaFileId);
+      const inPt = clip.inPoint ?? 0;
+      const outPt = clip.outPoint ?? (clip.source?.naturalDuration ?? 0);
+      if (outPt > inPt) {
+        const existing = analysisRanges.get(mediaFileId) || [];
+        existing.push([inPt, outPt]);
+        analysisRanges.set(mediaFileId, existing);
+      }
     }
   }
 
-  if (transcriptIds.size === 0 && analysisIds.size === 0) return;
+  if (transcriptWords.size === 0 && analysisRanges.size === 0) return;
 
   useMediaStore.setState((state) => ({
     files: state.files.map((f) => {
-      const hasTranscript = transcriptIds.has(f.id);
-      const hasAnalysis = analysisIds.has(f.id);
-      if (!hasTranscript && !hasAnalysis) return f;
+      const tWords = transcriptWords.get(f.id);
+      const aRanges = analysisRanges.get(f.id);
+      if (!tWords && !aRanges) return f;
+      const dur = f.duration || 0;
       return {
         ...f,
-        ...(hasTranscript && f.transcriptStatus !== 'ready' && { transcriptStatus: 'ready' as const }),
-        ...(hasAnalysis && f.analysisStatus !== 'ready' && { analysisStatus: 'ready' as const }),
+        ...(tWords && f.transcriptStatus !== 'ready' && {
+          transcriptStatus: 'ready' as const,
+          transcriptCoverage: dur > 0 ? calcRangeCoverage(tWords.map(w => [w.start, w.end]), dur) : 0,
+        }),
+        ...(aRanges && f.analysisStatus !== 'ready' && {
+          analysisStatus: 'ready' as const,
+          analysisCoverage: dur > 0 ? calcRangeCoverage(aRanges, dur) : 0,
+        }),
       };
     }),
   }));
 
-  log.info(`Synced badges from clips (T:${transcriptIds.size}, A:${analysisIds.size})`);
+  log.info(`Synced badges from clips (T:${transcriptWords.size}, A:${analysisRanges.size})`);
 }

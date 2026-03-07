@@ -426,16 +426,44 @@ export async function describeClip(clipId: string): Promise<void> {
       message: undefined,
     });
 
-    // Propagate analysis status to MediaFile for badge display
+    // Propagate analysis status + coverage to MediaFile for badge display
     const mediaFileId = clip.source?.mediaFileId || clip.mediaFileId;
     if (mediaFileId) {
       try {
         const mediaState = useMediaStore.getState();
         const file = mediaState.files.find(f => f.id === mediaFileId);
-        if (file && file.analysisStatus !== 'ready') {
+        if (file) {
+          // Calculate coverage from all clips that have analysis/description for this media
+          const allClips = useTimelineStore.getState().clips;
+          const ranges: [number, number][] = [];
+          for (const c of allClips) {
+            const mfId = c.source?.mediaFileId || c.mediaFileId;
+            if (mfId === mediaFileId && (c.analysisStatus === 'ready' || c.sceneDescriptionStatus === 'ready')) {
+              const i = c.inPoint ?? 0;
+              const o = c.outPoint ?? (c.source?.naturalDuration ?? file.duration ?? 0);
+              if (o > i) ranges.push([i, o]);
+            }
+          }
+          // Add current clip range (it just finished)
+          const curIn = clip.inPoint ?? 0;
+          const curOut = clip.outPoint ?? (clip.source?.naturalDuration ?? file.duration ?? 0);
+          if (curOut > curIn) ranges.push([curIn, curOut]);
+
+          let analysisCoverage = 0;
+          if (file.duration && file.duration > 0 && ranges.length > 0) {
+            const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+            const merged: [number, number][] = [sorted[0]];
+            for (let i = 1; i < sorted.length; i++) {
+              const last = merged[merged.length - 1];
+              if (sorted[i][0] <= last[1]) last[1] = Math.max(last[1], sorted[i][1]);
+              else merged.push([...sorted[i]]);
+            }
+            analysisCoverage = Math.min(1, merged.reduce((sum, [s, e]) => sum + (e - s), 0) / file.duration);
+          }
+
           useMediaStore.setState({
             files: mediaState.files.map(f =>
-              f.id === mediaFileId ? { ...f, analysisStatus: 'ready' as const } : f
+              f.id === mediaFileId ? { ...f, analysisStatus: 'ready' as const, analysisCoverage } : f
             ),
           });
         }

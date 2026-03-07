@@ -4468,6 +4468,38 @@ input[type="checkbox"] {
   box-shadow: 0 0 6px rgba(139, 92, 246, 0.4);
 }
 
+/* Transcript badge on timeline clip */
+.clip-transcript-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 20px;
+  background: var(--accent);
+  color: var(--text-inverse);
+  font-size: 8px;
+  font-weight: bold;
+  padding: 0px 3px;
+  border-radius: 2px;
+  z-index: 10;
+  pointer-events: none;
+  line-height: 13px;
+}
+
+/* Analysis badge on timeline clip */
+.clip-analysis-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: #e88a1a;
+  color: var(--text-inverse);
+  font-size: 8px;
+  font-weight: bold;
+  padding: 0px 3px;
+  border-radius: 2px;
+  z-index: 10;
+  pointer-events: none;
+  line-height: 13px;
+}
+
 /* Pick Whip (Layer Parenting) styles */
 .pick-whip {
   display: inline-flex;
@@ -6525,6 +6557,7 @@ input[type="checkbox"] {
   flex-shrink: 0;
 }
 
+/* Full coverage badges (solid) */
 .media-item-transcript-badge {
   background: var(--accent);
   color: var(--text-inverse);
@@ -6555,6 +6588,74 @@ input[type="checkbox"] {
 
 .media-item-analysis-badge:hover {
   filter: brightness(1.2);
+}
+
+/* Partial coverage fill badges */
+.media-item-transcript-fill,
+.media-item-analysis-fill {
+  margin-left: 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.media-item-transcript-fill:hover,
+.media-item-analysis-fill:hover {
+  filter: brightness(1.2);
+}
+
+.coverage-fill-badge {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: bold;
+  line-height: 14px;
+  text-align: center;
+  display: inline-block;
+}
+
+.coverage-fill-badge .coverage-fill-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.coverage-fill-badge .coverage-fill-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  transition: height 0.3s ease-out;
+}
+
+/* Transcript fill colors */
+.coverage-fill-badge.transcript-fill .coverage-fill-bg {
+  background: rgba(99, 102, 241, 0.2);
+  color: rgba(99, 102, 241, 0.4);
+}
+
+.coverage-fill-badge.transcript-fill .coverage-fill-progress {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+/* Analysis fill colors */
+.coverage-fill-badge.analysis-fill .coverage-fill-bg {
+  background: rgba(232, 138, 26, 0.2);
+  color: rgba(232, 138, 26, 0.4);
+}
+
+.coverage-fill-badge.analysis-fill .coverage-fill-progress {
+  background: #e88a1a;
+  color: var(--text-inverse);
 }
 
 .media-item-proxy-generating {

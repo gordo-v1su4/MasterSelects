@@ -857,20 +857,52 @@ export function MediaPanel() {
                 <span className="proxy-percent">{(item as MediaFile).proxyProgress || 0}%</span>
               </span>
             )}
-            {'transcriptStatus' in item && (item as MediaFile).transcriptStatus === 'ready' && (
-              <span
-                className="media-item-transcript-badge"
-                title="Transcript available — click to open"
-                onClick={(e) => { e.stopPropagation(); handleBadgeClick(item.id, 'transcript'); }}
-              >T</span>
-            )}
-            {'analysisStatus' in item && (item as MediaFile).analysisStatus === 'ready' && (
-              <span
-                className="media-item-analysis-badge"
-                title="Analysis available — click to open"
-                onClick={(e) => { e.stopPropagation(); handleBadgeClick(item.id, 'analysis'); }}
-              >A</span>
-            )}
+            {/* Transcript badge with coverage fill */}
+            {'transcriptStatus' in item && (item as MediaFile).transcriptStatus === 'ready' && (() => {
+              const cov = (item as MediaFile).transcriptCoverage ?? 0;
+              const pct = Math.round(cov * 100);
+              return pct >= 100 ? (
+                <span
+                  className="media-item-transcript-badge"
+                  title="Fully transcribed — click to open"
+                  onClick={(e) => { e.stopPropagation(); handleBadgeClick(item.id, 'transcript'); }}
+                >T</span>
+              ) : (
+                <span
+                  className="media-item-transcript-fill"
+                  title={`${pct}% transcribed — click to open`}
+                  onClick={(e) => { e.stopPropagation(); handleBadgeClick(item.id, 'transcript'); }}
+                >
+                  <span className="coverage-fill-badge transcript-fill">
+                    <span className="coverage-fill-bg">T</span>
+                    <span className="coverage-fill-progress" style={{ height: `${pct}%` }}>T</span>
+                  </span>
+                </span>
+              );
+            })()}
+            {/* Analysis badge with coverage fill */}
+            {'analysisStatus' in item && (item as MediaFile).analysisStatus === 'ready' && (() => {
+              const cov = (item as MediaFile).analysisCoverage ?? 0;
+              const pct = Math.round(cov * 100);
+              return pct >= 100 ? (
+                <span
+                  className="media-item-analysis-badge"
+                  title="Fully analyzed — click to open"
+                  onClick={(e) => { e.stopPropagation(); handleBadgeClick(item.id, 'analysis'); }}
+                >A</span>
+              ) : (
+                <span
+                  className="media-item-analysis-fill"
+                  title={`${pct}% analyzed — click to open`}
+                  onClick={(e) => { e.stopPropagation(); handleBadgeClick(item.id, 'analysis'); }}
+                >
+                  <span className="coverage-fill-badge analysis-fill">
+                    <span className="coverage-fill-bg">A</span>
+                    <span className="coverage-fill-progress" style={{ height: `${pct}%` }}>A</span>
+                  </span>
+                </span>
+              );
+            })()}
           </div>
         );
       case 'duration':

@@ -482,6 +482,14 @@ function TimelineClipComponent({
           {'\u26D3'}
         </div>
       )}
+      {/* Transcript badge */}
+      {clip.transcriptStatus === 'ready' && clip.transcript && clip.transcript.length > 0 && (
+        <div className="clip-transcript-badge" title="Transcript available">T</div>
+      )}
+      {/* Analysis badge */}
+      {!isAudioClip && (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') && (
+        <div className="clip-analysis-badge" title="Analysis available">A</div>
+      )}
       {/* Waveform generation progress indicator */}
       {clip.waveformGenerating && (
         <div className="clip-waveform-indicator">

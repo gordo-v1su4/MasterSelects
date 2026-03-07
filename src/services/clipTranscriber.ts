@@ -11,6 +11,28 @@ import { projectFileService } from './project/ProjectFileService';
 
 const log = Logger.create('ClipTranscriber');
 
+/**
+ * Calculate coverage ratio from a set of time ranges vs total duration.
+ * Merges overlapping ranges and returns 0-1.
+ */
+function calcCoverage(ranges: [number, number][], totalDuration: number): number {
+  if (totalDuration <= 0 || ranges.length === 0) return 0;
+  // Sort by start time
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  // Merge overlapping
+  const merged: [number, number][] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i][0] <= last[1]) {
+      last[1] = Math.max(last[1], sorted[i][1]);
+    } else {
+      merged.push([...sorted[i]]);
+    }
+  }
+  const covered = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
+  return Math.min(1, covered / totalDuration);
+}
+
 // Worker instance
 let worker: Worker | null = null;
 let isTranscribing = false;
@@ -289,10 +311,13 @@ function propagateTranscriptToMediaFile(mediaFileId: string, words: TranscriptWo
       mergedWords = merged.sort((a, b) => a.start - b.start);
     }
 
+    // Calculate transcript coverage (union of word ranges / total duration)
+    const transcriptCoverage = file.duration ? calcCoverage(mergedWords.map(w => [w.start, w.end]), file.duration) : 0;
+
     useMediaStore.setState({
       files: mediaState.files.map((f: MediaFile) =>
         f.id === mediaFileId
-          ? { ...f, transcriptStatus: 'ready' as TranscriptStatus, transcript: mergedWords }
+          ? { ...f, transcriptStatus: 'ready' as TranscriptStatus, transcript: mergedWords, transcriptCoverage }
           : f
       ),
     });

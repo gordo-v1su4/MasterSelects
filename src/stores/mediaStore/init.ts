@@ -97,13 +97,32 @@ async function initializeStore(): Promise<void> {
 }
 
 /**
- * Scan timeline clips for transcripts and analysis and propagate status to MediaFiles.
+ * Calculate coverage ratio from time ranges vs total duration (0-1).
+ */
+function calcRangeCoverage(ranges: [number, number][], totalDuration: number): number {
+  if (totalDuration <= 0 || ranges.length === 0) return 0;
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i][0] <= last[1]) {
+      last[1] = Math.max(last[1], sorted[i][1]);
+    } else {
+      merged.push([...sorted[i]]);
+    }
+  }
+  return Math.min(1, merged.reduce((sum, [s, e]) => sum + (e - s), 0) / totalDuration);
+}
+
+/**
+ * Scan timeline clips for transcripts and analysis and propagate status + coverage to MediaFiles.
  * This ensures the "T" and "A" badges show correctly after project reload.
  */
 function syncStatusFromClips(useMediaStore: MediaStore): void {
   const clips = useTimelineStore.getState().clips;
   const transcriptMap = new Map<string, import('../../types').TranscriptWord[]>();
-  const analysisSet = new Set<string>();
+  // Track analysis ranges per media file for coverage calculation
+  const analysisRanges = new Map<string, [number, number][]>();
 
   for (const clip of clips) {
     const mediaFileId = clip.source?.mediaFileId || clip.mediaFileId;
@@ -124,13 +143,19 @@ function syncStatusFromClips(useMediaStore: MediaStore): void {
       }
     }
 
-    // Analysis sync
+    // Analysis sync — collect ranges for coverage
     if (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') {
-      analysisSet.add(mediaFileId);
+      const inPt = clip.inPoint ?? 0;
+      const outPt = clip.outPoint ?? (clip.source?.naturalDuration ?? 0);
+      if (outPt > inPt) {
+        const existing = analysisRanges.get(mediaFileId) || [];
+        existing.push([inPt, outPt]);
+        analysisRanges.set(mediaFileId, existing);
+      }
     }
   }
 
-  if (transcriptMap.size === 0 && analysisSet.size === 0) return;
+  if (transcriptMap.size === 0 && analysisRanges.size === 0) return;
 
   // Sort each transcript by start time
   for (const [, words] of transcriptMap) {
@@ -138,20 +163,29 @@ function syncStatusFromClips(useMediaStore: MediaStore): void {
   }
 
   useMediaStore.setState((state: MediaState) => ({
-    files: state.files.map((f: { id: string; analysisStatus?: string }) => {
+    files: state.files.map((f: { id: string; duration?: number; analysisStatus?: string; transcriptStatus?: string; transcriptCoverage?: number; analysisCoverage?: number }) => {
       const transcript = transcriptMap.get(f.id);
-      const hasAnalysis = analysisSet.has(f.id);
-      if (!transcript && !hasAnalysis) return f;
+      const aRanges = analysisRanges.get(f.id);
+      if (!transcript && !aRanges) return f;
+
+      const dur = f.duration || 0;
       return {
         ...f,
-        ...(transcript && { transcriptStatus: 'ready' as const, transcript }),
-        ...(hasAnalysis && f.analysisStatus !== 'ready' && { analysisStatus: 'ready' as const }),
+        ...(transcript && {
+          transcriptStatus: 'ready' as const,
+          transcript,
+          transcriptCoverage: dur > 0 ? calcRangeCoverage(transcript.map(w => [w.start, w.end]), dur) : 0,
+        }),
+        ...(aRanges && f.analysisStatus !== 'ready' && {
+          analysisStatus: 'ready' as const,
+          analysisCoverage: dur > 0 ? calcRangeCoverage(aRanges, dur) : 0,
+        }),
       };
     }),
   }));
 
-  const total = transcriptMap.size + analysisSet.size;
-  log.info(`Synced status for ${total} media file(s) (T:${transcriptMap.size}, A:${analysisSet.size})`);
+  const total = transcriptMap.size + analysisRanges.size;
+  log.info(`Synced status for ${total} media file(s) (T:${transcriptMap.size}, A:${analysisRanges.size})`);
 }
 
 /**

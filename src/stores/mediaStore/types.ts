@@ -48,8 +48,10 @@ export interface MediaFile extends MediaItem {
   // Transcript support
   transcriptStatus?: TranscriptStatus;
   transcript?: TranscriptWord[];
+  transcriptCoverage?: number;  // 0-1, how much of total duration is transcribed
   // Analysis support (CV or AI describe)
   analysisStatus?: AnalysisStatus;
+  analysisCoverage?: number;    // 0-1, how much of total duration is analyzed
   // File System Access API
   hasFileHandle?: boolean;
   filePath?: string;

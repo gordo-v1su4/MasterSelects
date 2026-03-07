@@ -526,25 +526,71 @@ export async function analyzeClip(clipId: string): Promise<void> {
 }
 
 /**
- * Propagate analysis status to MediaFile for badge display.
+ * Propagate analysis status and coverage to MediaFile for badge display.
  */
-function propagateAnalysisToMediaFile(mediaFileId: string): void {
+async function propagateAnalysisToMediaFile(mediaFileId: string): Promise<void> {
   try {
     const mediaState = useMediaStore.getState();
     const file = mediaState.files.find(f => f.id === mediaFileId);
-    if (!file || file.analysisStatus === 'ready') return;
+    if (!file) return;
+
+    // Calculate coverage from all analysis ranges stored on disk
+    let analysisCoverage = 0;
+    if (file.duration && file.duration > 0 && projectFileService.isProjectOpen()) {
+      try {
+        const rangeKeys = await projectFileService.getAnalysisRanges(mediaFileId);
+        if (rangeKeys.length > 0) {
+          const ranges: [number, number][] = rangeKeys.map(key => {
+            const [s, e] = key.split('-').map(Number);
+            return [s, e];
+          });
+          analysisCoverage = calcCoverage(ranges, file.duration);
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Also check clips for scene descriptions (AI describe)
+    const clips = useTimelineStore.getState().clips;
+    for (const clip of clips) {
+      const mfId = clip.source?.mediaFileId || clip.mediaFileId;
+      if (mfId === mediaFileId && clip.sceneDescriptionStatus === 'ready' && file.duration) {
+        const inPt = clip.inPoint ?? 0;
+        const outPt = clip.outPoint ?? (clip.source?.naturalDuration ?? file.duration);
+        const clipCov = (outPt - inPt) / file.duration;
+        analysisCoverage = Math.min(1, analysisCoverage + clipCov);
+      }
+    }
 
     useMediaStore.setState({
       files: mediaState.files.map(f =>
         f.id === mediaFileId
-          ? { ...f, analysisStatus: 'ready' as const }
+          ? { ...f, analysisStatus: 'ready' as const, analysisCoverage }
           : f
       ),
     });
-    log.debug('Propagated analysis status to MediaFile', { mediaFileId });
+    log.debug('Propagated analysis status to MediaFile', { mediaFileId, analysisCoverage });
   } catch (e) {
     log.warn('Failed to propagate analysis status to MediaFile', e);
   }
+}
+
+/**
+ * Calculate coverage ratio from a set of time ranges vs total duration.
+ */
+function calcCoverage(ranges: [number, number][], totalDuration: number): number {
+  if (totalDuration <= 0 || ranges.length === 0) return 0;
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i][0] <= last[1]) {
+      last[1] = Math.max(last[1], sorted[i][1]);
+    } else {
+      merged.push([...sorted[i]]);
+    }
+  }
+  const covered = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
+  return Math.min(1, covered / totalDuration);
 }
 
 /**
