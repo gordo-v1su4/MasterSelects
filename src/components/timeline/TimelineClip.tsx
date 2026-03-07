@@ -488,20 +488,30 @@ function TimelineClipComponent({
         const clipOut = clip.outPoint ?? clip.duration;
         const clipDur = clipOut - clipIn;
         if (clipDur <= 0) return null;
-        // Calculate how much of the clip range is covered by transcript words
-        const wordsInRange = clip.transcript!.filter(w => w.end > clipIn && w.start < clipOut);
-        if (wordsInRange.length === 0) return null;
-        const sorted = [...wordsInRange].sort((a, b) => a.start - b.start);
-        const merged: [number, number][] = [[Math.max(sorted[0].start, clipIn), Math.min(sorted[0].end, clipOut)]];
-        for (let i = 1; i < sorted.length; i++) {
-          const s = Math.max(sorted[i].start, clipIn);
-          const e = Math.min(sorted[i].end, clipOut);
-          const last = merged[merged.length - 1];
-          if (s <= last[1]) last[1] = Math.max(last[1], e);
-          else merged.push([s, e]);
+        // Use transcribedRanges from MediaFile for coverage (silence still counts as transcribed)
+        const mediaFileId = clip.source?.mediaFileId || clip.mediaFileId;
+        const mediaFile = mediaFileId ? useMediaStore.getState().files.find(f => f.id === mediaFileId) : null;
+        const ranges: [number, number][] = (mediaFile as any)?.transcribedRanges || [];
+        let pct = 0;
+        if (ranges.length > 0) {
+          // Intersect transcribed ranges with clip's [inPoint, outPoint]
+          let covered = 0;
+          for (const [rs, re] of ranges) {
+            const s = Math.max(rs, clipIn);
+            const e = Math.min(re, clipOut);
+            if (s < e) covered += e - s;
+          }
+          pct = Math.min(100, Math.round((covered / clipDur) * 100));
+        } else {
+          // Fallback: use word envelope for old data without transcribedRanges
+          const wordsInRange = clip.transcript!.filter(w => w.end > clipIn && w.start < clipOut);
+          if (wordsInRange.length > 0) {
+            const minStart = Math.max(clipIn, Math.min(...wordsInRange.map(w => w.start)));
+            const maxEnd = Math.min(clipOut, Math.max(...wordsInRange.map(w => w.end)));
+            pct = Math.min(100, Math.round(((maxEnd - minStart) / clipDur) * 100));
+          }
         }
-        const covered = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
-        const pct = Math.min(100, Math.round((covered / clipDur) * 100));
+        if (pct <= 0) return null;
         return pct >= 100 ? (
           <div className="clip-transcript-badge" title="Fully transcribed">T</div>
         ) : (

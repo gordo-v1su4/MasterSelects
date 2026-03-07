@@ -121,6 +121,8 @@ function calcRangeCoverage(ranges: [number, number][], totalDuration: number): n
 function syncStatusFromClips(useMediaStore: MediaStore): void {
   const clips = useTimelineStore.getState().clips;
   const transcriptMap = new Map<string, import('../../types').TranscriptWord[]>();
+  // Track transcribed time ranges per media file (clip in/out = entire range was processed)
+  const transcribedRangesMap = new Map<string, [number, number][]>();
   // Track analysis ranges per media file for coverage calculation
   const analysisRanges = new Map<string, [number, number][]>();
 
@@ -140,6 +142,14 @@ function syncStatusFromClips(useMediaStore: MediaStore): void {
         }
       } else {
         transcriptMap.set(mediaFileId, [...clip.transcript]);
+      }
+      // Track the clip's full range as "transcribed" (silence still counts)
+      const inPt = clip.inPoint ?? 0;
+      const outPt = clip.outPoint ?? (clip.source?.naturalDuration ?? 0);
+      if (outPt > inPt) {
+        const existingRanges = transcribedRangesMap.get(mediaFileId) || [];
+        existingRanges.push([inPt, outPt]);
+        transcribedRangesMap.set(mediaFileId, existingRanges);
       }
     }
 
@@ -165,6 +175,7 @@ function syncStatusFromClips(useMediaStore: MediaStore): void {
   useMediaStore.setState((state: MediaState) => ({
     files: state.files.map((f: { id: string; duration?: number; analysisStatus?: string; transcriptStatus?: string; transcriptCoverage?: number; analysisCoverage?: number }) => {
       const transcript = transcriptMap.get(f.id);
+      const tRanges = transcribedRangesMap.get(f.id);
       const aRanges = analysisRanges.get(f.id);
       if (!transcript && !aRanges) return f;
 
@@ -174,7 +185,9 @@ function syncStatusFromClips(useMediaStore: MediaStore): void {
         ...(transcript && {
           transcriptStatus: 'ready' as const,
           transcript,
-          transcriptCoverage: dur > 0 ? calcRangeCoverage(transcript.map(w => [w.start, w.end]), dur) : 0,
+          // Use transcribed time ranges (not word ranges) - silence is still "transcribed"
+          transcriptCoverage: dur > 0 && tRanges ? calcRangeCoverage(tRanges, dur) : 0,
+          transcribedRanges: tRanges,
         }),
         ...(aRanges && f.analysisStatus !== 'ready' && {
           analysisStatus: 'ready' as const,

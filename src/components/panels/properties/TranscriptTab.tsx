@@ -1,6 +1,7 @@
 // Transcript Tab - View and interact with clip transcription
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { useTimelineStore } from '../../../stores/timeline';
+import { useMediaStore } from '../../../stores/mediaStore';
 import type { TranscriptWord } from '../../../types';
 
 const LANGUAGES = [
@@ -64,18 +65,32 @@ export function TranscriptTab({ clipId, transcript, transcriptStatus, transcript
     setPlayheadPosition(Math.max(0, timelinePosition));
   }, [clipStartTime, inPoint, setPlayheadPosition]);
 
-  // Calculate coverage from transcript words within clip range
+  // Get transcribedRanges from MediaFile for accurate coverage
   const clipCoverage = useMemo(() => {
     if (!transcript.length) return 0;
     const clipDuration = outPoint - inPoint;
     if (clipDuration <= 0) return 0;
+    // Look up MediaFile's transcribedRanges
+    const clip = useTimelineStore.getState().clips.find(c => c.id === clipId);
+    const mediaFileId = clip?.source?.mediaFileId || clip?.mediaFileId;
+    const mediaFile = mediaFileId ? useMediaStore.getState().files.find(f => f.id === mediaFileId) : null;
+    const ranges: [number, number][] = (mediaFile as any)?.transcribedRanges || [];
+    if (ranges.length > 0) {
+      let covered = 0;
+      for (const [rs, re] of ranges) {
+        const s = Math.max(rs, inPoint);
+        const e = Math.min(re, outPoint);
+        if (s < e) covered += e - s;
+      }
+      return Math.min(1, covered / clipDuration);
+    }
+    // Fallback: word envelope for old data
     const wordsInRange = transcript.filter(w => w.end > inPoint && w.start < outPoint);
     if (wordsInRange.length === 0) return 0;
-    // Use the envelope of word timestamps as proxy for transcribed range
     const minStart = Math.max(inPoint, Math.min(...wordsInRange.map(w => w.start)));
     const maxEnd = Math.min(outPoint, Math.max(...wordsInRange.map(w => w.end)));
     return Math.min(1, (maxEnd - minStart) / clipDuration);
-  }, [transcript, inPoint, outPoint]);
+  }, [transcript, inPoint, outPoint, clipId]);
 
   const isPartial = transcriptStatus === 'ready' && clipCoverage > 0 && clipCoverage < 0.98;
 

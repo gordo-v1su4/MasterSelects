@@ -803,6 +803,8 @@ async function reloadNestedCompositionClips(): Promise<void> {
 function syncStatusFromClipsToMedia(): void {
   const clips = useTimelineStore.getState().clips;
   const transcriptWords = new Map<string, { start: number; end: number }[]>();
+  // Track transcribed time ranges (clip in/out = entire range was processed, silence counts)
+  const transcribedRangesMap = new Map<string, [number, number][]>();
   const analysisRanges = new Map<string, [number, number][]>();
 
   for (const clip of clips) {
@@ -813,6 +815,14 @@ function syncStatusFromClipsToMedia(): void {
       const existing = transcriptWords.get(mediaFileId) || [];
       for (const w of clip.transcript) existing.push({ start: w.start, end: w.end });
       transcriptWords.set(mediaFileId, existing);
+      // Track clip's full range as transcribed
+      const inPt = clip.inPoint ?? 0;
+      const outPt = clip.outPoint ?? (clip.source?.naturalDuration ?? 0);
+      if (outPt > inPt) {
+        const existingRanges = transcribedRangesMap.get(mediaFileId) || [];
+        existingRanges.push([inPt, outPt]);
+        transcribedRangesMap.set(mediaFileId, existingRanges);
+      }
     }
 
     if (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') {
@@ -831,6 +841,7 @@ function syncStatusFromClipsToMedia(): void {
   useMediaStore.setState((state) => ({
     files: state.files.map((f) => {
       const tWords = transcriptWords.get(f.id);
+      const tRanges = transcribedRangesMap.get(f.id);
       const aRanges = analysisRanges.get(f.id);
       if (!tWords && !aRanges) return f;
       const dur = f.duration || 0;
@@ -838,7 +849,9 @@ function syncStatusFromClipsToMedia(): void {
         ...f,
         ...(tWords && f.transcriptStatus !== 'ready' && {
           transcriptStatus: 'ready' as const,
-          transcriptCoverage: dur > 0 ? calcRangeCoverage(tWords.map(w => [w.start, w.end]), dur) : 0,
+          // Use transcribed time ranges (not word ranges) - silence counts as transcribed
+          transcriptCoverage: dur > 0 && tRanges ? calcRangeCoverage(tRanges, dur) : 0,
+          transcribedRanges: tRanges,
         }),
         ...(aRanges && f.analysisStatus !== 'ready' && {
           analysisStatus: 'ready' as const,
