@@ -166,9 +166,22 @@ export class AudioTrackSyncManager {
       const isMuted = !isVideoTrackVisible(ctx, track.id);
       const mediaFileId = mediaFile?.id || clip.mediaFileId || clip.id;
 
-      // Varispeed scrubbing for all clips — respect clip volume and track mute
+      // Varispeed scrubbing — respect clip volume, video track mute,
+      // and linked audio track mute (user may have muted audio track or deleted linked audio)
       const clipVolume = getClipVolume(ctx, clip, timeInfo.clipLocalTime);
-      if (ctx.isDraggingPlayhead && !isMuted && clipVolume > 0.01) {
+      let audioMuted = isMuted || clipVolume <= 0.01;
+      if (!audioMuted && clip.linkedClipId) {
+        // Check if linked audio clip's track is muted
+        const linkedClip = ctx.clips.find(c => c.id === clip.linkedClipId);
+        if (linkedClip) {
+          const linkedTrackMuted = !ctx.unmutedAudioTrackIds.has(linkedClip.trackId);
+          if (linkedTrackMuted) audioMuted = true;
+        } else {
+          // Linked audio clip was deleted — mute scrub audio
+          audioMuted = true;
+        }
+      }
+      if (ctx.isDraggingPlayhead && !audioMuted) {
         const video = clip.source.videoElement;
         if (!video.muted) video.muted = true;
         proxyFrameCache.playScrubAudio(mediaFileId, timeInfo.clipTime, undefined, video.currentSrc || video.src);

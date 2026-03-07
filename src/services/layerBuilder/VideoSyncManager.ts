@@ -45,10 +45,7 @@ export class VideoSyncManager {
   // WebCodecs precise seek debounce
   private wcPreciseSeekTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
-  // Track last fastSeek target per clip to avoid redundant decoder resets.
-  // fastSeek sets seekTargetUs=null, so getPendingSeekTime() returns null.
-  // Without this, each frame re-triggers fastSeek → decoder.reset() loop.
-  private lastWcFastSeekTarget: Record<string, number> = {};
+  // (lastWcFastSeekTarget removed — replaced by wcp.isDecodePending() check)
 
   // Seamless cut transition: track last video element per track.
   // When same-source clips are sequential (split clips), the outgoing clip's
@@ -76,7 +73,6 @@ export class VideoSyncManager {
     this.forceDecodeInProgress.clear();
     this.rvfcHandles = {};
     this.latestSeekTargets = {};
-    this.lastWcFastSeekTarget = {};
     this.lastVideoSyncFrame = -1;
     this.lastVideoSyncPlaying = false;
     // Clear debounce timers
@@ -790,8 +786,7 @@ export class VideoSyncManager {
     const timeInfo = getClipTimeInfo(ctx, clip);
 
     if (ctx.isPlaying) {
-      // Clear scrub tracking — playback takes over
-      delete this.lastWcFastSeekTarget[clip.id];
+      // Playback takes over — no scrub tracking needed
 
       // Render-loop-driven: advance decoder to clip time each frame.
       // No internal animation loop — advanceToTime handles decode feeding + frame selection.
@@ -810,27 +805,34 @@ export class VideoSyncManager {
       if (wcp.isPlaying) wcp.pause();
       if (video && !video.paused) video.pause();
 
-      // Use pending seek target if one is in flight — avoids resetting the decoder
-      // repeatedly before it can output a frame (seek resets decoder each call).
-      // For fastSeek: seekTargetUs is null, so also check our local tracker.
-      const pendingSeek = wcp.getPendingSeekTime();
-      const lastFastTarget = this.lastWcFastSeekTarget[clip.id];
-      const effectivePos = pendingSeek
-        ?? (lastFastTarget !== undefined ? lastFastTarget : wcp.currentTime);
-      const wcTimeDiff = Math.abs(effectivePos - timeInfo.clipTime);
-      if (wcTimeDiff > 0.05) {
-        if (ctx.isDraggingPlayhead) {
-          // Fast scrubbing: keyframe-only for instant feedback
+      // Determine if a new seek is needed.
+      // Key constraint: fastSeek calls decoder.reset() which cancels any pending decode.
+      // At 120fps rAF (~8ms), the hardware decoder needs ~10-20ms to produce a frame.
+      // If we call fastSeek every frame, the decoder is constantly reset before it can
+      // output anything → preview freezes. Only issue a new fastSeek when:
+      //   1. No decode is currently in progress (decoder finished), AND
+      //   2. The actual frame position differs significantly from target
+      const actualPos = wcp.currentTime;
+      const posDiff = Math.abs(actualPos - timeInfo.clipTime);
+
+      if (ctx.isDraggingPlayhead) {
+        // Fast scrubbing: keyframe-only for instant feedback
+        // Only seek if decoder is idle (previous fastSeek completed) or position changed a lot
+        const decodeBusy = wcp.isDecodePending();
+        if (!decodeBusy && posDiff > 0.05) {
           wcp.fastSeek(timeInfo.clipTime);
-          this.lastWcFastSeekTarget[clip.id] = timeInfo.clipTime;
           // Debounced precise seek when scrubbing pauses
           this.schedulePreciseWcSeek(clip.id, wcp, timeInfo.clipTime);
-        } else {
-          // Click/arrow: precise seek immediately
-          delete this.lastWcFastSeekTarget[clip.id];
+        }
+      } else {
+        // Click/arrow: precise seek immediately
+        const pendingSeek = wcp.getPendingSeekTime();
+        const effectivePos = pendingSeek ?? actualPos;
+        if (Math.abs(effectivePos - timeInfo.clipTime) > 0.05) {
           wcp.seek(timeInfo.clipTime);
         }
       }
+
       // Keep audio element at same position — but NOT during scrubbing.
       // video.currentTime triggers the browser's internal decoder (heavy for long-GOP).
       // During scrubbing, audio feedback is handled by proxyFrameCache.playScrubAudio()

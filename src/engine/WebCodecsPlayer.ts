@@ -111,6 +111,8 @@ export class WebCodecsPlayer implements ExportModePlayer {
   isDestroyed(): boolean { return this._destroyed; }
   isSeeking(): boolean { return this.seekTargetUs !== null; }
   getPendingSeekTime(): number | null { return this.seekTargetUs !== null ? this.seekTargetUs / 1_000_000 : null; }
+  /** True when the decoder has queued work that hasn't produced output yet */
+  isDecodePending(): boolean { return this.trackedDecodeQueueSize > 0; }
   getVideoElement(): HTMLVideoElement | null { return this.videoElement; }
 
   constructor(options: WebCodecsPlayerOptions = {}) {
