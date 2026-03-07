@@ -17,8 +17,6 @@ export const transformToolDefinitions: ToolDefinition[] = [
           rotation: { type: 'number', description: 'Z-axis rotation in degrees' },
           opacity: { type: 'number', description: 'Opacity (0 = transparent, 1 = fully visible)' },
           blendMode: { type: 'string', description: 'Blend mode: normal, multiply, screen, overlay, darken, lighten, colorDodge, colorBurn, hardLight, softLight, difference, exclusion' },
-          anchorX: { type: 'number', description: 'Anchor point X (0-1, default 0.5 = center)' },
-          anchorY: { type: 'number', description: 'Anchor point Y (0-1, default 0.5 = center)' },
         },
         required: ['clipId'],
       },

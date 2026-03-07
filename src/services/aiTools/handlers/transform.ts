@@ -14,17 +14,31 @@ export async function handleSetTransform(
   }
 
   const updates: Record<string, unknown> = {};
-  if (args.x !== undefined) updates.x = args.x as number;
-  if (args.y !== undefined) updates.y = args.y as number;
-  if (args.scaleX !== undefined) updates.scaleX = args.scaleX as number;
-  if (args.scaleY !== undefined) updates.scaleY = args.scaleY as number;
+  const hasPosition = args.x !== undefined || args.y !== undefined;
+  const hasScale = args.scaleX !== undefined || args.scaleY !== undefined;
+  const hasRotation = args.rotation !== undefined;
+
+  if (hasPosition) {
+    const currentPos = clip.transform?.position || { x: 0, y: 0, z: 0 };
+    updates.position = {
+      x: args.x !== undefined ? args.x as number : currentPos.x,
+      y: args.y !== undefined ? args.y as number : currentPos.y,
+      z: currentPos.z,
+    };
+  }
+  if (hasScale) {
+    const currentScale = clip.transform?.scale || { x: 1, y: 1 };
+    updates.scale = {
+      x: args.scaleX !== undefined ? args.scaleX as number : currentScale.x,
+      y: args.scaleY !== undefined ? args.scaleY as number : currentScale.y,
+    };
+  }
+  if (hasRotation) {
+    const currentRot = clip.transform?.rotation || { x: 0, y: 0, z: 0 };
+    updates.rotation = { ...currentRot, z: args.rotation as number };
+  }
   if (args.opacity !== undefined) updates.opacity = args.opacity as number;
   if (args.blendMode !== undefined) updates.blendMode = args.blendMode as string;
-  if (args.anchorX !== undefined) updates.anchorX = args.anchorX as number;
-  if (args.anchorY !== undefined) updates.anchorY = args.anchorY as number;
-  if (args.rotation !== undefined) {
-    updates.rotation = { ...(clip.transform?.rotation || { x: 0, y: 0, z: 0 }), z: args.rotation as number };
-  }
 
   if (Object.keys(updates).length === 0) {
     return { success: false, error: 'No transform properties provided' };
