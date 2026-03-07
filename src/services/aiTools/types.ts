@@ -17,6 +17,16 @@ export const MODIFYING_TOOLS = new Set([
   'executeBatch',
   // YouTube
   'downloadAndImportVideo',
+  // Transform & Effects
+  'setTransform', 'addEffect', 'removeEffect', 'updateEffect',
+  // Keyframes
+  'addKeyframe', 'removeKeyframe',
+  // Speed & Playback
+  'setClipSpeed',
+  // Markers
+  'addMarker', 'removeMarker',
+  // Transitions
+  'addTransition', 'removeTransition',
 ]);
 
 // Tool definition type (OpenAI function calling format)

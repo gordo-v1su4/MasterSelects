@@ -69,6 +69,37 @@ import {
   handleGetYouTubeVideos,
 } from './youtube';
 
+import { handleSetTransform } from './transform';
+
+import {
+  handleListEffects,
+  handleAddEffect,
+  handleRemoveEffect,
+  handleUpdateEffect,
+} from './effects';
+
+import {
+  handleGetKeyframes,
+  handleAddKeyframe,
+  handleRemoveKeyframe,
+} from './keyframes';
+
+import {
+  handlePlay,
+  handlePause,
+  handleSetClipSpeed,
+  handleUndo,
+  handleRedo,
+  handleAddMarker,
+  handleGetMarkers,
+  handleRemoveMarker,
+} from './playback';
+
+import {
+  handleAddTransition,
+  handleRemoveTransition,
+} from './transitions';
+
 // Handler registry - maps tool names to handler functions
 const timelineHandlers: Record<string, (args: Record<string, unknown>, store: ReturnType<typeof useTimelineStore.getState>) => Promise<ToolResult>> = {
   getTimelineState: handleGetTimelineState,
@@ -100,6 +131,26 @@ const timelineHandlers: Record<string, (args: Record<string, unknown>, store: Re
   captureFrame: handleCaptureFrame,
   getCutPreviewQuad: handleGetCutPreviewQuad,
   getFramesAtTimes: handleGetFramesAtTimes,
+  // Transform
+  setTransform: handleSetTransform,
+  // Effects
+  addEffect: handleAddEffect,
+  removeEffect: handleRemoveEffect,
+  updateEffect: handleUpdateEffect,
+  // Keyframes
+  getKeyframes: handleGetKeyframes,
+  addKeyframe: handleAddKeyframe,
+  // Playback & Control
+  play: handlePlay,
+  pause: handlePause,
+  setClipSpeed: handleSetClipSpeed,
+  // Markers
+  addMarker: handleAddMarker,
+  getMarkers: handleGetMarkers,
+  removeMarker: handleRemoveMarker,
+  // Transitions
+  addTransition: handleAddTransition,
+  removeTransition: handleRemoveTransition,
 };
 
 const mediaHandlers: Record<string, (args: Record<string, unknown>, store: ReturnType<typeof useMediaStore.getState>) => Promise<ToolResult>> = {
@@ -117,6 +168,10 @@ const mediaHandlers: Record<string, (args: Record<string, unknown>, store: Retur
 const selfContainedHandlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   listLocalFiles: handleListLocalFiles,
   addClipSegment: handleAddClipSegment,
+  listEffects: handleListEffects,
+  removeKeyframe: handleRemoveKeyframe,
+  undo: handleUndo,
+  redo: handleRedo,
 };
 
 // YouTube handlers - self-contained, fetch their own stores
@@ -213,4 +268,28 @@ export {
   handleListVideoFormats,
   handleDownloadAndImportVideo,
   handleGetYouTubeVideos,
+  // Transform
+  handleSetTransform,
+  // Effects
+  handleListEffects,
+  handleAddEffect,
+  handleRemoveEffect,
+  handleUpdateEffect,
+  // Keyframes
+  handleGetKeyframes,
+  handleAddKeyframe,
+  handleRemoveKeyframe,
+  // Playback & Control
+  handlePlay,
+  handlePause,
+  handleSetClipSpeed,
+  handleUndo,
+  handleRedo,
+  // Markers
+  handleAddMarker,
+  handleGetMarkers,
+  handleRemoveMarker,
+  // Transitions
+  handleAddTransition,
+  handleRemoveTransition,
 };

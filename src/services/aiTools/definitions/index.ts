@@ -8,6 +8,11 @@ import { previewToolDefinitions } from './preview';
 import { mediaToolDefinitions } from './media';
 import { batchToolDefinitions } from './batch';
 import { youtubeToolDefinitions } from './youtube';
+import { transformToolDefinitions } from './transform';
+import { effectToolDefinitions } from './effects';
+import { keyframeToolDefinitions } from './keyframes';
+import { playbackToolDefinitions } from './playback';
+import { transitionToolDefinitions } from './transitions';
 
 // Combined tool definitions array (OpenAI function calling format)
 export const AI_TOOLS = [
@@ -19,6 +24,11 @@ export const AI_TOOLS = [
   ...mediaToolDefinitions,
   ...batchToolDefinitions,
   ...youtubeToolDefinitions,
+  ...transformToolDefinitions,
+  ...effectToolDefinitions,
+  ...keyframeToolDefinitions,
+  ...playbackToolDefinitions,
+  ...transitionToolDefinitions,
 ];
 
 // Re-export individual definition sets for selective use
@@ -31,4 +41,9 @@ export {
   mediaToolDefinitions,
   batchToolDefinitions,
   youtubeToolDefinitions,
+  transformToolDefinitions,
+  effectToolDefinitions,
+  keyframeToolDefinitions,
+  playbackToolDefinitions,
+  transitionToolDefinitions,
 };

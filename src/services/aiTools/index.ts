@@ -29,6 +29,11 @@ export {
   mediaToolDefinitions,
   batchToolDefinitions,
   youtubeToolDefinitions,
+  transformToolDefinitions,
+  effectToolDefinitions,
+  keyframeToolDefinitions,
+  playbackToolDefinitions,
+  transitionToolDefinitions,
 } from './definitions';
 
 // Re-export utilities
