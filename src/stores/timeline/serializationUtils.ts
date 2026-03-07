@@ -1021,11 +1021,10 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
     // Stop playback
     pause();
 
-    // CRITICAL: Clear clips and layers from state FIRST, before destroying
-    // media resources. The rAF render loop reads clips from the store —
-    // if we destroy WebCodecsPlayers/VideoFrames while clips still reference
-    // them, the render loop can pass a closed VideoFrame to
-    // importExternalTexture → GPU process crash (STATUS_BREAKPOINT).
+    // CRITICAL: Clear store state FIRST — synchronously.
+    // The rAF render loop reads clips/layers from the store. If we destroy
+    // media resources while clips still reference them, the render loop can
+    // pass a closed VideoFrame to importExternalTexture → GPU crash.
     const { tracks } = get();
     set({
       clips: [],
@@ -1044,41 +1043,39 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
       expandedCurveProperties: new Map<string, Set<import('../../types').AnimatableProperty>>(),
     });
 
-    // NOW destroy media resources — render loop already sees empty clips/layers.
-    // Track destroyed WebCodecsPlayers to avoid double-destroy on shared instances.
-    const destroyedPlayers = new Set<object>();
+    // Defer ALL resource destruction to next frame — guarantees the render
+    // loop has processed the empty clips/layers before we close any
+    // VideoFrames, destroy decoders, or release GPU surfaces.
+    requestAnimationFrame(() => {
+      const destroyedPlayers = new Set<object>();
 
-    const cleanupClip = (clip: TimelineClip) => {
-      if (clip.source?.videoElement) {
-        const video = clip.source.videoElement;
-        video.pause();
-        if (video.src) URL.revokeObjectURL(video.src);
-        video.removeAttribute('src');
-        video.load(); // Forces Chrome to release GPU decoder surface
-      }
-      if (clip.source?.audioElement) {
-        const audio = clip.source.audioElement;
-        audio.pause();
-        if (audio.src) URL.revokeObjectURL(audio.src);
-        audio.removeAttribute('src');
-        audio.load();
-      }
-      if (clip.source?.webCodecsPlayer && !destroyedPlayers.has(clip.source.webCodecsPlayer)) {
-        destroyedPlayers.add(clip.source.webCodecsPlayer);
-        clip.source.webCodecsPlayer.destroy();
-      }
-      // Recursively clean up nested composition clips
-      if (clip.nestedClips) {
-        clip.nestedClips.forEach(cleanupClip);
-      }
-    };
+      const cleanupClip = (clip: TimelineClip) => {
+        if (clip.source?.videoElement) {
+          const video = clip.source.videoElement;
+          video.pause();
+          try { if (video.src) URL.revokeObjectURL(video.src); } catch {}
+          video.removeAttribute('src');
+          video.load();
+        }
+        if (clip.source?.audioElement) {
+          const audio = clip.source.audioElement;
+          audio.pause();
+          try { if (audio.src) URL.revokeObjectURL(audio.src); } catch {}
+          audio.removeAttribute('src');
+          audio.load();
+        }
+        if (clip.source?.webCodecsPlayer && !destroyedPlayers.has(clip.source.webCodecsPlayer)) {
+          destroyedPlayers.add(clip.source.webCodecsPlayer);
+          clip.source.webCodecsPlayer.destroy();
+        }
+        if (clip.nestedClips) {
+          clip.nestedClips.forEach(cleanupClip);
+        }
+      };
 
-    clips.forEach(cleanupClip);
-
-    // Clear GPU caches — scrubbing textures, composite cache, video time tracking.
-    engine.clearCaches();
-
-    // Reset VideoSyncManager — clear stale references to old video elements.
-    layerBuilder.getVideoSyncManager().reset();
+      clips.forEach(cleanupClip);
+      engine.clearCaches();
+      layerBuilder.getVideoSyncManager().reset();
+    });
   },
 });
