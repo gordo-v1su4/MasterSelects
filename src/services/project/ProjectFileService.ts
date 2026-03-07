@@ -396,6 +396,12 @@ class ProjectFileService {
     return this.analysisService.getAnalysisRanges(handle, mediaId);
   }
 
+  async getAllAnalysisMerged(mediaId: string): Promise<{ frames: unknown[]; sampleInterval: number } | null> {
+    const handle = this.coreService.getProjectHandle();
+    if (!handle) return null;
+    return this.analysisService.getAllAnalysisMerged(handle, mediaId);
+  }
+
   async deleteAnalysis(mediaId: string): Promise<boolean> {
     const handle = this.coreService.getProjectHandle();
     if (!handle) return false;

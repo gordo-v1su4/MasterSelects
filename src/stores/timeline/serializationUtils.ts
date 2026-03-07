@@ -883,12 +883,18 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
       }));
 
       // Check for cached analysis in project folder if clip doesn't have analysis but has mediaFileId
+      // Try exact range first, then fall back to merged all-ranges
       if (!serializedClip.analysis && serializedClip.mediaFileId && projectFileService.isProjectOpen()) {
+        const mfId = serializedClip.mediaFileId;
         projectFileService.getAnalysis(
-          serializedClip.mediaFileId,
+          mfId,
           serializedClip.inPoint,
           serializedClip.outPoint
-        ).then(cachedAnalysis => {
+        ).then(async cachedAnalysis => {
+          // If no exact range match, try merging all available ranges
+          if (!cachedAnalysis) {
+            cachedAnalysis = await projectFileService.getAllAnalysisMerged(mfId);
+          }
           if (cachedAnalysis) {
             log.debug('Loaded analysis from project folder', { clip: serializedClip.name });
             const analysis: ClipAnalysis = {

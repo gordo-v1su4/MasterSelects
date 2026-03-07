@@ -297,21 +297,22 @@ export async function loadVideoMedia(params: LoadVideoMediaParams): Promise<void
   }
 
   // Load cached analysis from project folder if available (non-blocking)
+  // Uses getAllAnalysisMerged to combine all analyzed ranges (not just exact match)
   if (mediaFileId) {
     import('../../../services/project/ProjectFileService').then(async ({ projectFileService }) => {
       if (!projectFileService.isProjectOpen()) return;
       try {
-        const cached = await projectFileService.getAnalysis(mediaFileId, 0, naturalDuration);
-        if (cached) {
+        const merged = await projectFileService.getAllAnalysisMerged(mediaFileId);
+        if (merged && merged.frames.length > 0) {
           setClips(clips => clips.map(c => {
             if (c.id !== clipId || c.analysisStatus === 'ready') return c;
             return {
               ...c,
-              analysis: { frames: cached.frames as import('../../../types').FrameAnalysisData[], sampleInterval: cached.sampleInterval },
+              analysis: { frames: merged.frames as import('../../../types').FrameAnalysisData[], sampleInterval: merged.sampleInterval },
               analysisStatus: 'ready' as const,
             };
           }));
-          log.debug('Loaded cached analysis for new clip', { file: file.name });
+          log.debug('Loaded cached analysis for new clip', { file: file.name, frames: merged.frames.length });
         }
       } catch { /* no cached analysis */ }
     });
