@@ -135,8 +135,12 @@ export function createFrameContext(): FrameContext {
 
     get clipsAtTime(): TimelineClip[] {
       if (_clipsAtTime === null) {
+        // Use a small epsilon for the end boundary to avoid floating-point gaps
+        // at exact cut points where clip1.endTime === clip2.startTime.
+        // The strict < caused 1-2 frame gaps where clipsAtTime was empty.
+        const EPSILON = 1e-6;
         _clipsAtTime = clips.filter(
-          c => playheadPosition >= c.startTime && playheadPosition < c.startTime + c.duration
+          c => playheadPosition >= c.startTime && playheadPosition < c.startTime + c.duration + EPSILON
         );
       }
       return _clipsAtTime;

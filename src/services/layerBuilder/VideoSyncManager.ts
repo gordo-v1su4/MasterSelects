@@ -102,7 +102,9 @@ export class VideoSyncManager {
     this.activeHandoffs.clear();
     this.handoffElements.clear();
 
-    if (!ctx.isPlaying || ctx.isDraggingPlayhead) return;
+    // Handoffs are needed during playback (seamless cut transitions)
+    // Only skip during scrubbing where we don't need seamless video
+    if (ctx.isDraggingPlayhead) return;
 
     for (const clip of ctx.clipsAtTime) {
       if (!clip.source?.videoElement || !clip.trackId) continue;
@@ -200,11 +202,11 @@ export class VideoSyncManager {
       }
     }
 
-    // Proactive GPU warmup: look ahead 0.5s and warm up video elements
-    // for clips that are about to enter the frame. Without this, split clips
-    // stutter at cut boundaries because each HTMLVideoElement needs GPU activation.
+    // Proactive GPU warmup + audio pre-buffering: look ahead and prepare
+    // video elements for clips about to become active.
     if (ctx.isPlaying) {
       this.warmupUpcomingClips(ctx);
+      this.preBufferUpcomingVideoAudio(ctx);
     }
 
     // Update track state for seamless cut transition detection
@@ -655,7 +657,7 @@ export class VideoSyncManager {
 
   // Videos whose GPU surface has been confirmed active via RVFC
   private gpuWarmedUp = new WeakSet<HTMLVideoElement>();
-  private static readonly LOOKAHEAD_TIME = 0.5; // seconds
+  private static readonly LOOKAHEAD_TIME = 1.5; // seconds (increased from 0.5 for reliable GPU warmup)
 
   /**
    * Warm up video elements for clips that will become active within LOOKAHEAD_TIME.
@@ -723,6 +725,36 @@ export class VideoSyncManager {
   }
 
   /**
+   * Pre-buffer video elements (for audio) for upcoming clips.
+   * In full WebCodecs mode, the HTMLVideoElement provides audio.
+   * Without pre-buffering, the element is cold at cut points → audio gap.
+   */
+  private preBufferUpcomingVideoAudio(ctx: FrameContext): void {
+    if (!ctx.isPlaying || ctx.isDraggingPlayhead) return;
+
+    const lookaheadEnd = ctx.playheadPosition + VideoSyncManager.LOOKAHEAD_TIME;
+
+    for (const clip of ctx.clips) {
+      if (!clip.source?.videoElement) continue;
+
+      const video = clip.source.videoElement;
+      const clipStart = clip.startTime;
+
+      // Is this clip about to become active? (starts within lookahead, not yet active)
+      if (clipStart <= ctx.playheadPosition || clipStart > lookaheadEnd) continue;
+
+      // Skip videos already warmed up or warming up (handled by warmupUpcomingClips)
+      if (this.gpuWarmedUp.has(video) || this.warmingUpVideos.has(video)) continue;
+
+      // Pre-seek the video element to inPoint so audio data is buffered
+      const targetTime = clip.inPoint;
+      if (Math.abs(video.currentTime - targetTime) > 0.5) {
+        video.currentTime = this.safeSeekTime(video, targetTime);
+      }
+    }
+  }
+
+  /**
    * Update per-track state after syncing (for cut transition detection next frame)
    */
   private updateLastTrackState(ctx: FrameContext): void {
@@ -785,6 +817,13 @@ export class VideoSyncManager {
     const wcp = clip.source!.webCodecsPlayer!;
     const timeInfo = getClipTimeInfo(ctx, clip);
 
+    // Use handoff video element for audio continuity at cut points.
+    // In full WebCodecs mode, the HTMLVideoElement is only used for audio.
+    // At a same-source cut, the previous clip's element is already playing
+    // at the right position — reuse it instead of cold-starting clip B's element.
+    const handoffVideo = this.activeHandoffs.get(clip.id);
+    const audioVideo = handoffVideo ?? video;
+
     if (ctx.isPlaying) {
       // Playback takes over — no scrub tracking needed
 
@@ -793,11 +832,12 @@ export class VideoSyncManager {
       wcp.advanceToTime(timeInfo.clipTime);
 
       // Keep video element in sync for audio (if available)
-      if (video) {
-        if (video.paused) video.play().catch(() => {});
-        const audioDrift = Math.abs(video.currentTime - timeInfo.clipTime);
+      // Use handoff element for seamless audio across cuts
+      if (audioVideo) {
+        if (audioVideo.paused) audioVideo.play().catch(() => {});
+        const audioDrift = Math.abs(audioVideo.currentTime - timeInfo.clipTime);
         if (audioDrift > 0.3) {
-          video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
+          audioVideo.currentTime = this.safeSeekTime(audioVideo, timeInfo.clipTime);
         }
       }
     } else {

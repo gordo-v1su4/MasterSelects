@@ -423,28 +423,20 @@ export function useEngine() {
         // previous position (not yet seeking), so importExternalTexture succeeds and
         // populates the cache. The 'seeked' event then triggers a re-render with the
         // correct frame.
-        if (isPlaying) {
-          // Sync video elements FIRST during playback
-          const syncVideoStart = performance.now();
-          layerBuilder.syncVideoElements();
-          syncVideoMs += performance.now() - syncVideoStart;
+        // Always sync video BEFORE render — ensures the current frame is
+        // at the right position before we import textures and composite.
+        // Previously, scrubbing rendered first (stale frame) then seeked after,
+        // causing 1-frame-late display. The RVFC re-render handles page-reload
+        // robustness (GPU surface cold → warmup play/pause → RVFC triggers render).
+        const syncVideoStart = performance.now();
+        layerBuilder.syncVideoElements();
+        syncVideoMs += performance.now() - syncVideoStart;
 
-          // Then render with the freshly-synced frame
-          const renderStart = performance.now();
-          engine.render(layers);
-          renderMs += performance.now() - renderStart;
-        } else {
-          // Scrubbing: render first for page-reload robustness
-          const renderStart = performance.now();
-          engine.render(layers);
-          renderMs += performance.now() - renderStart;
+        const renderStart = performance.now();
+        engine.render(layers);
+        renderMs += performance.now() - renderStart;
 
-          const syncVideoStart = performance.now();
-          layerBuilder.syncVideoElements();
-          syncVideoMs += performance.now() - syncVideoStart;
-        }
-
-        // Audio sync always after render
+        // Audio sync after render (video and audio now see same playhead)
         const syncAudioStart = performance.now();
         layerBuilder.syncAudioElements();
         syncAudioMs += performance.now() - syncAudioStart;

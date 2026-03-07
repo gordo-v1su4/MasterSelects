@@ -113,6 +113,9 @@ export class AudioTrackSyncManager {
     // Update audio track state for next frame's handoff detection
     this.updateLastAudioTrackState(ctx);
 
+    // Pre-buffer audio for upcoming clips (audio lookahead)
+    this.preBufferUpcomingAudio(ctx);
+
     // Sync background layer audio elements
     layerPlaybackManager.syncAudioElements(ctx.playheadPosition, ctx.isPlaying);
 
@@ -283,7 +286,9 @@ export class AudioTrackSyncManager {
     this.audioHandoffs.clear();
     this.audioHandoffElements.clear();
 
-    if (!ctx.isPlaying || ctx.isDraggingPlayhead) return;
+    // Handoffs are needed during playback (seamless cut transitions)
+    // Only skip during scrubbing where we don't need seamless audio
+    if (ctx.isDraggingPlayhead) return;
 
     for (const track of ctx.audioTracks) {
       const clip = getClipForTrack(ctx, track.id);
@@ -325,6 +330,47 @@ export class AudioTrackSyncManager {
         audioElement: audio,
         outPoint: clip.outPoint,
       });
+    }
+  }
+
+  // Audio lookahead: pre-buffer upcoming audio elements
+  private static readonly AUDIO_LOOKAHEAD_TIME = 1.0; // seconds
+  private preBufferedAudio = new WeakSet<HTMLAudioElement>();
+
+  /**
+   * Pre-buffer audio elements for clips about to become active.
+   * Without this, audio starts cold at cut points causing a 100-500ms gap.
+   * We seek the audio element to the correct inPoint and call load() to
+   * ensure the browser has decoded audio data ready.
+   */
+  private preBufferUpcomingAudio(ctx: FrameContext): void {
+    if (!ctx.isPlaying || ctx.isDraggingPlayhead) return;
+
+    const lookaheadEnd = ctx.playheadPosition + AudioTrackSyncManager.AUDIO_LOOKAHEAD_TIME;
+
+    for (const clip of ctx.clips) {
+      // Only audio clips with audio elements
+      if (!clip.source?.audioElement) continue;
+
+      const audio = clip.source.audioElement;
+      const clipStart = clip.startTime;
+
+      // Is this clip about to become active? (starts within lookahead, not yet active)
+      if (clipStart <= ctx.playheadPosition || clipStart > lookaheadEnd) continue;
+
+      // Skip if already pre-buffered
+      if (this.preBufferedAudio.has(audio)) continue;
+
+      // Skip if no source loaded
+      if (!audio.src && audio.readyState === 0) continue;
+
+      // Pre-seek to inPoint so audio data is buffered and ready
+      const targetTime = clip.inPoint;
+      if (Math.abs(audio.currentTime - targetTime) > 0.1) {
+        audio.currentTime = targetTime;
+      }
+
+      this.preBufferedAudio.add(audio);
     }
   }
 
