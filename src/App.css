@@ -4500,6 +4500,49 @@ input[type="checkbox"] {
   line-height: 13px;
 }
 
+/* Clip badge fill effect (partial coverage) */
+.clip-badge-fill {
+  background: transparent;
+  overflow: hidden;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+}
+
+.clip-badge-fill .clip-badge-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 8px;
+  font-weight: bold;
+}
+
+.clip-badge-fill .clip-badge-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-inverse);
+  font-size: 8px;
+  font-weight: bold;
+}
+
+.clip-badge-fill .clip-badge-transcript-fill {
+  background: var(--accent);
+}
+
+.clip-badge-fill .clip-badge-analysis-fill {
+  background: #e88a1a;
+}
+
 /* Pick Whip (Layer Parenting) styles */
 .pick-whip {
   display: inline-flex;

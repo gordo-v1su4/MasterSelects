@@ -482,14 +482,59 @@ function TimelineClipComponent({
           {'\u26D3'}
         </div>
       )}
-      {/* Transcript badge */}
-      {clip.transcriptStatus === 'ready' && clip.transcript && clip.transcript.length > 0 && (
-        <div className="clip-transcript-badge" title="Transcript available">T</div>
-      )}
-      {/* Analysis badge */}
-      {!isAudioClip && (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') && (
-        <div className="clip-analysis-badge" title="Analysis available">A</div>
-      )}
+      {/* Transcript badge with coverage fill */}
+      {clip.transcriptStatus === 'ready' && clip.transcript && clip.transcript.length > 0 && (() => {
+        const clipIn = clip.inPoint ?? 0;
+        const clipOut = clip.outPoint ?? clip.duration;
+        const clipDur = clipOut - clipIn;
+        if (clipDur <= 0) return null;
+        // Calculate how much of the clip range is covered by transcript words
+        const wordsInRange = clip.transcript!.filter(w => w.end > clipIn && w.start < clipOut);
+        if (wordsInRange.length === 0) return null;
+        const sorted = [...wordsInRange].sort((a, b) => a.start - b.start);
+        const merged: [number, number][] = [[Math.max(sorted[0].start, clipIn), Math.min(sorted[0].end, clipOut)]];
+        for (let i = 1; i < sorted.length; i++) {
+          const s = Math.max(sorted[i].start, clipIn);
+          const e = Math.min(sorted[i].end, clipOut);
+          const last = merged[merged.length - 1];
+          if (s <= last[1]) last[1] = Math.max(last[1], e);
+          else merged.push([s, e]);
+        }
+        const covered = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
+        const pct = Math.min(100, Math.round((covered / clipDur) * 100));
+        return pct >= 100 ? (
+          <div className="clip-transcript-badge" title="Fully transcribed">T</div>
+        ) : (
+          <div className="clip-transcript-badge clip-badge-fill" title={`${pct}% transcribed`}>
+            <span className="clip-badge-bg">T</span>
+            <span className="clip-badge-progress clip-badge-transcript-fill" style={{ height: `${pct}%` }}>T</span>
+          </div>
+        );
+      })()}
+      {/* Analysis badge with coverage fill */}
+      {!isAudioClip && (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') && (() => {
+        const clipIn = clip.inPoint ?? 0;
+        const clipOut = clip.outPoint ?? clip.duration;
+        const clipDur = clipOut - clipIn;
+        if (clipDur <= 0) return null;
+        // Calculate coverage from analysis frame timestamps
+        let pct = 100;
+        if (clip.analysis?.frames?.length) {
+          const frames = clip.analysis.frames;
+          const interval = (clip.analysis.sampleInterval || 500) / 1000;
+          const framesInRange = frames.filter((f: any) => f.timestamp >= clipIn && f.timestamp < clipOut);
+          const coveredTime = framesInRange.length * interval;
+          pct = Math.min(100, Math.round((coveredTime / clipDur) * 100));
+        }
+        return pct >= 100 ? (
+          <div className="clip-analysis-badge" title="Fully analyzed">A</div>
+        ) : (
+          <div className="clip-analysis-badge clip-badge-fill" title={`${pct}% analyzed`}>
+            <span className="clip-badge-bg">A</span>
+            <span className="clip-badge-progress clip-badge-analysis-fill" style={{ height: `${pct}%` }}>A</span>
+          </div>
+        );
+      })()}
       {/* Waveform generation progress indicator */}
       {clip.waveformGenerating && (
         <div className="clip-waveform-indicator">
