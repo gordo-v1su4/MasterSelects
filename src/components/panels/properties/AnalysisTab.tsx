@@ -114,7 +114,7 @@ export function AnalysisTab({ clipId, analysis, analysisStatus, analysisProgress
   }, [clipStartTime, inPoint]);
 
   return (
-    <div className="properties-tab-content analysis-tab">
+    <div className="properties-tab-content analysis-tab" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Actions */}
       <div className="properties-section">
         <div className="analysis-tab-actions">
@@ -190,7 +190,7 @@ export function AnalysisTab({ clipId, analysis, analysisStatus, analysisProgress
       )}
 
       {/* AI Scene Description Section */}
-      <div className="properties-section" style={{ borderTop: '1px solid var(--border-color)', marginTop: '8px', paddingTop: '8px' }}>
+      <div className="properties-section" style={{ borderTop: '1px solid var(--border-color)', marginTop: '8px', paddingTop: '8px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <h4>AI Scene Description</h4>
         <div className="analysis-tab-actions">
           {descStatus !== 'ready' && descStatus !== 'describing' && (
@@ -230,10 +230,11 @@ export function AnalysisTab({ clipId, analysis, analysisStatus, analysisProgress
         {segments.length > 0 && (
           <div className="scene-segment-list" style={{
             marginTop: '6px',
-            maxHeight: '300px',
+            flex: 1,
             overflowY: 'auto',
             borderRadius: '4px',
             border: '1px solid var(--border-color)',
+            minHeight: 0,
           }}>
             {segments.map(seg => {
               const isActive = seg.id === activeSegment?.id;

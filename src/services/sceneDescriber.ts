@@ -192,28 +192,30 @@ async function describeFrameBatch(
 
 /**
  * Strip thinking/reasoning artifacts from model output.
- * Only keep lines that contain timestamp patterns [MM:SS].
+ * Only keep lines matching exact format: [MM:SS-MM:SS] Description
  */
 function cleanThinkingText(text: string): string {
   // Remove <think>...</think> blocks
   text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
 
-  // Split into lines and only keep timestamp-formatted lines
+  // Strict pattern: line must start with [MM:SS-MM:SS] followed by a description
+  const strictRange = /^\[?\s*\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}\s*\]?\s*.{5,}/;
   const lines = text.split('\n');
-  const timestampLine = /\[?\s*\d{1,2}:\d{2}/;
-  const cleanLines = lines.filter(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return false;
-    // Keep lines that start with a timestamp pattern
-    return timestampLine.test(trimmed);
-  });
+  const cleanLines = lines.filter(line => strictRange.test(line.trim()));
 
-  // If we found timestamp lines, use only those
-  if (cleanLines.length > 0) {
+  if (cleanLines.length >= 2) {
     return cleanLines.join('\n');
   }
 
-  // Fallback: return original (stripped of think tags)
+  // If strict matching fails, try to extract ONLY the [MM:SS-MM:SS] Description parts
+  // from within a larger block of text (thinking mixed with output)
+  const extractPattern = /\[\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}\]\s*[A-Z][^[\n]{10,}/g;
+  const extracted = text.match(extractPattern);
+  if (extracted && extracted.length >= 2) {
+    return extracted.join('\n');
+  }
+
+  // Last resort: return original stripped text
   return text.trim();
 }
 
