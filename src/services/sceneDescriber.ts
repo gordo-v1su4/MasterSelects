@@ -1,135 +1,46 @@
 // Scene Describer Service
-// Uses local Ollama (Qwen3.5) to describe video content with timestamps
+// Uses local Qwen3-VL Python server for native video understanding with timestamps
 
 import { Logger } from './logger';
 import { useTimelineStore } from '../stores/timeline';
+import { useMediaStore } from '../stores/mediaStore';
 import type { SceneSegment, SceneDescriptionStatus } from '../types';
 
 const log = Logger.create('SceneDescriber');
 
-const OLLAMA_URL = 'http://localhost:11434';
-const MODEL = 'qwen3-vl:8b';
-// Sample every N seconds for frame extraction
-const SAMPLE_INTERVAL_SEC = 2;
-// Canvas size for frame capture (smaller = faster, less VRAM)
-const CAPTURE_WIDTH = 512;
-const CAPTURE_HEIGHT = 288;
+const SERVER_URL = 'http://localhost:5555';
 
 // Cancellation state
 let isDescribing = false;
-let shouldCancel = false;
+let abortController: AbortController | null = null;
 
 /**
- * Check if Ollama is available and the model is loaded
+ * Check if the Qwen3-VL Python server is available
  */
-export async function checkOllamaStatus(): Promise<{ available: boolean; modelLoaded: boolean; error?: string }> {
+export async function checkServerStatus(): Promise<{
+  available: boolean;
+  modelLoaded: boolean;
+  error?: string;
+}> {
   try {
-    const response = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    if (!response.ok) return { available: false, modelLoaded: false, error: 'Ollama not responding' };
+    const response = await fetch(`${SERVER_URL}/api/status`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return { available: false, modelLoaded: false, error: 'Server not responding' };
 
     const data = await response.json();
-    const models = data.models || [];
-    const hasModel = models.some((m: { name: string }) => m.name.startsWith('qwen3-vl'));
-
-    return { available: true, modelLoaded: hasModel };
-  } catch {
-    return { available: false, modelLoaded: false, error: 'Ollama not running. Install from ollama.com and run: ollama pull qwen3.5:9b' };
-  }
-}
-
-/**
- * Extract a single frame from video as base64 JPEG
- */
-function extractFrameAsBase64(
-  video: HTMLVideoElement,
-  timestampSec: number,
-  canvas: HTMLCanvasElement,
-  ctx: CanvasRenderingContext2D
-): Promise<string> {
-  return new Promise((resolve) => {
-    const onSeeked = () => {
-      video.removeEventListener('seeked', onSeeked);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      // Get as JPEG base64 (smaller than PNG)
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-      // Strip the data:image/jpeg;base64, prefix
-      resolve(dataUrl.split(',')[1]);
+    return {
+      available: data.available,
+      modelLoaded: data.model_loaded,
+      error: data.model_loaded ? undefined : 'Model not loaded yet (will load on first request)',
     };
-
-    video.addEventListener('seeked', onSeeked);
-    video.currentTime = timestampSec;
-
-    // Timeout fallback
-    setTimeout(() => {
-      video.removeEventListener('seeked', onSeeked);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-      resolve(dataUrl.split(',')[1]);
-    }, 2000);
-  });
-}
-
-/**
- * Send a single frame to Ollama and get scene description
- * Qwen3-VL works best with one image per request for reliable output
- */
-async function describeSingleFrame(
-  frame: { base64: string; timestamp: number },
-  prevDescription: string,
-  totalDuration: number,
-): Promise<string> {
-  const mins = Math.floor(frame.timestamp / 60);
-  const secs = Math.floor(frame.timestamp % 60);
-  const timeLabel = `${mins}:${secs.toString().padStart(2, '0')}`;
-
-  const contextHint = prevDescription
-    ? `Previous scene was: "${prevDescription}". `
-    : '';
-
-  const prompt = `/no_think\nThis is a frame from a video (${Math.round(totalDuration)}s total) at timestamp ${timeLabel}. ` +
-    `${contextHint}` +
-    `Describe what is happening in this frame in ONE concise sentence (max 20 words). ` +
-    `Focus on actions, subjects, camera angle, and any motion you can infer. ` +
-    `Output ONLY the description, nothing else.`;
-
-  const response = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [{
-        role: 'user',
-        content: prompt,
-        images: [frame.base64],
-      }],
-      stream: false,
-      options: {
-        num_predict: 512,
-        temperature: 0.3,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Ollama API error: ${response.status} - ${text}`);
+  } catch {
+    return {
+      available: false,
+      modelLoaded: false,
+      error: 'Qwen3-VL server not running. Start it with: python tools/qwen3vl-server/server.py',
+    };
   }
-
-  const data = await response.json();
-  let content = data.message?.content || '';
-
-  // Fallback: if content empty but thinking has useful text, extract it
-  if (!content.trim() && data.message?.thinking) {
-    const thinking = data.message.thinking as string;
-    // Try to find a descriptive sentence in the thinking
-    const sentences = thinking.split(/[.!]\s/).filter(s => s.trim().length > 10);
-    if (sentences.length > 0) {
-      content = sentences[sentences.length - 1].trim();
-      if (!content.endsWith('.')) content += '.';
-    }
-  }
-
-  return content.trim();
 }
 
 /**
@@ -161,30 +72,11 @@ function updateClipSceneDescription(
 }
 
 /**
- * Describe a video clip using Ollama AI
+ * Describe a video clip using the Qwen3-VL Python server (native video input)
  */
 export async function describeClip(clipId: string): Promise<void> {
   if (isDescribing) {
     log.warn('Already describing a clip');
-    return;
-  }
-
-  // Check Ollama availability
-  const status = await checkOllamaStatus();
-  if (!status.available) {
-    updateClipSceneDescription(clipId, {
-      status: 'error',
-      progress: 0,
-      message: status.error || 'Ollama not available',
-    });
-    return;
-  }
-  if (!status.modelLoaded) {
-    updateClipSceneDescription(clipId, {
-      status: 'error',
-      progress: 0,
-      message: `Model ${MODEL} not found. Run: ollama pull ${MODEL}`,
-    });
     return;
   }
 
@@ -203,122 +95,102 @@ export async function describeClip(clipId: string): Promise<void> {
     return;
   }
 
+  // Resolve file path: source.filePath > mediaStore.absolutePath > File.path
+  let filePath = clip.source?.filePath || (clip.file as any).path;
+  if (!filePath) {
+    // Try mediaStore absolutePath
+    const mediaFileId = clip.source?.mediaFileId || clip.mediaFileId;
+    if (mediaFileId) {
+      const mediaFile = useMediaStore.getState().files.find(f => f.id === mediaFileId);
+      filePath = mediaFile?.absolutePath;
+    }
+  }
+  if (!filePath) {
+    updateClipSceneDescription(clipId, {
+      status: 'error',
+      progress: 0,
+      message: 'No file path available. Drag the video from your file explorer onto the timeline.',
+    });
+    return;
+  }
+
   isDescribing = true;
-  shouldCancel = false;
+  abortController = new AbortController();
+
   updateClipSceneDescription(clipId, {
     status: 'describing',
-    progress: 0,
-    message: 'Loading video...',
+    progress: 10,
+    message: 'Connecting to Qwen3-VL server...',
   });
 
-  let videoUrl: string | null = null;
-
   try {
-    // Create video element for frame extraction
-    const video = document.createElement('video');
-    videoUrl = URL.createObjectURL(clip.file);
-    video.src = videoUrl;
-    video.muted = true;
-    video.preload = 'auto';
-
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error('Failed to load video'));
-      setTimeout(() => reject(new Error('Video load timeout')), 30000);
-    });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = CAPTURE_WIDTH;
-    canvas.height = CAPTURE_HEIGHT;
-    const ctx = canvas.getContext('2d')!;
+    // Check server availability
+    const status = await checkServerStatus();
+    if (!status.available) {
+      updateClipSceneDescription(clipId, {
+        status: 'error',
+        progress: 0,
+        message: status.error || 'Server not available',
+      });
+      return;
+    }
 
     const inPoint = clip.inPoint ?? 0;
     const outPoint = clip.outPoint ?? clip.duration;
     const clipDuration = outPoint - inPoint;
 
-    // Calculate sample timestamps
-    const timestamps: number[] = [];
-    for (let t = inPoint; t < outPoint; t += SAMPLE_INTERVAL_SEC) {
-      timestamps.push(t);
-    }
-    // Always include last frame if not already close
-    if (timestamps.length > 0 && outPoint - timestamps[timestamps.length - 1] > 1) {
-      timestamps.push(outPoint - 0.1);
-    }
-
-    const totalFrames = timestamps.length;
-    log.info(`Extracting ${totalFrames} frames from ${clip.name} (${clipDuration.toFixed(1)}s)`);
+    // Adjust frame count based on clip duration
+    let numFrames = 12;
+    if (clipDuration < 5) numFrames = 6;
+    else if (clipDuration < 15) numFrames = 8;
+    else if (clipDuration > 60) numFrames = 16;
+    else if (clipDuration > 120) numFrames = 20;
 
     updateClipSceneDescription(clipId, {
-      progress: 5,
-      message: `Extracting ${totalFrames} frames...`,
+      progress: 20,
+      message: 'Analyzing video with AI...',
     });
 
-    // Extract all frames
-    const frames: { base64: string; timestamp: number }[] = [];
-    for (let i = 0; i < timestamps.length; i++) {
-      if (shouldCancel) throw new Error('Cancelled');
+    log.info(`Describing clip ${clip.name}: ${filePath} (${clipDuration.toFixed(1)}s, ${numFrames} frames)`);
 
-      const base64 = await extractFrameAsBase64(video, timestamps[i], canvas, ctx);
-      frames.push({ base64, timestamp: timestamps[i] });
+    // Send video to Python server (extracts frames + sends to Ollama)
+    const response = await fetch(`${SERVER_URL}/api/describe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_path: filePath.replace(/\\/g, '/'),
+        duration: clipDuration,
+        num_frames: numFrames,
+      }),
+      signal: abortController.signal,
+    });
 
-      const extractProgress = 5 + (35 * (i + 1) / totalFrames);
-      updateClipSceneDescription(clipId, {
-        progress: Math.round(extractProgress),
-        message: `Extracted frame ${i + 1}/${totalFrames}`,
-      });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(errorData.error || `Server error: ${response.status}`);
     }
 
-    // Process frame by frame (Qwen3-VL works best with single images)
-    const allSegments: SceneSegment[] = [];
-    let prevDescription = '';
+    const result = await response.json();
+    log.info(`AI analysis complete: ${result.segments?.length} segments in ${result.elapsed_seconds}s`);
 
-    for (let i = 0; i < frames.length; i++) {
-      if (shouldCancel) throw new Error('Cancelled');
-
-      updateClipSceneDescription(clipId, {
-        progress: Math.round(40 + (50 * (i + 1) / frames.length)),
-        message: `AI analyzing frame ${i + 1}/${frames.length}...`,
-      });
-
-      log.info(`Describing frame ${i + 1}/${frames.length} at ${frames[i].timestamp.toFixed(1)}s`);
-
-      const description = await describeSingleFrame(frames[i], prevDescription, clipDuration);
-
-      if (description) {
-        allSegments.push({
-          id: `scene-${allSegments.length}`,
-          text: description,
-          start: frames[i].timestamp,
-          end: frames[i].timestamp + SAMPLE_INTERVAL_SEC,
-        });
-        prevDescription = description;
-
-        // Update with partial results
-        updateClipSceneDescription(clipId, {
-          segments: [...allSegments],
-        });
-      }
-    }
-
-    // Finalize: adjust end times so segments don't overlap
-    const finalSegments = allSegments.map((seg, i, arr) => ({
-      ...seg,
+    const segments: SceneSegment[] = (result.segments || []).map((seg: any, i: number) => ({
       id: `scene-${i}`,
-      end: i < arr.length - 1 ? arr[i + 1].start : outPoint,
+      text: seg.text,
+      start: seg.start + inPoint, // Offset by clip in-point
+      end: Math.min(seg.end + inPoint, outPoint),
     }));
 
     updateClipSceneDescription(clipId, {
       status: 'ready',
       progress: 100,
-      segments: finalSegments,
+      segments,
       message: undefined,
     });
 
-    log.info(`Scene description complete: ${finalSegments.length} segments`);
+    log.info(`Scene description complete: ${segments.length} segments`);
 
   } catch (error) {
-    if (shouldCancel) {
+    if (abortController?.signal.aborted) {
       updateClipSceneDescription(clipId, {
         status: 'none',
         progress: 0,
@@ -335,8 +207,8 @@ export async function describeClip(clipId: string): Promise<void> {
       });
     }
   } finally {
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
     isDescribing = false;
+    abortController = null;
   }
 }
 
@@ -344,8 +216,8 @@ export async function describeClip(clipId: string): Promise<void> {
  * Cancel ongoing scene description
  */
 export function cancelDescription(): void {
-  if (isDescribing) {
-    shouldCancel = true;
+  if (isDescribing && abortController) {
+    abortController.abort();
     log.info('Cancel requested');
   }
 }
