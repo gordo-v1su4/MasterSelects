@@ -607,34 +607,34 @@ async function propagateAnalysisToMediaFile(mediaFileId: string): Promise<void> 
   try {
     const mediaState = useMediaStore.getState();
     const file = mediaState.files.find(f => f.id === mediaFileId);
-    if (!file) return;
+    if (!file || !file.duration || file.duration <= 0) return;
 
-    // Calculate coverage from all analysis ranges stored on disk
-    let analysisCoverage = 0;
-    if (file.duration && file.duration > 0 && projectFileService.isProjectOpen()) {
+    const allRanges: [number, number][] = [];
+
+    // 1. Try to get ranges from project folder on disk
+    if (projectFileService.isProjectOpen()) {
       try {
         const rangeKeys = await projectFileService.getAnalysisRanges(mediaFileId);
-        if (rangeKeys.length > 0) {
-          const ranges: [number, number][] = rangeKeys.map(key => {
-            const [s, e] = key.split('-').map(Number);
-            return [s, e];
-          });
-          analysisCoverage = calcCoverage(ranges, file.duration);
+        for (const key of rangeKeys) {
+          const [s, e] = key.split('-').map(Number);
+          if (!isNaN(s) && !isNaN(e)) allRanges.push([s, e]);
         }
       } catch { /* ignore */ }
     }
 
-    // Also check clips for scene descriptions (AI describe)
+    // 2. Also derive ranges from all clips with analysis/description for this media file
     const clips = useTimelineStore.getState().clips;
     for (const clip of clips) {
       const mfId = clip.source?.mediaFileId || clip.mediaFileId;
-      if (mfId === mediaFileId && clip.sceneDescriptionStatus === 'ready' && file.duration) {
+      if (mfId !== mediaFileId) continue;
+      if (clip.analysisStatus === 'ready' || clip.sceneDescriptionStatus === 'ready') {
         const inPt = clip.inPoint ?? 0;
         const outPt = clip.outPoint ?? (clip.source?.naturalDuration ?? file.duration);
-        const clipCov = (outPt - inPt) / file.duration;
-        analysisCoverage = Math.min(1, analysisCoverage + clipCov);
+        if (outPt > inPt) allRanges.push([inPt, outPt]);
       }
     }
+
+    const analysisCoverage = calcCoverage(allRanges, file.duration);
 
     useMediaStore.setState({
       files: mediaState.files.map(f =>
@@ -643,7 +643,7 @@ async function propagateAnalysisToMediaFile(mediaFileId: string): Promise<void> 
           : f
       ),
     });
-    log.debug('Propagated analysis status to MediaFile', { mediaFileId, analysisCoverage });
+    log.debug('Propagated analysis status to MediaFile', { mediaFileId, analysisCoverage: analysisCoverage.toFixed(2) });
   } catch (e) {
     log.warn('Failed to propagate analysis status to MediaFile', e);
   }
