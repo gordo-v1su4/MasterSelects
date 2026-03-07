@@ -296,6 +296,27 @@ export async function loadVideoMedia(params: LoadVideoMediaParams): Promise<void
     });
   }
 
+  // Load cached analysis from project folder if available (non-blocking)
+  if (mediaFileId) {
+    import('../../../services/project/ProjectFileService').then(async ({ projectFileService }) => {
+      if (!projectFileService.isProjectOpen()) return;
+      try {
+        const cached = await projectFileService.getAnalysis(mediaFileId, 0, naturalDuration);
+        if (cached) {
+          setClips(clips => clips.map(c => {
+            if (c.id !== clipId || c.analysisStatus === 'ready') return c;
+            return {
+              ...c,
+              analysis: { frames: cached.frames as import('../../../types').FrameAnalysisData[], sampleInterval: cached.sampleInterval },
+              analysisStatus: 'ready' as const,
+            };
+          }));
+          log.debug('Loaded cached analysis for new clip', { file: file.name });
+        }
+      } catch { /* no cached analysis */ }
+    });
+  }
+
   // Generate thumbnails in background (non-blocking) - only if enabled and not large file
   const isLargeFile = shouldSkipWaveform(file);
   if (thumbnailsEnabled && !isLargeFile && video) {

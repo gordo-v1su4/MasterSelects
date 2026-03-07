@@ -28,7 +28,7 @@ import { detectMediaType } from './helpers/mediaTypeHelpers';
 import { loadVideoMedia } from './clip/addVideoClip';
 import { createAudioClipPlaceholder, loadAudioMedia } from './clip/addAudioClip';
 import { createImageClipPlaceholder, loadImageMedia } from './clip/addImageClip';
-import { createVideoElement, createAudioElement, initWebCodecsPlayer } from './helpers/webCodecsHelpers';
+import { createVideoElement, createAudioElement } from './helpers/webCodecsHelpers';
 import {
   createCompClipPlaceholder,
   loadNestedClips,
@@ -520,21 +520,13 @@ export const createClipSlice: SliceCreator<CoreClipActions> = (set, get) => ({
       secondClipSource = {
         ...clip.source,
         videoElement: newVideo,
-        webCodecsPlayer: undefined, // Will be initialized async below
+        // Share WebCodecsPlayer with clip1 — both clips are from the same source
+        // and never overlap (same track), so one decoder handles both.
+        // advanceToTime already handles time jumps at cut boundaries.
+        // This avoids async re-parsing the MP4 and creating a second decoder
+        // that could crash or race with the first.
+        webCodecsPlayer: clip.source.webCodecsPlayer,
       };
-      // Initialize WebCodecsPlayer for the new video element asynchronously
-      initWebCodecsPlayer(newVideo, clip.name).then(player => {
-        if (player) {
-          const { clips: currentClips } = get();
-          const secondClipId = `clip-${timestamp}-${randomSuffix}-b`;
-          set({
-            clips: currentClips.map(c => {
-              if (c.id !== secondClipId || !c.source) return c;
-              return { ...c, source: { ...c.source, webCodecsPlayer: player } };
-            }),
-          });
-        }
-      });
     } else if (clip.source?.type === 'audio' && clip.source.audioElement && clip.file) {
       // Handle audio-only clips - create new audio element for second clip
       const newAudio = createAudioElement(clip.file);

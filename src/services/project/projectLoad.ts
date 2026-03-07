@@ -89,17 +89,18 @@ async function convertProjectMediaToStore(projectMedia: ProjectMediaFile[]): Pro
       }
     }
 
-    // Check for existing transcript on disk + calculate coverage
+    // Check for existing transcript on disk + load words + calculate coverage
     let transcriptStatus: import('../../types').TranscriptStatus = 'none';
+    let transcript: import('../../types').TranscriptWord[] | undefined;
     let transcriptCoverage = 0;
     if (projectFileService.isProjectOpen()) {
       try {
         const saved = await projectFileService.getTranscript(pm.id);
         if (saved && Array.isArray(saved) && saved.length > 0) {
           transcriptStatus = 'ready';
+          transcript = saved as import('../../types').TranscriptWord[];
           if (pm.duration && pm.duration > 0) {
-            const words = saved as { start: number; end: number }[];
-            transcriptCoverage = calcRangeCoverage(words.map(w => [w.start, w.end]), pm.duration);
+            transcriptCoverage = calcRangeCoverage(transcript.map(w => [w.start, w.end]), pm.duration);
           }
         }
       } catch { /* no transcript file */ }
@@ -147,6 +148,7 @@ async function convertProjectMediaToStore(projectMedia: ProjectMediaFile[]): Pro
       hasFileHandle: !!handle,
       filePath: pm.sourcePath,
       transcriptStatus,
+      transcript,
       transcriptCoverage,
       analysisStatus,
       analysisCoverage,
