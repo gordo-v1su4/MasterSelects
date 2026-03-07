@@ -45,6 +45,11 @@ export class VideoSyncManager {
   // WebCodecs precise seek debounce
   private wcPreciseSeekTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
+  // Track last fastSeek target per clip to avoid redundant decoder resets.
+  // fastSeek sets seekTargetUs=null, so getPendingSeekTime() returns null.
+  // Without this, each frame re-triggers fastSeek → decoder.reset() loop.
+  private lastWcFastSeekTarget: Record<string, number> = {};
+
   // Seamless cut transition: track last video element per track.
   // When same-source clips are sequential (split clips), the outgoing clip's
   // video element keeps playing through the cut — no pause/play gap.
@@ -154,6 +159,12 @@ export class VideoSyncManager {
             !this.handoffElements.has(clip.source.videoElement)) {
           clip.source.videoElement.pause();
         }
+        // NOTE: Do NOT pause WebCodecsPlayer here. Split clips share the same
+        // player instance, so clip1 exiting and clip2 entering use the same decoder.
+        // Pausing here would reset the decoder right after clip2's advanceToTime()
+        // just set it up — causing a permanent freeze. The player's advanceToTime()
+        // handles all state transitions (seek, restart) automatically.
+        // syncFullWebCodecs() pauses the player when ctx.isPlaying is false.
       }
 
       // Pause nested comp videos not at playhead
@@ -755,6 +766,9 @@ export class VideoSyncManager {
     const timeInfo = getClipTimeInfo(ctx, clip);
 
     if (ctx.isPlaying) {
+      // Clear scrub tracking — playback takes over
+      delete this.lastWcFastSeekTarget[clip.id];
+
       // Render-loop-driven: advance decoder to clip time each frame.
       // No internal animation loop — advanceToTime handles decode feeding + frame selection.
       wcp.advanceToTime(timeInfo.clipTime);
@@ -770,15 +784,24 @@ export class VideoSyncManager {
       if (wcp.isPlaying) wcp.pause();
       if (!video.paused) video.pause();
 
-      const wcTimeDiff = Math.abs(wcp.currentTime - timeInfo.clipTime);
+      // Use pending seek target if one is in flight — avoids resetting the decoder
+      // repeatedly before it can output a frame (seek resets decoder each call).
+      // For fastSeek: seekTargetUs is null, so also check our local tracker.
+      const pendingSeek = wcp.getPendingSeekTime();
+      const lastFastTarget = this.lastWcFastSeekTarget[clip.id];
+      const effectivePos = pendingSeek
+        ?? (lastFastTarget !== undefined ? lastFastTarget : wcp.currentTime);
+      const wcTimeDiff = Math.abs(effectivePos - timeInfo.clipTime);
       if (wcTimeDiff > 0.05) {
         if (ctx.isDraggingPlayhead) {
           // Fast scrubbing: keyframe-only for instant feedback
           wcp.fastSeek(timeInfo.clipTime);
+          this.lastWcFastSeekTarget[clip.id] = timeInfo.clipTime;
           // Debounced precise seek when scrubbing pauses
           this.schedulePreciseWcSeek(clip.id, wcp, timeInfo.clipTime);
         } else {
           // Click/arrow: precise seek immediately
+          delete this.lastWcFastSeekTarget[clip.id];
           wcp.seek(timeInfo.clipTime);
         }
       }
