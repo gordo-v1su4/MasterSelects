@@ -128,7 +128,14 @@ export class AudioSyncHandler {
 
     // Start playback if paused
     if (element.paused) {
-      element.currentTime = clipTime;
+      // Only seek before play if the element is significantly out of sync.
+      // After a clean pause, the element is already at the correct position —
+      // an unnecessary seek forces the browser to re-decode from the last
+      // keyframe, causing a 100-400ms startup delay.
+      const currentDrift = Math.abs(element.currentTime - clipTime);
+      if (currentDrift > 0.1) {
+        element.currentTime = clipTime;
+      }
       element.play().catch(err => {
         log.warn(`[Audio ${type}] Failed to play: ${err.message}`);
         state.hasAudioError = true;
