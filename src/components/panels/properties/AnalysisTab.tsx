@@ -226,49 +226,61 @@ export function AnalysisTab({ clipId, analysis, analysisStatus, analysisProgress
           </div>
         )}
 
-        {/* Current scene at playhead */}
-        {activeSegment && (
-          <div style={{ marginTop: '6px', padding: '6px 8px', background: 'var(--accent-subtle)', borderRadius: '4px', borderLeft: '3px solid var(--accent)' }}>
-            <div style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', marginBottom: '2px' }}>
-              {formatTimestamp(activeSegment.start)} - {formatTimestamp(activeSegment.end)}
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-              {activeSegment.text}
-            </div>
-          </div>
-        )}
-
-        {/* Scene list */}
+        {/* Scene segment list */}
         {segments.length > 0 && (
-          <div style={{ marginTop: '6px', maxHeight: '200px', overflowY: 'auto' }}>
-            {segments.map(seg => (
-              <div
-                key={seg.id}
-                onClick={() => handleSeekToSegment(seg.start)}
-                style={{
-                  padding: '4px 6px',
-                  cursor: 'pointer',
-                  borderLeft: seg.id === activeSegment?.id ? '3px solid var(--accent)' : '3px solid transparent',
-                  background: seg.id === activeSegment?.id ? 'var(--accent-subtle)' : 'transparent',
-                  fontSize: '11px',
-                  lineHeight: '1.4',
-                  transition: 'background 0.15s',
-                }}
-              >
-                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '10px', marginRight: '6px' }}>
-                  {formatTimestamp(seg.start)}
-                </span>
-                <span style={{ color: seg.id === activeSegment?.id ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                  {seg.text}
-                </span>
-              </div>
-            ))}
+          <div className="scene-segment-list" style={{
+            marginTop: '6px',
+            maxHeight: '300px',
+            overflowY: 'auto',
+            borderRadius: '4px',
+            border: '1px solid var(--border-color)',
+          }}>
+            {segments.map(seg => {
+              const isActive = seg.id === activeSegment?.id;
+              return (
+                <div
+                  key={seg.id}
+                  className={`scene-segment-item${isActive ? ' active' : ''}`}
+                  onClick={() => handleSeekToSegment(seg.start)}
+                  style={{
+                    display: 'flex',
+                    gap: '8px',
+                    padding: '6px 8px',
+                    cursor: 'pointer',
+                    borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
+                    background: isActive ? 'var(--accent-subtle)' : 'transparent',
+                    borderBottom: '1px solid var(--border-color)',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'; }}
+                  onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <span style={{
+                    color: isActive ? 'var(--accent)' : 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    whiteSpace: 'nowrap',
+                    paddingTop: '1px',
+                    flexShrink: 0,
+                  }}>
+                    {formatTimestamp(seg.start)}
+                  </span>
+                  <span style={{
+                    color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontSize: '11px',
+                    lineHeight: '1.4',
+                  }}>
+                    {seg.text}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 
         {descStatus === 'none' && segments.length === 0 && (
           <div className="analysis-empty-state" style={{ marginTop: '4px', fontSize: '11px' }}>
-            Uses local Ollama AI to describe video content.
+            Uses local Ollama AI to describe video content with timestamps.
           </div>
         )}
       </div>

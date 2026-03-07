@@ -183,8 +183,38 @@ async function describeFrameBatch(
     log.info('Content empty, using thinking field');
   }
 
+  // Clean thinking artifacts from output
+  rawText = cleanThinkingText(rawText);
+
   const segments = parseSegments(rawText, chunkDuration, chunkStartTime);
   return { rawText, segments };
+}
+
+/**
+ * Strip thinking/reasoning artifacts from model output.
+ * Only keep lines that contain timestamp patterns [MM:SS].
+ */
+function cleanThinkingText(text: string): string {
+  // Remove <think>...</think> blocks
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+
+  // Split into lines and only keep timestamp-formatted lines
+  const lines = text.split('\n');
+  const timestampLine = /\[?\s*\d{1,2}:\d{2}/;
+  const cleanLines = lines.filter(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    // Keep lines that start with a timestamp pattern
+    return timestampLine.test(trimmed);
+  });
+
+  // If we found timestamp lines, use only those
+  if (cleanLines.length > 0) {
+    return cleanLines.join('\n');
+  }
+
+  // Fallback: return original (stripped of think tags)
+  return text.trim();
 }
 
 function formatTime(seconds: number): string {
