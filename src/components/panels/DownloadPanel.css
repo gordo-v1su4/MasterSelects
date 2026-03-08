@@ -483,6 +483,21 @@
   animation: spin 0.8s linear infinite;
 }
 
+.download-overlay-progress {
+  width: 80%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.download-overlay-progress-bar {
+  height: 100%;
+  background: var(--success);
+  transition: width 0.2s ease-out;
+  border-radius: 2px;
+}
+
 /* Drag hint overlay */
 .drag-hint {
   position: absolute;

@@ -178,6 +178,7 @@ export function DownloadPanel() {
   const [draggingVideo, setDraggingVideo] = useState<string | null>(null);
   const [autoDownload, setAutoDownload] = useState(false);
   const [downloadingVideos, setDownloadingVideos] = useState<Set<string>>(new Set());
+  const [downloadProgressMap, setDownloadProgressMap] = useState<Map<string, { progress: number; speed?: string }>>(new Map());
   const [helperConnected, setHelperConnected] = useState(isDownloadAvailable());
   const [downloadedVideos, setDownloadedVideos] = useState<Set<string>>(new Set());
 
@@ -523,8 +524,14 @@ export function DownloadPanel() {
 
     setDownloadingVideos(prev => new Set(prev).add(video.id));
 
-    const unsubscribe = subscribeToDownload(video.id, (_progress: DownloadProgress) => {
-      // Progress tracked via downloadingVideos set
+    const unsubscribe = subscribeToDownload(video.id, (p: DownloadProgress) => {
+      if (p.status === 'downloading' || p.status === 'processing') {
+        setDownloadProgressMap(prev => {
+          const next = new Map(prev);
+          next.set(video.id, { progress: p.progress, speed: p.speed });
+          return next;
+        });
+      }
     });
 
     try {
@@ -541,6 +548,11 @@ export function DownloadPanel() {
     } finally {
       setDownloadingVideos(prev => {
         const next = new Set(prev);
+        next.delete(video.id);
+        return next;
+      });
+      setDownloadProgressMap(prev => {
+        const next = new Map(prev);
         next.delete(video.id);
         return next;
       });
@@ -579,10 +591,16 @@ export function DownloadPanel() {
     }
 
     activeDownloadsRef.current.add(video.id);
+    setDownloadingVideos(prev => new Set(prev).add(video.id));
 
     const unsubscribe = subscribeToDownload(video.id, (progress: DownloadProgress) => {
       if (progress.status === 'downloading' || progress.status === 'processing') {
         updateDownloadProgress(clipId, progress.progress, progress.speed);
+        setDownloadProgressMap(prev => {
+          const next = new Map(prev);
+          next.set(video.id, { progress: progress.progress, speed: progress.speed });
+          return next;
+        });
       }
     });
 
@@ -597,6 +615,16 @@ export function DownloadPanel() {
       setDownloadError(clipId, (err as Error).message);
     } finally {
       activeDownloadsRef.current.delete(video.id);
+      setDownloadingVideos(prev => {
+        const next = new Set(prev);
+        next.delete(video.id);
+        return next;
+      });
+      setDownloadProgressMap(prev => {
+        const next = new Map(prev);
+        next.delete(video.id);
+        return next;
+      });
       unsubscribe();
     }
   };
@@ -741,11 +769,27 @@ export function DownloadPanel() {
                       <span>Loading formats...</span>
                     </div>
                   )}
-                  {/* Downloading indicator */}
+                  {/* Downloading indicator with progress */}
                   {downloadingVideos.has(video.id) && (
                     <div className="download-overlay">
                       <div className="download-spinner" />
-                      <span>Downloading...</span>
+                      <span>
+                        {(() => {
+                          const dp = downloadProgressMap.get(video.id);
+                          if (!dp || dp.progress <= 0) return 'Downloading...';
+                          const pct = Math.round(dp.progress);
+                          return dp.speed ? `${pct}% · ${dp.speed}` : `${pct}%`;
+                        })()}
+                      </span>
+                      {(() => {
+                        const dp = downloadProgressMap.get(video.id);
+                        if (!dp || dp.progress <= 0) return null;
+                        return (
+                          <div className="download-overlay-progress">
+                            <div className="download-overlay-progress-bar" style={{ width: `${dp.progress}%` }} />
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
