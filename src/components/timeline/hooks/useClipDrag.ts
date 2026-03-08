@@ -5,7 +5,6 @@ import { useState, useCallback, useRef } from 'react';
 import type { TimelineClip, TimelineTrack } from '../../../types';
 import type { ClipDragState } from '../types';
 import { Logger } from '../../../services/logger';
-import { SNAP_THRESHOLD_SECONDS } from '../../../stores/timeline/constants';
 
 const log = Logger.create('useClipDrag');
 
@@ -174,34 +173,59 @@ export function useClipDrag({
         const shouldSnap = snappingEnabled !== moveEvent.altKey;
 
         // First check for edge snapping (only if snapping should be active)
-        // Snap hysteresis: once snapped, require 3x the distance to break free
-        const SNAP_BREAKOUT_MULTIPLIER = 3;
+        // Snap hysteresis: once snapped, user must drag SNAP_BREAKOUT_PX pixels to break free
+        const SNAP_BREAKOUT_PX = 40; // pixels of drag to break out of snap
         let snapped = false;
         let snappedTime = rawTime;
         let snapEdgeTime = 0;
 
         if (shouldSnap) {
-          const snapResult = getSnappedPosition(drag.clipId, rawTime, newTrackId) as { startTime: number; snapped: boolean; snapEdgeTime: number };
-          snapped = snapResult.snapped;
-          snappedTime = snapResult.startTime;
-          snapEdgeTime = snapResult.snapEdgeTime;
-
-          // If we were snapping on the previous frame but now we're not,
-          // check if the user has dragged far enough to break free
-          if (!snapped && drag.isSnapping && drag.snapIndicatorTime !== null) {
+          // If currently snapped, check if user has dragged far enough (in pixels) to break free
+          if (drag.isSnapping && drag.snapIndicatorTime !== null && drag.snappedTime !== null) {
             const draggedClipForSnap = clipMap.get(drag.clipId);
             const dur = draggedClipForSnap?.duration || 0;
-            // Check distance from rawTime's edges to the snap edge
+            // Convert breakout threshold from pixels to time using pixelToTime
+            const breakoutTimeDist = pixelToTime(SNAP_BREAKOUT_PX);
+            // Distance in time from raw position edges to the snap edge
             const distStart = Math.abs(rawTime - drag.snapIndicatorTime);
             const distEnd = Math.abs((rawTime + dur) - drag.snapIndicatorTime);
             const minDist = Math.min(distStart, distEnd);
-            const breakoutThreshold = SNAP_THRESHOLD_SECONDS * SNAP_BREAKOUT_MULTIPLIER;
 
-            if (minDist < breakoutThreshold) {
-              // Still within breakout zone — keep snapping
+            if (minDist < breakoutTimeDist) {
+              // Still within breakout zone — keep snapping at previous position
               snapped = true;
-              snappedTime = drag.snappedTime!;
+              snappedTime = drag.snappedTime;
               snapEdgeTime = drag.snapIndicatorTime;
+            }
+          }
+
+          // If not held by hysteresis, check for new snap points
+          if (!snapped) {
+            const snapResult = getSnappedPosition(drag.clipId, rawTime, newTrackId) as { startTime: number; snapped: boolean; snapEdgeTime: number };
+            snapped = snapResult.snapped;
+            snappedTime = snapResult.startTime;
+            snapEdgeTime = snapResult.snapEdgeTime;
+
+            // When moving to a different track, also snap to original position
+            // so the user can precisely move clips up/down without horizontal drift
+            if (!snapped && newTrackId !== drag.originalTrackId) {
+              const draggedClipForOrig = clipMap.get(drag.clipId);
+              const dur = draggedClipForOrig?.duration || 0;
+              const origEnd = drag.originalStartTime + dur;
+              const snapThresholdTime = pixelToTime(SNAP_BREAKOUT_PX / 2);
+
+              // Snap start to original start
+              if (Math.abs(rawTime - drag.originalStartTime) < snapThresholdTime) {
+                snapped = true;
+                snappedTime = drag.originalStartTime;
+                snapEdgeTime = drag.originalStartTime;
+              }
+              // Snap end to original end
+              else if (Math.abs((rawTime + dur) - origEnd) < snapThresholdTime) {
+                snapped = true;
+                snappedTime = drag.originalStartTime;
+                snapEdgeTime = origEnd;
+              }
             }
           }
         }
