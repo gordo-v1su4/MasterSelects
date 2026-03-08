@@ -57,6 +57,10 @@ export function TimelineOverlays({
       {clipDrag?.isSnapping && clipDrag.snapIndicatorTime !== null && (
         <div className="snap-line" style={{ left: timeToPixel(clipDrag.snapIndicatorTime) }} />
       )}
+      {/* Guide line at original position when dragging across tracks (dimmer when not snapped) */}
+      {clipDrag && !clipDrag.isSnapping && clipDrag.trackChangeGuideTime !== null && (
+        <div className="snap-line snap-line-guide" style={{ left: timeToPixel(clipDrag.trackChangeGuideTime) }} />
+      )}
 
       {/* Work area overlays */}
       {(inPoint !== null || outPoint !== null) && (

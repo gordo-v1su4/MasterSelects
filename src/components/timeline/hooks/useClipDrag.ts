@@ -117,6 +117,7 @@ export function useClipDrag({
         snappedTime: null,
         snapIndicatorTime: null,
         isSnapping: false,
+        trackChangeGuideTime: null,
         altKeyPressed: e.altKey, // Capture Alt state for independent drag
         forcingOverlap: false,
         dragStartTime: Date.now(), // Track when drag started for track-change delay
@@ -349,13 +350,9 @@ export function useClipDrag({
           currentX: moveEvent.clientX,
           currentTrackId: newTrackId,
           snappedTime: resistedTime,
-          snapIndicatorTime: snapped && !forcingOverlap
-            ? snapEdgeTime
-            : newTrackId !== drag.originalTrackId
-              ? drag.originalStartTime  // Show guide line at original position when on different track
-              : null,
-          isSnapping: snapped && !forcingOverlap
-            || newTrackId !== drag.originalTrackId,  // Always show guide when on different track
+          snapIndicatorTime: snapped && !forcingOverlap ? snapEdgeTime : null,
+          isSnapping: snapped && !forcingOverlap,
+          trackChangeGuideTime: newTrackId !== drag.originalTrackId ? drag.originalStartTime : null,
           altKeyPressed: moveEvent.altKey, // Update Alt state dynamically
           forcingOverlap,
           multiSelectTimeDelta,

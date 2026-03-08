@@ -5669,6 +5669,11 @@ input[type="checkbox"] {
   box-shadow: 0 0 8px var(--success, #4ade80);
 }
 
+.snap-line-guide {
+  opacity: 0.35;
+  box-shadow: none;
+}
+
 /* In/Out Work Area Markers */
 .work-area-overlay {
   position: absolute;

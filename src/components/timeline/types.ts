@@ -13,7 +13,8 @@ export interface ClipDragState {
   currentTrackId: string;
   snappedTime: number | null;  // Snapped position (if snapping) - used for clip positioning
   snapIndicatorTime: number | null; // The actual edge time where snap occurs - used for snap line indicator
-  isSnapping: boolean;         // Whether currently snapping
+  isSnapping: boolean;         // Whether currently snapping to an edge
+  trackChangeGuideTime: number | null; // Guide line at original position when dragging across tracks
   altKeyPressed: boolean;      // If true, skip linked group movement (independent drag)
   forcingOverlap: boolean;     // If true, user has pushed through resistance and is forcing overlap
   dragStartTime: number;       // Timestamp when drag started (for track-change delay)
