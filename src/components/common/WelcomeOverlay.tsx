@@ -30,7 +30,7 @@ function detectBrowser(): { name: string; isChromium: boolean } {
     return { name: 'Safari', isChromium: false };
   }
   if (/Firefox\//.test(ua)) {
-    return { name: 'Firefox', isChromium: false };
+    return { name: 'Firefox', isChromium: true }; // Firefox supports WebGPU
   }
 
   return { name: 'Unknown Browser', isChromium: false };
