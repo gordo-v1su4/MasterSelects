@@ -35,6 +35,7 @@ export type MixdownProgressCallback = (progress: MixdownProgress) => void;
 
 class CompositionAudioMixerService {
   private audioContext: AudioContext | null = null;
+  private blobUrls: Set<string> = new Set();
 
   private getAudioContext(): AudioContext {
     if (!this.audioContext) {
@@ -258,12 +259,33 @@ class CompositionAudioMixerService {
     // Convert AudioBuffer to WAV blob
     const wavBlob = this.audioBufferToWav(buffer);
     const url = URL.createObjectURL(wavBlob);
+    this.blobUrls.add(url);
 
     const audio = document.createElement('audio');
     audio.src = url;
     audio.preload = 'auto';
 
     return audio;
+  }
+
+  /**
+   * Dispose: close AudioContext and revoke all blob URLs
+   */
+  dispose(): void {
+    // Revoke all blob URLs
+    for (const url of this.blobUrls) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch { /* ignore */ }
+    }
+    this.blobUrls.clear();
+
+    // Close AudioContext
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close();
+    }
+    this.audioContext = null;
+    log.info('CompositionAudioMixer disposed');
   }
 
   /**

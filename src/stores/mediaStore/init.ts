@@ -6,6 +6,12 @@ import { useTimelineStore } from '../timeline';
 import { fileSystemService } from '../../services/fileSystemService';
 import type { Composition, MediaState } from './types';
 import { Logger } from '../../services/logger';
+import { audioManager } from '../../services/audioManager';
+import { audioRoutingManager } from '../../services/audioRoutingManager';
+import { audioAnalyzer } from '../../services/audioAnalyzer';
+import { compositionAudioMixer } from '../../services/compositionAudioMixer';
+import { proxyFrameCache } from '../../services/proxyFrameCache';
+import { audioExtractor } from '../../engine/audio/AudioExtractor';
 
 const log = Logger.create('MediaStore');
 
@@ -242,12 +248,31 @@ function setupAutoSave(): void {
 }
 
 /**
+ * Dispose all audio contexts and related resources.
+ * Called on page unload to prevent leaked AudioContext instances.
+ */
+function disposeAllAudio(): void {
+  try {
+    audioManager.destroy();
+    audioRoutingManager.dispose();
+    audioAnalyzer.dispose();
+    compositionAudioMixer.dispose();
+    proxyFrameCache.disposeAudioContext();
+    audioExtractor.destroy();
+    log.info('All audio contexts disposed');
+  } catch (e) {
+    log.warn('Error during audio cleanup', e);
+  }
+}
+
+/**
  * Set up beforeunload handler.
  */
 function setupBeforeUnload(): void {
   window.addEventListener('beforeunload', () => {
     if ((window as unknown as { __CLEARING_CACHE__?: boolean }).__CLEARING_CACHE__) return;
     saveTimelineToActiveComposition();
+    disposeAllAudio();
   });
 }
 

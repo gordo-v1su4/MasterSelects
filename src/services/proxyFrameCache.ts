@@ -784,6 +784,32 @@ class ProxyFrameCache {
 
     // Clear audio buffer cache
     this.audioBufferCache.clear();
+
+    // Clean up audio context
+    this.disposeAudioContext();
+  }
+
+  /**
+   * Dispose the AudioContext used for scrub audio.
+   * Stops active scrub audio, closes the context, and resets state.
+   */
+  disposeAudioContext(): void {
+    // Stop any active scrub audio first
+    this.stopScrubAudio();
+
+    // Close the AudioContext
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close();
+    }
+    this.audioContext = null;
+    this.scrubGain = null;
+
+    // Clear audio buffer cache (buffers are tied to the old context)
+    this.audioBufferCache.clear();
+    this.audioBufferFailed.clear();
+    this.audioBufferRetryTime.clear();
+
+    log.info('AudioContext disposed');
   }
 
   // Bulk preload frames around a position - call when scrubbing starts

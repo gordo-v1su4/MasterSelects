@@ -308,29 +308,39 @@ export function MediaPanel() {
 
   // Marquee selection handlers
   const handleMarqueeMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only start marquee on left-click directly on the item list background (not on items)
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
-    // Don't start marquee if clicking on an item
-    if (target.closest('.media-item')) return;
+    // Ignore clicks on buttons, inputs, context menus
+    if (target.closest('button, input, .context-menu')) return;
 
     const container = itemListRef.current;
     if (!container) return;
 
     const rect = container.getBoundingClientRect();
-    const x = e.clientX - rect.left + container.scrollLeft;
-    const y = e.clientY - rect.top + container.scrollTop;
+    const startX = e.clientX - rect.left + container.scrollLeft;
+    const startY = e.clientY - rect.top + container.scrollTop;
+    const clientStartX = e.clientX;
+    const clientStartY = e.clientY;
 
+    const clickedOnItem = !!target.closest('.media-item');
     const initial = e.ctrlKey || e.metaKey ? [...selectedIds] : [];
-    marqueeRef.current = { startX: x, startY: y, initialSelection: initial };
-    setMarquee({ startX: x, startY: y, currentX: x, currentY: y });
-
-    if (!e.ctrlKey && !e.metaKey) {
-      setSelection([]);
-    }
+    let isDragging = false;
 
     const handleMouseMove = (ev: MouseEvent) => {
-      if (!marqueeRef.current || !container) return;
+      const dx = ev.clientX - clientStartX;
+      const dy = ev.clientY - clientStartY;
+
+      // Start marquee after 4px movement threshold
+      if (!isDragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        isDragging = true;
+        marqueeRef.current = { startX, startY, initialSelection: initial };
+        if (!ev.ctrlKey && !ev.metaKey) {
+          setSelection([]);
+        }
+      }
+
+      if (!isDragging || !marqueeRef.current) return;
+
       const r = container.getBoundingClientRect();
       const cx = ev.clientX - r.left + container.scrollLeft;
       const cy = ev.clientY - r.top + container.scrollTop;
@@ -351,7 +361,6 @@ export function MediaPanel() {
         const elLeft = elRect.left - r.left + container.scrollLeft;
         const elRight = elLeft + elRect.width;
         if (elRight > mLeft && elLeft < mRight && elBottom > mTop && elTop < mBottom) {
-          // Find the item id from the closest parent with a key
           const itemId = el.parentElement?.getAttribute('data-item-id');
           if (itemId) hitIds.push(itemId);
         }
@@ -362,6 +371,13 @@ export function MediaPanel() {
     };
 
     const handleMouseUp = () => {
+      if (!isDragging && !clickedOnItem) {
+        // Clicked on empty space without dragging → deselect all
+        if (!e.ctrlKey && !e.metaKey) {
+          setSelection([]);
+        }
+      }
+      isDragging = false;
       marqueeRef.current = null;
       setMarquee(null);
       window.removeEventListener('mousemove', handleMouseMove);
@@ -457,9 +473,9 @@ export function MediaPanel() {
 
   // Handle click on item name to start rename
   const handleNameClick = useCallback((e: React.MouseEvent, id: string, currentName: string) => {
-    e.stopPropagation();
     // Only start rename if item is already selected (double-click on name effect)
     if (selectedIds.includes(id)) {
+      e.stopPropagation();
       startRename(id, currentName);
     }
   }, [selectedIds, startRename]);

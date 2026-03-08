@@ -6271,11 +6271,16 @@ input[type="checkbox"] {
 .media-panel-content {
   flex: 1;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Table wrapper for horizontal scrolling */
 .media-panel-table-wrapper {
   min-width: 650px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 /* Column headers */
@@ -6516,6 +6521,8 @@ input[type="checkbox"] {
 .media-item-list {
   padding: 4px 0;
   user-select: none;
+  flex: 1;
+  min-height: 0;
 }
 
 .media-marquee {
@@ -6541,8 +6548,12 @@ input[type="checkbox"] {
 }
 
 .media-item.selected {
-  background: rgba(45, 140, 235, 0.15);
+  background: rgba(45, 140, 235, 0.25);
   border-left-color: var(--accent);
+}
+
+.media-item.selected:hover {
+  background: rgba(45, 140, 235, 0.35);
 }
 
 .media-item.no-file {
