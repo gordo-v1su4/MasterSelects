@@ -4,7 +4,7 @@
 
 ### Browser-based Video Compositor
 
-[![Version](https://img.shields.io/badge/version-1.2.11-blue.svg)](https://github.com/Sportinger/MASterSelects/releases)
+[![Version](https://img.shields.io/badge/version-1.2.12-blue.svg)](https://github.com/Sportinger/MASterSelects/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [![WebGPU](https://img.shields.io/badge/WebGPU-Powered-990000?style=flat-square&logo=webgpu&logoColor=white)](#)
@@ -39,7 +39,7 @@ Most browser-based video editors share a pattern: Canvas 2D compositing, heavywe
 
 **3-tier scrubbing cache.** **300 GPU textures in VRAM** for instant scrub (Tier 1), per-video last-frame cache for seek transitions (Tier 2), and a **900-frame RAM Preview** with CPU/GPU promotion (Tier 3). When the cache is warm, **scrubbing doesn't decode at all**.
 
-**13 production dependencies.** React, Zustand, FFmpeg WASM, mp4box, mp4/webm muxers, HuggingFace Transformers, ONNX Runtime, SoundTouch, WebGPU types. **Everything else is custom-built from scratch**: the entire WebGPU compositor, all 30 effect shaders, the keyframe animation system, the export engine, the audio mixer, the text renderer, the mask engine, the video scope renderers, the dock/panel system, the timeline UI. Zero runtime abstraction layers between your timeline and the GPU.
+**13 production dependencies.** React, Zustand, mp4box, mp4/webm muxers, HuggingFace Transformers, ONNX Runtime, SoundTouch, WebGPU types, plus an **experimental FFmpeg WASM path**. **Everything else is custom-built from scratch**: the entire WebGPU compositor, all 30 effect shaders, the keyframe animation system, the export engine, the audio mixer, the text renderer, the mask engine, the video scope renderers, the dock/panel system, the timeline UI. Zero runtime abstraction layers between your timeline and the GPU.
 
 **Nested composition rendering.** Compositions within compositions, each with their own resolution. Rendered to **pooled GPU textures** with frame-level caching, composited in the parent's ping-pong pass, all in a **single `device.queue.submit()`**.
 
@@ -49,11 +49,32 @@ Most browser-based video editors share a pattern: Canvas 2D compositing, heavywe
 
 ## Why I Built This
 
-No Adobe subscription, no patience for cracks, and every free online editor felt like garbage. I needed something that actually works - fast, in the browser, with the power of After Effects, Premiere, and a bit of Ableton mixed in.
+No Adobe subscription, no patience for cracks, and every free online editor felt like garbage. I wanted something that actually works: fast in the browser, GPU-first, built for real editing instead of templates, and open enough that AI can steer the timeline instead of just suggesting ideas.
 
-**The vision:** A tool where AI can control *everything*. 76 editing tools accessible via OpenAI/Claude function calling, plus a multi-output system for live performances (been doing video art for 16 years, so yeah, that matters to me).
+**The vision:** an editor where AI can directly operate the tool. The built-in chat connects to OpenAI and exposes **76 editing tools**. External agents can steer the running editor over a local HTTP bridge, and in development the Vite bridge still exists too. Live outputs still matter too - I've been doing video art for 16 years, so multi-output routing was never optional.
 
-Built with Claude as my pair-programmer. Every feature gets debugged, refactored, and beaten into shape until it does what I need. ~60k lines of TypeScript, ~2,200 lines of WGSL, and a Rust native helper for the stuff browsers can't do.
+Built with Claude as my pair-programmer. Every feature gets debugged, refactored, and beaten into shape until it does what I need. ~60k lines of TypeScript, ~2,200 lines of WGSL, and a Rust native helper for the stuff browsers still can't do cleanly.
+
+---
+
+## AI Control
+
+MasterSelects is being built around the idea that AI should be able to *do the edit*, not just talk about it.
+
+- **Built-in editor chat:** OpenAI-powered, with direct access to 76 timeline/media/editing tools
+- **External agent bridge:** Claude Code or any other agent can drive the running editor via the Native Helper HTTP bridge
+- **Experimental multicam AI:** Claude/Anthropic generates edit decision lists for the multicam workflow
+- **On-device AI:** SAM2 segmentation in-browser via ONNX Runtime, plus local Whisper transcription via Transformers.js
+
+Example Native Helper bridge call:
+
+```bash
+curl -X POST http://127.0.0.1:9877/api/ai-tools \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"_list","args":{}}'
+```
+
+This requires the Native Helper to be running and a MasterSelects editor tab to be connected. The Vite `/api/ai-tools` bridge still exists in development.
 
 ---
 
@@ -67,11 +88,12 @@ Built with Claude as my pair-programmer. Every feature gets debugged, refactored
 | [**Keyframe Animation**](docs/Features/Keyframes.md) | Bezier curves, copy/paste, tick marks, 5 easing modes |
 | [**Vector Masks**](docs/Features/Masks.md) | Pen tool, edge dragging, feathering, multiple masks per clip |
 | [**SAM2 Segmentation**](docs/Features/AI-Integration.md) | AI object selection in preview - click to mask, propagate across frames |
-| [**Transitions**](docs/Features/UI-Panels.md#transitions-panel) | Crossfade transitions with GPU-accelerated rendering |
-| [**AI Integration**](docs/Features/AI-Integration.md) | 76 tools controllable via OpenAI GPT / Claude function calling |
-| [**Export Pipeline**](docs/Features/Export.md) | WebCodecs Fast, HTMLVideo Precise, FFmpeg ProRes/DNxHR, FCPXML |
+| [**Transitions**](docs/Features/UI-Panels.md#transitions-panel) | Crossfade transitions with GPU-accelerated rendering *(experimental)* |
+| [**AI Integration**](docs/Features/AI-Integration.md) | Built-in OpenAI chat, 76 tool-callable edit actions, and a local bridge for external agents |
+| [**Multicam AI**](docs/Features/Multicam-AI.md) | Sync cameras, transcribe footage, and generate Claude-powered multicam EDLs *(experimental)* |
+| [**Export Pipeline**](docs/Features/Export.md) | WebCodecs Fast, HTMLVideo Precise, FFmpeg WASM *(experimental / WIP)*, FCPXML |
 | [**Live EQ & Audio**](docs/Features/Audio.md) | 10-band parametric EQ with real-time Web Audio preview |
-| [**Download Panel**](docs/Features/YouTube.md) | YouTube, TikTok, Instagram, Twitter/X via Native Helper |
+| [**Download Panel**](docs/Features/YouTube.md) | YouTube, TikTok, Instagram, Twitter/X, Vimeo, and other yt-dlp-supported sites via Native Helper |
 | [**Text & Solids**](docs/Features/Text-Clips.md) | 57 Google Fonts, stroke, shadow, solid color clips |
 | [**Proxy System**](docs/Features/Proxy-System.md) | GPU-accelerated proxies with resume and cache indicator |
 | [**Output Manager**](docs/Features/Preview.md) | Multi-window outputs, source routing, corner pin warping, slice masks |
@@ -95,7 +117,9 @@ npm install
 npm run dev     # http://localhost:5173
 ```
 
-**Requirements:** Chrome 113+ with WebGPU support. Dedicated GPU recommended.
+**Requirements:** Chrome 113+ with WebGPU support is the main target. Dedicated GPU recommended.
+
+> **Firefox:** project storage requires the Native Helper backend because Firefox does not support the File System Access API flow used by Chrome.
 
 > **Linux:** Enable Vulkan for smooth 60fps: `chrome://flags/#enable-vulkan`
 
@@ -103,7 +127,7 @@ npm run dev     # http://localhost:5173
 
 ## Native Helper
 
-Optional cross-platform Rust binary for features browsers can't do natively.
+Cross-platform Rust companion app for the parts browsers still can't do well. Required for Firefox project storage and for yt-dlp-based downloads.
 
 ```bash
 cd tools/native-helper
@@ -114,9 +138,11 @@ cargo run --release    # WebSocket :9876, HTTP :9877
 |---|---|
 | **Decode** | H.264, ProRes, DNxHD + LRU frame cache |
 | **Encode** | ProRes, DNxHR, H.264, H.265, VP9, FFV1, UTVideo, MJPEG |
-| **Download** | yt-dlp integration (YouTube, TikTok, Instagram, Twitter/X, 100+ sites) |
+| **Storage** | Native project persistence backend for Firefox |
+| **AI Control** | Local HTTP bridge for external agents to steer the running editor |
+| **Download** | yt-dlp integration for YouTube, TikTok, Instagram, Twitter/X, Vimeo, and other supported sites |
 
-**Platforms:** Windows, Linux, macOS. Requires Rust + FFmpeg. See [Native Helper docs](tools/native-helper/README.md) for platform-specific setup.
+**Platforms:** Windows, Linux, macOS. Requires Rust + FFmpeg. Downloads also require `yt-dlp`. See [Native Helper docs](tools/native-helper/README.md) for platform-specific setup.
 
 ---
 
@@ -124,6 +150,10 @@ cargo run --release    # WebSocket :9876, HTTP :9877
 
 This is alpha software. Features get added fast, things break.
 
+- FFmpeg WASM export is still work in progress
+- Multicam AI is experimental
+- Transitions are experimental
+- Firefox project storage requires the Native Helper backend
 - Video downloads require Native Helper with yt-dlp installed
 - Audio waveforms may not display for some video formats
 - Very long videos (>2 hours) may cause performance issues
@@ -136,11 +166,11 @@ If something breaks, refresh. If it's still broken, [open an issue](https://gith
 
 - **Frontend:** React 19, TypeScript, Zustand, Vite 7.2
 - **Rendering:** WebGPU + 2,200 lines of WGSL shaders
-- **Video:** WebCodecs for decode/encode, FFmpeg WASM for ProRes/DNxHR/HAP
+- **Video:** WebCodecs, mp4box, mp4-muxer, webm-muxer, HTMLVideo fallback, experimental FFmpeg WASM export path
 - **Audio:** Web Audio API with 10-band live EQ, audio master clock, varispeed
-- **AI:** OpenAI GPT-4.x/GPT-5.x function calling, Claude via Anthropic API, SAM2 via ONNX Runtime, PiAPI video generation
-- **Native:** Rust binary for FFmpeg decode/encode + yt-dlp downloads
-- **Storage:** File System Access API, local project folders with raw media
+- **AI:** Built-in OpenAI editor chat with 76 tools, Native Helper HTTP bridge for Claude Code / external agents, Claude/Anthropic for experimental multicam EDLs, SAM2 via ONNX Runtime, local Whisper via Hugging Face Transformers, PiAPI video generation
+- **Native:** Rust helper for Firefox storage backend, native decode/encode, and yt-dlp downloads
+- **Storage:** File System Access API on Chrome, Native Helper backend on Firefox, IndexedDB, local project folders with raw media
 
 ---
 

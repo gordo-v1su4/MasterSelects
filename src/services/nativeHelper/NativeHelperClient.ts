@@ -6,6 +6,7 @@
  */
 
 import { Logger } from '../logger';
+import { APP_VERSION } from '../../version';
 import type {
   Command,
   Response,
@@ -124,6 +125,19 @@ class NativeHelperClientImpl {
             } catch {
               log.warn('Auth failed');
             }
+          }
+
+          try {
+            await this.send({
+              cmd: 'register_client',
+              id: this.nextId(),
+              role: 'editor',
+              capabilities: ['ai_tools'],
+              session_name: 'masterselects-editor',
+              app_version: APP_VERSION,
+            });
+          } catch (error) {
+            log.warn('Editor registration with native helper failed', error);
           }
 
           this.setStatus('connected');
@@ -882,6 +896,11 @@ class NativeHelperClientImpl {
       // JSON response
       try {
         const response: any = JSON.parse(data);
+        if (response?.type === 'ai_tool_request') {
+          await this.handleAiToolRequest(response);
+          return;
+        }
+
         const isProgress = response.type === 'progress';
         const callback = this.pendingRequests.get(response.id);
 
@@ -931,6 +950,56 @@ class NativeHelperClientImpl {
         callback(frame);
         this.frameCallbacks.delete(id);
         break;
+      }
+    }
+  }
+
+  private async handleAiToolRequest(payload: {
+    request_id?: string;
+    tool?: string;
+    args?: Record<string, unknown>;
+  }): Promise<void> {
+    const requestId = payload.request_id;
+    const tool = payload.tool;
+
+    if (!requestId || !tool) {
+      log.warn('Ignoring malformed ai_tool_request from native helper');
+      return;
+    }
+
+    const commandId = this.nextId();
+
+    try {
+      const { executeAITool, AI_TOOLS, getQuickTimelineSummary } = await import('../aiTools');
+      let result: unknown;
+
+      if (tool === '_list') {
+        result = { success: true, data: AI_TOOLS };
+      } else if (tool === '_status') {
+        result = { success: true, data: getQuickTimelineSummary() };
+      } else {
+        result = await executeAITool(tool, payload.args ?? {});
+      }
+
+      await this.send({
+        cmd: 'ai_tool_result',
+        id: commandId,
+        request_id: requestId,
+        result,
+      });
+    } catch (error) {
+      try {
+        await this.send({
+          cmd: 'ai_tool_result',
+          id: commandId,
+          request_id: requestId,
+          result: {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      } catch (sendError) {
+        log.error('Failed to send ai_tool_result error response', sendError);
       }
     }
   }

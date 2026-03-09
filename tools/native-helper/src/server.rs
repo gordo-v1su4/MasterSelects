@@ -2,9 +2,11 @@
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
@@ -36,8 +38,9 @@ pub async fn run(config: ServerConfig) -> Result<()> {
     let state = Arc::new(AppState::new(None));
     let allowed_origins = Arc::new(config.allowed_origins);
 
+    let http_state = state.clone();
     tokio::spawn(async move {
-        run_http_server(http_port).await;
+        run_http_server(http_port, http_state).await;
     });
 
     while let Ok((stream, addr)) = listener.accept().await {
@@ -71,8 +74,9 @@ pub async fn run_with_shutdown(
 
     tray_state.running.store(true, Ordering::Relaxed);
 
+    let http_state = state.clone();
     tokio::spawn(async move {
-        run_http_server(http_port).await;
+        run_http_server(http_port, http_state).await;
     });
 
     loop {
@@ -118,7 +122,20 @@ async fn wait_for_quit(tray_state: &Arc<crate::tray::TrayState>) {
     }
 }
 
-async fn run_http_server(port: u16) {
+#[derive(Debug, Deserialize)]
+struct AiToolHttpRequest {
+    tool: String,
+    #[serde(default)]
+    args: serde_json::Value,
+}
+
+fn with_state(
+    state: Arc<AppState>,
+) -> impl Filter<Extract = (Arc<AppState>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || state.clone())
+}
+
+async fn run_http_server(port: u16, state: Arc<AppState>) {
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "OPTIONS"])
@@ -142,13 +159,121 @@ async fn run_http_server(port: u16) {
         .and(warp::get())
         .and_then(get_project_root);
 
+    let state_for_status = state.clone();
+    let state_for_api_status = state.clone();
+    let state_for_post = state.clone();
+    let state_for_api_post = state.clone();
+
+    // GET /ai-tools and /api/ai-tools — status for external AI bridge
+    let ai_tools_status_route = warp::path("ai-tools")
+        .and(warp::get())
+        .and(with_state(state_for_status))
+        .and_then(get_ai_tools_status);
+    let api_ai_tools_status_route = warp::path!("api" / "ai-tools")
+        .and(warp::get())
+        .and(with_state(state_for_api_status))
+        .and_then(get_ai_tools_status);
+
+    // POST /ai-tools and /api/ai-tools — forward a tool call to the active editor session
+    let ai_tools_route = warp::path("ai-tools")
+        .and(warp::post())
+        .and(warp::body::json::<AiToolHttpRequest>())
+        .and(with_state(state_for_post))
+        .and_then(handle_ai_tools_request);
+    let api_ai_tools_route = warp::path!("api" / "ai-tools")
+        .and(warp::post())
+        .and(warp::body::json::<AiToolHttpRequest>())
+        .and(with_state(state_for_api_post))
+        .and_then(handle_ai_tools_request);
+
     let routes = file_route
         .or(upload_route)
         .or(project_root_route)
+        .or(ai_tools_status_route)
+        .or(api_ai_tools_status_route)
+        .or(ai_tools_route)
+        .or(api_ai_tools_route)
         .with(cors);
 
     info!("HTTP file server listening on http://127.0.0.1:{}", port);
     warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+}
+
+async fn get_ai_tools_status(state: Arc<AppState>) -> Result<impl warp::Reply, warp::Rejection> {
+    let editor = state.get_editor_client().await;
+    let pending = state.pending_ai_request_count().await;
+
+    Ok(warp::reply::json(&serde_json::json!({
+        "ok": true,
+        "editor_connected": editor.is_some(),
+        "pending": pending,
+        "editor": editor.as_ref().map(|client| serde_json::json!({
+            "role": client.role,
+            "session_name": client.session_name,
+            "app_version": client.app_version,
+            "capabilities": client.capabilities,
+        })),
+    })))
+}
+
+async fn handle_ai_tools_request(
+    body: AiToolHttpRequest,
+    state: Arc<AppState>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let editor = match state.get_editor_client().await {
+        Some(client) => client,
+        None => {
+            return Ok(warp::reply::json(&serde_json::json!({
+                "success": false,
+                "error": "No editor session connected to Native Helper"
+            })));
+        }
+    };
+
+    let args = if body.args.is_null() {
+        serde_json::json!({})
+    } else {
+        body.args
+    };
+
+    let request_id = format!("ai-{}", uuid::Uuid::new_v4().simple());
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state.add_ai_request(request_id.clone(), tx).await;
+
+    let payload = serde_json::json!({
+        "type": "ai_tool_request",
+        "request_id": request_id,
+        "tool": body.tool,
+        "args": args,
+    });
+
+    let send_result = {
+        let mut sender = editor.sender.lock().await;
+        sender.send(Message::Text(payload.to_string())).await
+    };
+
+    if send_result.is_err() {
+        state.remove_ai_request(&request_id).await;
+        return Ok(warp::reply::json(&serde_json::json!({
+            "success": false,
+            "error": "Failed to forward request to editor session"
+        })));
+    }
+
+    match tokio::time::timeout(Duration::from_secs(30), rx).await {
+        Ok(Ok(result)) => Ok(warp::reply::json(&result)),
+        Ok(Err(_)) => Ok(warp::reply::json(&serde_json::json!({
+            "success": false,
+            "error": "Editor session disconnected while handling AI request"
+        }))),
+        Err(_) => {
+            state.remove_ai_request(&request_id).await;
+            Ok(warp::reply::json(&serde_json::json!({
+                "success": false,
+                "error": "Timeout: editor did not respond within 30s"
+            })))
+        }
+    }
 }
 
 /// Guess Content-Type from file extension
@@ -315,7 +440,8 @@ async fn handle_websocket(
 ) -> Result<()> {
     let (write, mut read) = ws.split();
     let write = Arc::new(tokio::sync::Mutex::new(write));
-    let mut session = Session::new(state);
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let mut session = Session::new(state.clone());
 
     while let Some(msg) = read.next().await {
         let msg = match msg {
@@ -342,6 +468,52 @@ async fn handle_websocket(
                 debug!("Received command: {:?}", cmd);
 
                 match cmd {
+                    Command::RegisterClient {
+                        id,
+                        role,
+                        capabilities,
+                        session_name,
+                        app_version,
+                    } => {
+                        if role == "editor" {
+                            state
+                                .register_editor_client(crate::session::EditorClient {
+                                    session_id: session_id.clone(),
+                                    sender: write.clone(),
+                                    role: role.clone(),
+                                    capabilities: capabilities.clone(),
+                                    session_name: session_name.clone(),
+                                    app_version: app_version.clone(),
+                                })
+                                .await;
+                            info!("Registered editor client from {}", addr);
+                        }
+
+                        let response = Response::ok(
+                            &id,
+                            serde_json::json!({
+                                "registered": true,
+                                "role": role,
+                                "session_id": session_id.clone(),
+                            }),
+                        );
+                        let json = serde_json::to_string(&response)?;
+                        let mut w = write.lock().await;
+                        w.send(Message::Text(json)).await?;
+                    }
+                    Command::AiToolResult { id, request_id, result } => {
+                        let accepted = state.resolve_ai_request(&request_id, result).await;
+                        let response = Response::ok(
+                            &id,
+                            serde_json::json!({
+                                "accepted": accepted,
+                                "request_id": request_id,
+                            }),
+                        );
+                        let json = serde_json::to_string(&response)?;
+                        let mut w = write.lock().await;
+                        w.send(Message::Text(json)).await?;
+                    }
                     Command::DownloadYoutube {
                         id, url, format_id, output_dir,
                     }
@@ -388,6 +560,7 @@ async fn handle_websocket(
         }
     }
 
+    state.unregister_client(&session_id).await;
     info!("Connection closed: {}", addr);
     Ok(())
 }

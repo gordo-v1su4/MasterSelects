@@ -1,15 +1,16 @@
 # Native Helper
 
-The Native Helper is an optional companion application that provides download acceleration (via yt-dlp) and file system access (for Firefox project persistence) over WebSocket.
+The Native Helper is a local companion application that provides Firefox project persistence, external AI control, and yt-dlp-based downloads.
 
 ## Overview
 
-The Native Helper is a lightweight Rust binary that runs locally and communicates with the MasterSelects web app over WebSocket. It provides two main capabilities:
+The Native Helper is a lightweight Rust binary that runs locally and communicates with the MasterSelects web app over WebSocket and HTTP. It currently provides three main capabilities:
 
 1. **Downloads**: YouTube, TikTok, Instagram, Twitter/X, and other platforms via yt-dlp
 2. **File System Access**: Read/write files, create directories, folder picker -- primarily used for Firefox project persistence (since Firefox lacks the File System Access API)
+3. **AI Bridge**: Forward AI tool calls from local agents to the running MasterSelects editor session
 
-> **Note**: The browser-side code (`src/services/nativeHelper/`) still contains protocol types for video decode/encode commands (`open`, `decode`, `prefetch`, `start_encode`, etc.) and a `NativeDecoder` class. These are **not implemented on the server side** and represent either planned future functionality or remnants from a previous design. The actual Rust server only handles downloads and file system operations.
+> **Note**: The browser-side code (`src/services/nativeHelper/`) still contains protocol types for video decode/encode commands (`open`, `decode`, `prefetch`, `start_encode`, etc.) and a `NativeDecoder` class. These are **not implemented on the current Rust server side** and represent planned future functionality. The current Rust helper handles downloads, file system operations, and the AI bridge.
 
 ## Features
 
@@ -19,6 +20,7 @@ The Native Helper is a lightweight Rust binary that runs locally and communicate
 - **File system operations** -- Write files, create directories, list/delete/rename, check existence
 - **Folder picker** -- Native OS folder picker dialog (for Firefox project folder selection)
 - **Firefox persistence** -- Enables full project save/load on Firefox via file system commands
+- **External AI control** -- Local `POST /api/ai-tools` bridge for Claude Code, curl, and other local agents
 - **System tray** -- On Windows, runs as a system tray app with auto-start and self-update support
 
 ## Architecture
@@ -27,13 +29,14 @@ The Native Helper is a lightweight Rust binary that runs locally and communicate
 Browser (MasterSelects App)
     |
     | WebSocket (ws://127.0.0.1:9876)
-    | HTTP file server (http://127.0.0.1:9877)
+    | HTTP server (http://127.0.0.1:9877)
     |
     v
 Native Helper (Rust)
     |
     | yt-dlp (subprocess)
     | File system (direct)
+    | AI tool forwarding
     |
     v
 Local file system
@@ -82,7 +85,7 @@ Options:
 
 1. Run the Native Helper
 2. The toolbar will show "Turbo" when connected
-3. Downloads and Firefox file system operations are now available
+3. Downloads, Firefox file system operations, and the local AI bridge are now available
 
 ### Status Indicator
 
@@ -111,6 +114,8 @@ The helper communicates via WebSocket (port 9876) with JSON commands:
 | `list_formats` | List available formats for a video URL |
 | `get_file` | Get a file from local filesystem |
 | `locate` | Locate a file by name in common directories |
+| `register_client` | Register the running editor session with the helper |
+| `ai_tool_result` | Return a forwarded AI tool result back to the helper |
 | `write_file` | Write data to a file (text or base64) |
 | `create_dir` | Create a directory |
 | `list_dir` | List directory contents |
@@ -119,9 +124,25 @@ The helper communicates via WebSocket (port 9876) with JSON commands:
 | `rename` | Rename or move a file/directory |
 | `pick_folder` | Open native OS folder picker dialog |
 
-### HTTP File Server
+### HTTP Server
 
-An HTTP file server runs on port 9877 (WebSocket port + 1) for serving downloaded files to the browser.
+An HTTP server runs on port 9877 (WebSocket port + 1).
+
+| Endpoint | Purpose |
+|---------|---------|
+| `GET /file?path=...` | Serve local files to the browser |
+| `POST /upload?path=...` | Upload/write local files efficiently |
+| `GET /project-root` | Return the default project root |
+| `GET /api/ai-tools` | AI bridge status |
+| `POST /api/ai-tools` | Forward AI tool calls to the connected editor session |
+
+Example:
+
+```bash
+curl -X POST http://127.0.0.1:9877/api/ai-tools \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"_list","args":{}}'
+```
 
 ### Security
 

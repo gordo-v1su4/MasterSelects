@@ -22,6 +22,25 @@ pub enum Command {
         id: String,
     },
 
+    /// Register a connected browser client with the helper
+    RegisterClient {
+        id: String,
+        role: String,
+        #[serde(default)]
+        capabilities: Vec<String>,
+        #[serde(default)]
+        session_name: Option<String>,
+        #[serde(default)]
+        app_version: Option<String>,
+    },
+
+    /// Result for an AI tool request previously forwarded to the browser client
+    AiToolResult {
+        id: String,
+        request_id: String,
+        result: serde_json::Value,
+    },
+
     /// Download a YouTube video using yt-dlp (legacy command name)
     DownloadYoutube {
         id: String,
@@ -161,6 +180,8 @@ pub struct SystemInfo {
     pub download_dir: String,
     pub project_root: String,
     pub fs_commands: bool,
+    pub ai_bridge: bool,
+    pub editor_connected: bool,
 }
 
 // Helper functions for creating responses
