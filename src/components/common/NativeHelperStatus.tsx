@@ -40,6 +40,10 @@ const DOWNLOAD_LINKS = {
   linux: NATIVE_HELPER_RELEASES,
 } as const;
 
+type NativeHelperStatusProps = {
+  variant?: 'toolbar' | 'info';
+};
+
 function detectPlatform(): Platform {
   const ua = navigator.userAgent.toLowerCase();
   if (ua.includes('mac')) return 'mac';
@@ -58,7 +62,7 @@ function getInstallGuide(platform: Platform): InstallGuide {
           'Run the installer and keep the helper running in the system tray.',
           'Return to MasterSelects and press Check connection.',
         ],
-        note: 'If GitHub still only shows v0.2.0, the v0.3.1 package has not been published yet.',
+        note: 'The current helper release includes downloads, Firefox project save/open, and the local AI bridge.',
       };
     case 'mac':
       return {
@@ -164,7 +168,7 @@ function StatusPill({
 /**
  * Toolbar button that shows helper status
  */
-export function NativeHelperStatus() {
+export function NativeHelperStatus({ variant = 'toolbar' }: NativeHelperStatusProps) {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [showDialog, setShowDialog] = useState(false);
 
@@ -217,17 +221,43 @@ export function NativeHelperStatus() {
   }, [checkConnection, setNativeHelperConnected]);
 
   const isConnected = status === 'connected';
+  const statusTone = isConnected ? 'connected' : helperEnabled ? 'offline' : 'disabled';
+  const statusLabel = isConnected ? 'Connected' : helperEnabled ? 'Not running' : 'Disabled';
+  const helperSummary = isConnected
+    ? 'Downloads, Firefox projects, and the AI bridge are ready.'
+    : 'Open the helper panel for status, download links, and setup.';
 
   return (
     <>
-      <button
-        onClick={() => setShowDialog(true)}
-        className="p-1 rounded hover:bg-white/10 transition-colors"
-        title={isConnected ? 'Native Helper connected' : 'Native Helper'}
-        style={{ background: 'transparent', lineHeight: 1 }}
-      >
-        <LightningIcon active={isConnected} />
-      </button>
+      {variant === 'toolbar' ? (
+        <button
+          onClick={() => setShowDialog(true)}
+          className="p-1 rounded hover:bg-white/10 transition-colors"
+          title={isConnected ? 'Native Helper connected' : 'Native Helper'}
+          style={{ background: 'transparent', lineHeight: 1 }}
+        >
+          <LightningIcon active={isConnected} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="info-helper-launch"
+          onClick={() => setShowDialog(true)}
+        >
+          <span className="info-helper-launch-icon">
+            <LightningIcon active={isConnected} />
+          </span>
+          <span className="info-helper-launch-copy">
+            <span className="info-helper-launch-header">
+              <span className="info-helper-launch-title">Native Helper</span>
+              <span className={`info-helper-launch-badge info-helper-launch-badge-${statusTone}`}>
+                {statusLabel}
+              </span>
+            </span>
+            <span className="info-helper-launch-text">{helperSummary}</span>
+          </span>
+        </button>
+      )}
 
       {showDialog && (
         <NativeHelperDialog
@@ -374,7 +404,7 @@ function NativeHelperDialog({
               </div>
               <h1 className="native-helper-title">Native Helper</h1>
             </div>
-            <span className="native-helper-version-pill">Target v{NATIVE_HELPER_VERSION}</span>
+            <span className="native-helper-version-pill">v{NATIVE_HELPER_VERSION}</span>
           </div>
           <p className="native-helper-subtitle">
             Downloads, Firefox project save/open, and local AI bridge access.

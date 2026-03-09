@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { APP_VERSION } from '../../version';
+import { NativeHelperStatus } from './NativeHelperStatus';
 
 interface InfoDialogProps {
   onClose: () => void;
@@ -90,6 +91,8 @@ export function InfoDialog({ onClose }: InfoDialogProps) {
             <div className="info-version">
               Version {APP_VERSION}
             </div>
+
+            <NativeHelperStatus variant="info" />
 
             <a
               href="https://github.com/Sportinger/MASterSelects"

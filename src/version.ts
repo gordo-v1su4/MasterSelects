@@ -10,9 +10,9 @@ export const BUILD_NOTICE: {
   message: string;
   animated?: boolean;
 } | null = {
-  type: 'info',
-  title: 'Native Helper v0.3.1 landed',
-  message: 'This build targets the new AI bridge and Firefox project integration. GitHub still publishes helper v0.2.0 until the new package is uploaded.',
+  type: 'success',
+  title: 'Native Helper v0.3.1 available',
+  message: 'Includes the local AI bridge, Firefox project save/open support, and the refreshed helper workflow.',
   animated: true,
 };
 
