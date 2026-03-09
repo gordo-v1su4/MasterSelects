@@ -32,6 +32,8 @@ import { LayerCollector } from '../../src/engine/render/LayerCollector';
 import { flags } from '../../src/engine/featureFlags';
 import { useTimelineStore } from '../../src/stores/timeline';
 
+const defaultUserAgent = navigator.userAgent;
+
 describe('LayerCollector', () => {
   beforeEach(() => {
     hoisted.getRuntimeFrameProvider.mockReset();
@@ -39,6 +41,10 @@ describe('LayerCollector', () => {
     hoisted.wcRecord.mockReset();
     flags.useFullWebCodecsPlayback = true;
     useTimelineStore.setState({ isDraggingPlayhead: false });
+    Object.defineProperty(globalThis.navigator, 'userAgent', {
+      configurable: true,
+      value: defaultUserAgent,
+    });
   });
 
   it('uses the clip WebCodecs frame while a separate scrub runtime session is still cold', () => {
@@ -535,5 +541,73 @@ describe('LayerCollector', () => {
     expect(textureManager.importVideoTexture).toHaveBeenCalledTimes(2);
     expect(textureManager.importVideoTexture).toHaveBeenLastCalledWith(secondVideo);
     expect(result[0]?.externalTexture).toEqual({ label: 'tex-second' });
+  });
+
+  it('uses copied HTML video frames on Firefox instead of external textures', () => {
+    flags.useFullWebCodecsPlayback = false;
+    Object.defineProperty(globalThis.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0',
+    });
+
+    const video = {
+      src: 'blob:test-video',
+      currentTime: 1.25,
+      readyState: 4,
+      seeking: false,
+      paused: false,
+      videoWidth: 1920,
+      videoHeight: 1080,
+    } as any;
+
+    const copiedFrame = { view: { label: 'copied-frame' }, width: 1920, height: 1080 };
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'html-video-texture' })),
+    };
+    const scrubbingCache = {
+      captureVideoFrame: vi.fn(),
+      getLastFrame: vi.fn(() => copiedFrame),
+      getCachedFrame: vi.fn(() => null),
+      getLastCaptureTime: vi.fn(() => 0),
+      setLastCaptureTime: vi.fn(),
+      cacheFrameAtTime: vi.fn(),
+    };
+
+    const collector = new LayerCollector();
+    const result = collector.collect([{
+      id: 'layer-firefox',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        videoElement: video,
+      },
+    } as any], {
+      textureManager: textureManager as any,
+      scrubbingCache: scrubbingCache as any,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(scrubbingCache.captureVideoFrame).toHaveBeenCalledWith(video);
+    expect(textureManager.importVideoTexture).not.toHaveBeenCalled();
+    expect(result[0]).toMatchObject({
+      isVideo: false,
+      externalTexture: null,
+      textureView: copiedFrame.view,
+      sourceWidth: copiedFrame.width,
+      sourceHeight: copiedFrame.height,
+    });
+    expect(collector.getDecoder()).toBe('HTMLVideo');
+    expect(collector.hasActiveVideo()).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import {
 } from '../../services/mediaRuntime/runtimePlayback';
 import { wcPipelineMonitor } from '../../services/wcPipelineMonitor';
 import { useTimelineStore } from '../../stores/timeline';
+import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
 
 const log = Logger.create('NestedCompRenderer');
 const ENABLE_VISUAL_HTML_VIDEO_FALLBACK = false;
@@ -422,6 +423,15 @@ export class NestedCompRenderer {
       if (allowHtmlVideoPreview) {
         const video = layer.source.videoElement!;
         if (video.readyState >= 2) {
+          const copiedFrame = getCopiedHtmlVideoPreviewFrame(video, this.scrubbingCache);
+          if (copiedFrame) {
+            result.push({
+              layer, isVideo: false, externalTexture: null, textureView: copiedFrame.view,
+              sourceWidth: copiedFrame.width, sourceHeight: copiedFrame.height,
+            });
+            continue;
+          }
+
           const extTex = this.textureManager.importVideoTexture(video);
           if (extTex) {
             if (this.scrubbingCache) {

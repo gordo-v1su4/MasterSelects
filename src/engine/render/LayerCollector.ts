@@ -11,6 +11,7 @@ import {
 } from '../../services/mediaRuntime/runtimePlayback';
 import { wcPipelineMonitor } from '../../services/wcPipelineMonitor';
 import { useTimelineStore } from '../../stores/timeline';
+import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
 
 const log = Logger.create('LayerCollector');
 const ENABLE_VISUAL_HTML_VIDEO_FALLBACK = false;
@@ -458,6 +459,21 @@ export class LayerCollector {
         // During playback: fall through to importExternalTexture anyway.
         // May show a brief flash but avoids black frame at cut boundaries.
         // Proactive warmup should prevent this in most cases.
+      }
+
+      const copiedFrame = getCopiedHtmlVideoPreviewFrame(video, deps.scrubbingCache);
+      if (copiedFrame) {
+        deps.setLastVideoTime(videoKey, currentTime);
+        this.currentDecoder = 'HTMLVideo';
+        this.hasVideo = true;
+        return {
+          layer,
+          isVideo: false,
+          externalTexture: null,
+          textureView: copiedFrame.view,
+          sourceWidth: copiedFrame.width,
+          sourceHeight: copiedFrame.height,
+        };
       }
 
       // Import external texture (zero-copy GPU path)

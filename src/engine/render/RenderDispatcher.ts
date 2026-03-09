@@ -20,6 +20,7 @@ import { useSliceStore } from '../../stores/sliceStore';
 import { useTimelineStore } from '../../stores/timeline';
 import { reportRenderTime } from '../../services/performanceMonitor';
 import { Logger } from '../../services/logger';
+import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
 
 const log = Logger.create('RenderDispatcher');
 
@@ -313,6 +314,22 @@ export class RenderDispatcher {
       if (layer.source.videoElement) {
         const video = layer.source.videoElement;
         if (video.readyState >= 2) {
+          const copiedFrame = getCopiedHtmlVideoPreviewFrame(
+            video,
+            d.cacheManager.getScrubbingCache()
+          );
+          if (copiedFrame) {
+            layerData.push({
+              layer,
+              isVideo: false,
+              externalTexture: null,
+              textureView: copiedFrame.view,
+              sourceWidth: copiedFrame.width,
+              sourceHeight: copiedFrame.height,
+            });
+            continue;
+          }
+
           const extTex = d.textureManager?.importVideoTexture(video);
           if (extTex) {
             layerData.push({ layer, isVideo: true, externalTexture: extTex, textureView: null, sourceWidth: video.videoWidth, sourceHeight: video.videoHeight });

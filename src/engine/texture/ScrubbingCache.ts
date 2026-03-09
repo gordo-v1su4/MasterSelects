@@ -130,37 +130,54 @@ export class ScrubbingCache {
   // === LAST FRAME CACHE ===
 
   // Capture current video frame to a persistent GPU texture (for last-frame cache)
-  captureVideoFrame(video: HTMLVideoElement): void {
-    if (video.videoWidth === 0 || video.videoHeight === 0) return;
+  captureVideoFrame(video: HTMLVideoElement): boolean {
+    if (video.videoWidth === 0 || video.videoHeight === 0) return false;
 
     const width = video.videoWidth;
     const height = video.videoHeight;
 
-    // Get or create texture for this video
-    let texture = this.lastFrameTextures.get(video);
+    // Reuse the existing texture when dimensions match so we never replace
+    // a known-good frame with an uninitialized texture if the copy fails.
+    const existingTexture = this.lastFrameTextures.get(video);
     const existingSize = this.lastFrameSizes.get(video);
+    const canReuseExisting =
+      !!existingTexture &&
+      !!existingSize &&
+      existingSize.width === width &&
+      existingSize.height === height;
 
-    // Recreate if size changed (don't destroy old - let GC handle to avoid GPU conflicts)
-    if (!texture || !existingSize || existingSize.width !== width || existingSize.height !== height) {
+    let texture = existingTexture;
+    let view = this.lastFrameViews.get(video);
+    let createdFreshTexture = false;
+
+    if (!canReuseExisting) {
       texture = this.device.createTexture({
         size: [width, height],
         format: 'rgba8unorm',
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
       });
-      this.lastFrameTextures.set(video, texture);
-      this.lastFrameSizes.set(video, { width, height });
-      this.lastFrameViews.set(video, texture.createView());
+      view = texture.createView();
+      createdFreshTexture = true;
     }
 
     // Copy current frame to texture
     try {
       this.device.queue.copyExternalImageToTexture(
         { source: video },
-        { texture },
+        { texture: texture! },
         [width, height]
       );
+      if (createdFreshTexture) {
+        this.lastFrameTextures.set(video, texture!);
+        this.lastFrameViews.set(video, view!);
+        this.lastFrameSizes.set(video, { width, height });
+      }
+      return true;
     } catch {
-      // Video might not be ready - ignore
+      if (createdFreshTexture) {
+        texture?.destroy();
+      }
+      return false;
     }
   }
 
