@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.2.0)'
+        description: 'Version tag (e.g. v0.3.1)'
         required: true
-        default: 'v0.2.0'
+        default: 'v0.3.1'
 
 jobs:
   build:
@@ -93,17 +93,23 @@ jobs:
           body: |
             ## MasterSelects Native Helper ${{ github.event.inputs.version }}
 
-            Cross-platform video codec helper for MasterSelects.
+            Local runtime companion for MasterSelects.
+
+            ### Included
+            - yt-dlp-powered downloads
+            - Firefox project save/open backend
+            - Local AI bridge for external agents
 
             ### Downloads
-            - **Windows x64**: Upload manually (includes FFmpeg DLLs)
+            - **Windows x64 (MSI)**: Upload manually from `tools/native-helper/target/wix/*.msi`
             - **macOS ARM (Apple Silicon)**: `MasterSelects-NativeHelper-macos-arm64.tar.gz`
             - **macOS x64 (Intel)**: `MasterSelects-NativeHelper-macos-x64.tar.gz`
             - **Linux x64**: `MasterSelects-NativeHelper-linux-x64.tar.gz`
 
-            ### Requirements
-            - **macOS/Linux**: FFmpeg libraries must be installed (`brew install ffmpeg` / `apt install libavcodec-dev`)
-            - **All platforms**: Install [yt-dlp](https://github.com/yt-dlp/yt-dlp) for video downloads
+            ### Notes
+            - Keep the helper running while using MasterSelects
+            - Install [yt-dlp](https://github.com/yt-dlp/yt-dlp) if it is not already available on your system
+            - Windows MSI is the preferred package for in-place upgrades
           files: |
             artifacts/**/*.tar.gz
           draft: false

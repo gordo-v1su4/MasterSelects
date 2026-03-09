@@ -4,14 +4,43 @@
  * Shows connection status in toolbar and opens a dialog for details/download.
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import { NativeHelperClient, isNativeHelperAvailable } from '../../services/nativeHelper';
 import type { SystemInfo, ConnectionStatus } from '../../services/nativeHelper';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { upgradeAllClipsToNativeDecoder, downgradeAllClipsFromNativeDecoder, startClipWatcher, stopClipWatcher } from '../../stores/timeline/clip/upgradeToNativeDecoder';
 
-// Detect platform
-function detectPlatform(): 'mac' | 'windows' | 'linux' | 'unknown' {
+type Platform = 'mac' | 'windows' | 'linux' | 'unknown';
+
+type ExtendedSystemInfo = SystemInfo & {
+  ytdlp_available?: boolean;
+  fs_commands?: boolean;
+  ai_bridge?: boolean;
+};
+
+type InstallGuide = {
+  title: string;
+  steps: string[];
+  note?: string;
+  command?: string;
+};
+
+type PillTone = 'neutral' | 'good' | 'warn';
+
+type PublishedReleaseInfo = {
+  version: string;
+  url: string;
+};
+
+const NATIVE_HELPER_VERSION = '0.3.1';
+const NATIVE_HELPER_RELEASES = 'https://github.com/Sportinger/MasterSelects/releases';
+const GITHUB_RELEASES_API = 'https://api.github.com/repos/Sportinger/MasterSelects/releases';
+const DOWNLOAD_LINKS = {
+  windows: NATIVE_HELPER_RELEASES,
+  mac: NATIVE_HELPER_RELEASES,
+  linux: NATIVE_HELPER_RELEASES,
+} as const;
+
+function detectPlatform(): Platform {
   const ua = navigator.userAgent.toLowerCase();
   if (ua.includes('mac')) return 'mac';
   if (ua.includes('win')) return 'windows';
@@ -19,16 +48,118 @@ function detectPlatform(): 'mac' | 'windows' | 'linux' | 'unknown' {
   return 'unknown';
 }
 
-// GitHub releases download URLs
-const NATIVE_HELPER_RELEASE = 'https://github.com/Sportinger/MasterSelects/releases/tag/native-helper-v0.2.0';
-const GITHUB_RELEASES = NATIVE_HELPER_RELEASE;
-const DOWNLOAD_LINKS = {
-  windows: 'https://github.com/Sportinger/MasterSelects/releases/download/native-helper-v0.2.0/MasterSelects-NativeHelper-v0.2.0-windows-x64.msi',
-  mac: NATIVE_HELPER_RELEASE,
-  linux: NATIVE_HELPER_RELEASE,
-} as const;
+function getInstallGuide(platform: Platform): InstallGuide {
+  switch (platform) {
+    case 'windows':
+      return {
+        title: 'How to install on Windows',
+        steps: [
+          'Open the GitHub releases page and download the newest published MSI.',
+          'Run the installer and keep the helper running in the system tray.',
+          'Return to MasterSelects and press Check connection.',
+        ],
+        note: 'If GitHub still only shows v0.2.0, the v0.3.1 package has not been published yet.',
+      };
+    case 'mac':
+      return {
+        title: 'How to install on macOS',
+        steps: [
+          'Open the release page and download the current helper build.',
+          'Move the app to Applications and launch it once.',
+          'Keep the menu bar app running while using MasterSelects.',
+        ],
+        command: 'brew install yt-dlp',
+      };
+    case 'linux':
+      return {
+        title: 'How to install on Linux',
+        steps: [
+          'Open the release page and download the current helper build.',
+          'Extract the archive and launch the helper binary.',
+          'Keep the helper process running while using MasterSelects.',
+        ],
+        command: 'sudo apt install yt-dlp || pip install yt-dlp',
+      };
+    default:
+      return {
+        title: 'How to install',
+        steps: [
+          'Open the release page for the latest helper build.',
+          'Install and launch the helper on the same machine as MasterSelects.',
+          'Return here and press Check connection.',
+        ],
+      };
+  }
+}
 
+async function copyText(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
+function LightningIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={active ? '#facc15' : '#6b7280'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+async function fetchLatestPublishedNativeHelperRelease(): Promise<PublishedReleaseInfo | null> {
+  try {
+    const response = await fetch(GITHUB_RELEASES_API, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+      },
+    });
+    if (!response.ok) return null;
+
+    const releases = await response.json() as Array<{ tag_name?: string; html_url?: string; published_at?: string }>;
+    const nativeHelperReleases = releases
+      .filter((release) => typeof release.tag_name === 'string' && release.tag_name.startsWith('native-helper-v'))
+      .sort((a, b) => {
+        const aTime = a.published_at ? Date.parse(a.published_at) : 0;
+        const bTime = b.published_at ? Date.parse(b.published_at) : 0;
+        return bTime - aTime;
+      });
+
+    const latest = nativeHelperReleases[0];
+    if (!latest?.tag_name || !latest.html_url) return null;
+
+    return {
+      version: latest.tag_name.replace('native-helper-v', ''),
+      url: latest.html_url,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }}>
+      <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StatusPill({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode;
+  tone?: PillTone;
+}) {
+  return (
+    <span className={`native-helper-pill native-helper-pill-${tone}`}>
+      {children}
+    </span>
+  );
+}
 
 /**
  * Toolbar button that shows helper status
@@ -37,11 +168,17 @@ export function NativeHelperStatus() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [showDialog, setShowDialog] = useState(false);
 
-  const { turboModeEnabled, setNativeHelperConnected } = useSettingsStore();
+  const {
+    turboModeEnabled,
+    nativeDecodeEnabled,
+    setNativeDecodeEnabled,
+    setNativeHelperConnected,
+  } = useSettingsStore();
 
-  // Check connection status
+  const helperEnabled = turboModeEnabled;
+
   const checkConnection = useCallback(async () => {
-    if (!turboModeEnabled) {
+    if (!helperEnabled) {
       setStatus('disconnected');
       setNativeHelperConnected(false);
       return;
@@ -55,22 +192,22 @@ export function NativeHelperStatus() {
       setStatus('disconnected');
       setNativeHelperConnected(false);
     }
-  }, [turboModeEnabled, setNativeHelperConnected]);
+  }, [helperEnabled, setNativeHelperConnected]);
 
-  // Check on mount and when turbo mode changes
-  // This effect syncs with external NativeHelper service state
   useEffect(() => {
-    // Use void to explicitly mark fire-and-forget async call
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (nativeDecodeEnabled) {
+      setNativeDecodeEnabled(false);
+    }
+  }, [nativeDecodeEnabled, setNativeDecodeEnabled]);
+
+  useEffect(() => {
     void checkConnection();
 
-    // Subscribe to status changes
     const unsubscribe = NativeHelperClient.onStatusChange((newStatus) => {
       setStatus(newStatus);
       setNativeHelperConnected(newStatus === 'connected');
     });
 
-    // Periodic check every 30 seconds (less aggressive)
     const interval = setInterval(() => void checkConnection(), 30000);
 
     return () => {
@@ -79,25 +216,6 @@ export function NativeHelperStatus() {
     };
   }, [checkConnection, setNativeHelperConnected]);
 
-  // Upgrade/downgrade clips when native decode setting or connection changes
-  const nativeDecodeEnabled = useSettingsStore((s) => s.nativeDecodeEnabled);
-  const prevConnectedRef = useRef(false);
-  useEffect(() => {
-    const isNowConnected = status === 'connected' && nativeDecodeEnabled;
-    const wasConnected = prevConnectedRef.current;
-    prevConnectedRef.current = isNowConnected;
-
-    if (isNowConnected && !wasConnected) {
-      // Helper connected + decode enabled — upgrade all clips + watch for new ones
-      void upgradeAllClipsToNativeDecoder();
-      startClipWatcher();
-    } else if (!isNowConnected && wasConnected) {
-      // Helper disconnected or decode off — downgrade + stop watching
-      stopClipWatcher();
-      downgradeAllClipsFromNativeDecoder();
-    }
-  }, [status, nativeDecodeEnabled]);
-
   const isConnected = status === 'connected';
 
   return (
@@ -105,16 +223,10 @@ export function NativeHelperStatus() {
       <button
         onClick={() => setShowDialog(true)}
         className="p-1 rounded hover:bg-white/10 transition-colors"
-        title={isConnected ? 'Turbo Mode active' : 'Turbo Mode'}
+        title={isConnected ? 'Native Helper connected' : 'Native Helper'}
         style={{ background: 'transparent', lineHeight: 1 }}
       >
-        {isConnected ? (
-          <span style={{ fontSize: '14px', color: '#facc15' }}>⚡</span>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#52525b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-        )}
+        <LightningIcon active={isConnected} />
       </button>
 
       {showDialog && (
@@ -128,9 +240,6 @@ export function NativeHelperStatus() {
   );
 }
 
-/**
- * Modal dialog for Native Helper details
- */
 function NativeHelperDialog({
   status,
   onClose,
@@ -143,21 +252,39 @@ function NativeHelperDialog({
   const [isClosing, setIsClosing] = useState(false);
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [checking, setChecking] = useState(false);
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [publishedRelease, setPublishedRelease] = useState<PublishedReleaseInfo | null>(null);
 
-  const { turboModeEnabled, setTurboModeEnabled, nativeDecodeEnabled, setNativeDecodeEnabled } = useSettingsStore();
+  const {
+    turboModeEnabled,
+    setTurboModeEnabled,
+  } = useSettingsStore();
 
+  const helperEnabled = turboModeEnabled;
   const platform = useMemo(() => detectPlatform(), []);
+  const installGuide = useMemo(() => getInstallGuide(platform), [platform]);
+  const helperInfo = info as ExtendedSystemInfo | null;
 
-  // Fetch system info when connected
-  // This effect syncs UI state with external NativeHelper info
   useEffect(() => {
     if (status === 'connected') {
       NativeHelperClient.getInfo().then(setInfo).catch(() => setInfo(null));
     } else {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInfo(null);
     }
   }, [status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchLatestPublishedNativeHelperRelease().then((release) => {
+      if (!cancelled) {
+        setPublishedRelease(release);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleClose = useCallback(() => {
     if (isClosing) return;
@@ -165,21 +292,27 @@ function NativeHelperDialog({
     setTimeout(onClose, 150);
   }, [onClose, isClosing]);
 
-  const handleRetry = async () => {
+  const handleRetry = useCallback(async () => {
     setChecking(true);
     await onRetry();
     setChecking(false);
-  };
+  }, [onRetry]);
 
-  // Auto-check connection when dialog opens
-  useEffect(() => {
-    if (turboModeEnabled && status !== 'connected') {
-      void handleRetry();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleCopyCommand = useCallback(async (command: string) => {
+    const copied = await copyText(command);
+    if (!copied) return;
+    setCopiedCommand(command);
+    window.setTimeout(() => {
+      setCopiedCommand((current) => (current === command ? null : current));
+    }, 1400);
   }, []);
 
-  // Handle Escape key
+  useEffect(() => {
+    if (helperEnabled && status !== 'connected') {
+      void handleRetry();
+    }
+  }, [handleRetry, helperEnabled, status]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') handleClose();
@@ -188,14 +321,30 @@ function NativeHelperDialog({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleClose]);
 
-  // Handle backdrop click
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) handleClose();
   };
 
   const isConnected = status === 'connected';
-  const downloadLink = (platform !== 'unknown' && DOWNLOAD_LINKS[platform]) || GITHUB_RELEASES;
-  const platformLabel = platform === 'mac' ? 'macOS' : platform === 'windows' ? 'Windows' : platform === 'linux' ? 'Linux' : 'your platform';
+  const downloadLink = publishedRelease?.url || ((platform !== 'unknown' && DOWNLOAD_LINKS[platform]) || NATIVE_HELPER_RELEASES);
+  const connectedVersion = helperInfo?.version ?? null;
+  const publishedVersion = publishedRelease?.version ?? null;
+  const expectedVersionInstalled = connectedVersion === NATIVE_HELPER_VERSION;
+  const statusTone = isConnected ? 'connected' : helperEnabled ? 'offline' : 'disabled';
+  const statusLabel = isConnected ? 'Connected' : helperEnabled ? 'Not running' : 'Disabled';
+
+  const capabilityPills: Array<{ label: string; tone: PillTone }> = isConnected && helperInfo
+    ? [
+        { label: connectedVersion ? `Installed v${connectedVersion}` : 'Connected', tone: expectedVersionInstalled ? 'good' : 'warn' },
+        { label: helperInfo.ytdlp_available ? 'Downloads ready' : 'yt-dlp missing', tone: helperInfo.ytdlp_available ? 'good' : 'warn' },
+        { label: helperInfo.fs_commands ? 'Projects ready' : 'Projects unavailable', tone: helperInfo.fs_commands ? 'good' : 'warn' },
+        { label: helperInfo.ai_bridge ? 'AI bridge ready' : 'AI bridge unavailable', tone: helperInfo.ai_bridge ? 'good' : 'warn' },
+      ]
+    : [
+        { label: 'Downloads', tone: 'neutral' },
+        { label: 'Firefox projects', tone: 'neutral' },
+        { label: 'AI bridge', tone: 'neutral' },
+      ];
 
   return (
     <div
@@ -208,213 +357,170 @@ function NativeHelperDialog({
       }}
     >
       <div
-        className="welcome-overlay"
+        className="welcome-overlay native-helper-dialog"
         style={{
-          maxWidth: '480px',
           animation: 'none',
           opacity: isClosing ? 0 : 1,
-          transform: isClosing ? 'scale(0.95)' : 'none',
+          transform: isClosing ? 'scale(0.97)' : 'none',
           transition: 'opacity 150ms ease-out, transform 150ms ease-out',
         }}
       >
-        {/* Header */}
-        <div className="welcome-tagline" style={{ animation: 'welcome-fade-in 0.3s ease-out both' }}>
-          <span style={{ color: isConnected ? '#51cf66' : '#ff6b6b' }}>
-            {isConnected ? '⚡ Connected' : '○ Not Running'}
-          </span>
+        <div className="native-helper-dialog-header">
+          <div className="native-helper-title-row">
+            <div>
+              <div className={`native-helper-status-pill native-helper-status-pill-${statusTone}`}>
+                <span className="native-helper-status-dot" />
+                <span>{statusLabel}</span>
+              </div>
+              <h1 className="native-helper-title">Native Helper</h1>
+            </div>
+            <span className="native-helper-version-pill">Target v{NATIVE_HELPER_VERSION}</span>
+          </div>
+          <p className="native-helper-subtitle">
+            Downloads, Firefox project save/open, and local AI bridge access.
+          </p>
         </div>
 
-        <h1 className="welcome-title" style={{ fontSize: '28px' }}>
-          <span className="welcome-title-master" style={{ animation: 'welcome-title-master-in 0.4s ease-out both' }}>Native</span>
-          <span className="welcome-title-selects" style={{ animation: 'welcome-title-selects-in 0.4s ease-out 0.1s both' }}>Helper</span>
-        </h1>
-
-        <p className="welcome-subtitle" style={{ animation: 'welcome-fade-up 0.4s ease-out 0.15s both' }}>
-          Downloads, project saving & more
-        </p>
-
-        {/* Content Card */}
-        <div className="welcome-folder-card" style={{ animation: 'welcome-fade-up 0.4s ease-out 0.2s both' }}>
-          <div className="info-content">
-            {/* Enable Toggles */}
-            <label className="flex items-center gap-3 mb-2 cursor-pointer">
+        <div className="native-helper-dialog-body">
+          <div className="native-helper-card">
+            <label className="native-helper-toggle-row">
               <input
                 type="checkbox"
-                checked={turboModeEnabled}
+                checked={helperEnabled}
                 onChange={(e) => setTurboModeEnabled(e.target.checked)}
-                className="w-4 h-4 rounded"
+                className="native-helper-checkbox"
               />
-              <span className="text-sm text-zinc-300">Enable Native Helper (Downloads)</span>
+              <span className="native-helper-toggle-text">
+                <span className="native-helper-toggle-title">Enable Native Helper</span>
+                <span className="native-helper-toggle-description">
+                  Required for downloads, Firefox projects, and the AI bridge.
+                </span>
+              </span>
             </label>
-            <label className="flex items-center gap-3 mb-4 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={nativeDecodeEnabled}
-                onChange={(e) => setNativeDecodeEnabled(e.target.checked)}
-                className="w-4 h-4 rounded"
-                disabled={!turboModeEnabled}
-              />
-              <span className={`text-sm ${turboModeEnabled ? 'text-zinc-300' : 'text-zinc-500'}`}>Turbo Decode/Encode (FFmpeg)</span>
-            </label>
+          </div>
 
-            {isConnected && info ? (
-              /* Connected State */
-              <div className="space-y-3">
-                <div className="info-features">
-                  <div className="info-feature">
-                    <span className="info-feature-icon">v{info.version}</span>
-                    <span>Helper Version</span>
-                  </div>
-                  {info.cache_used_mb !== undefined && (
-                    <div className="info-feature">
-                      <span className="info-feature-icon">{info.cache_used_mb}MB</span>
-                      <span>Cache Used ({info.cache_max_mb}MB max)</span>
-                    </div>
-                  )}
-                  {info.hw_accel && info.hw_accel.length > 0 && (
-                    <div className="info-feature">
-                      <span className="info-feature-icon">HW</span>
-                      <span>{info.hw_accel.join(', ')}</span>
-                    </div>
-                  )}
-                  {info.open_files !== undefined && (
-                    <div className="info-feature">
-                      <span className="info-feature-icon">{info.open_files}</span>
-                      <span>Open Files</span>
-                    </div>
-                  )}
-                  <div className="info-feature">
-                    <span className="info-feature-icon">{(info as any).ytdlp_available ? '✓' : '✗'}</span>
-                    <span>Video Downloads</span>
-                  </div>
-                  <div className="info-feature">
-                    <span className="info-feature-icon">{(info as any).fs_commands ? '✓' : '✗'}</span>
-                    <span>Project Saving</span>
-                  </div>
+          <div className="native-helper-card native-helper-card-highlight">
+            <div className="native-helper-card-head">
+              <div>
+                <div className="native-helper-card-kicker">
+                  {isConnected ? 'Connected session' : 'Published release'}
                 </div>
-
-                <p className="text-xs text-green-400 text-center pt-2">
-                  {[
-                    (info as any).ytdlp_available && 'Downloads',
-                    !(info as any).lite && 'FFmpeg',
-                    (info as any).fs_commands && 'Projects',
-                  ].filter(Boolean).join(' · ') || 'Connected'}
-                </p>
-
-                {/* Download link always visible */}
-                <a
-                  href={downloadLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block w-full text-center text-xs text-zinc-500 hover:text-zinc-300 py-1 transition-colors"
-                >
-                  Download latest version for {platformLabel}
-                </a>
+                <div className="native-helper-card-title">
+                  {isConnected && connectedVersion
+                    ? `Helper v${connectedVersion}`
+                    : publishedVersion
+                      ? `GitHub release v${publishedVersion}`
+                      : 'Native Helper releases'}
+                </div>
               </div>
-            ) : turboModeEnabled ? (
-              /* Not Connected State */
-              <div className="space-y-4">
-                <p className="text-sm text-zinc-400">
-                  Download the Native Helper to enable video downloads, project saving in Firefox, and FFmpeg encoding.
-                </p>
+              <span className={`native-helper-chip ${isConnected && !expectedVersionInstalled ? 'is-warn' : ''}`}>
+              {isConnected ? (expectedVersionInstalled ? 'Up to date' : 'Update available') : (helperEnabled ? 'Waiting for helper' : 'Helper disabled')}
+              </span>
+            </div>
 
-                <a
-                  href={downloadLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white py-2.5 px-4 rounded-lg transition-colors font-medium"
-                >
-                  Download for {platformLabel}
-                </a>
+            <p className="native-helper-card-note">
+              {isConnected
+                ? (
+                  publishedVersion && publishedVersion !== NATIVE_HELPER_VERSION
+                    ? `The helper is reachable from MasterSelects. GitHub still only publishes v${publishedVersion}, while this app build already targets v${NATIVE_HELPER_VERSION}.`
+                    : 'The helper is reachable from MasterSelects on this machine.'
+                )
+                : (
+                  publishedVersion && publishedVersion !== NATIVE_HELPER_VERSION
+                    ? `GitHub currently only has v${publishedVersion} published. MasterSelects already targets helper v${NATIVE_HELPER_VERSION}, but that release is not public yet.`
+                    : 'Install the current helper build and keep it running in the background.'
+                )}
+            </p>
 
-                {platform === 'windows' && (
-                  <div className="bg-zinc-900 rounded-lg p-3 space-y-2">
-                    <p className="text-xs text-zinc-500 font-medium">Installation:</p>
-                    <ol className="text-xs text-zinc-400 space-y-1.5 list-decimal list-inside">
-                      <li>Run the MSI installer</li>
-                      <li>The helper starts in the system tray (notification area)</li>
-                      <li>Right-click the tray icon for options</li>
-                    </ol>
-                  </div>
+            <div className="native-helper-pill-row">
+              {capabilityPills.map((pill) => (
+                <StatusPill key={pill.label} tone={pill.tone}>
+                  {pill.label}
+                </StatusPill>
+              ))}
+              {publishedVersion && (
+                <StatusPill tone={publishedVersion === NATIVE_HELPER_VERSION ? 'good' : 'warn'}>
+                  Public GitHub: v{publishedVersion}
+                </StatusPill>
+              )}
+              {publishedVersion && publishedVersion !== NATIVE_HELPER_VERSION && (
+                <StatusPill tone="neutral">
+                  App target: v{NATIVE_HELPER_VERSION}
+                </StatusPill>
+              )}
+            </div>
+
+            <div className="native-helper-action-row">
+              <a
+                href={downloadLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="native-helper-button native-helper-button-primary"
+              >
+                Open Native Helper releases
+              </a>
+              <button
+                onClick={() => void handleRetry()}
+                disabled={checking}
+                className="native-helper-button native-helper-button-secondary"
+              >
+                {checking ? 'Checking...' : 'Check connection'}
+              </button>
+            </div>
+
+            <a
+              href={NATIVE_HELPER_RELEASES}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="native-helper-link"
+            >
+              Open release page
+            </a>
+          </div>
+
+          <div className="native-helper-accordion">
+            <button
+              className="native-helper-accordion-toggle"
+              onClick={() => setShowInstallGuide((value) => !value)}
+            >
+              <span>{installGuide.title}</span>
+              <ChevronIcon open={showInstallGuide} />
+            </button>
+
+            {showInstallGuide && (
+              <div className="native-helper-accordion-body">
+                <ol className="native-helper-install-list">
+                  {installGuide.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+
+                {installGuide.note && (
+                  <p className="native-helper-install-note">{installGuide.note}</p>
                 )}
 
-                {platform === 'mac' && (
-                  <div className="bg-zinc-900 rounded-lg p-3 space-y-2">
-                    <p className="text-xs text-zinc-500 font-medium">Installation:</p>
-                    <ol className="text-xs text-zinc-400 space-y-1.5 list-decimal list-inside">
-                      <li>Open the DMG and drag the app to Applications</li>
-                      <li>Open from Applications (right-click → Open for first launch)</li>
-                      <li>The helper runs in your menubar</li>
-                    </ol>
-                  </div>
-                )}
-
-                {platform === 'mac' && (
-                  <div className="bg-zinc-900 rounded-lg p-3">
-                    <p className="text-xs text-zinc-500 mb-2">For YouTube downloads, also install yt-dlp:</p>
-                    <code
-                      className="text-xs text-zinc-300 font-mono block bg-zinc-800 p-2 rounded select-all cursor-pointer"
-                      onClick={(e) => {
-                        navigator.clipboard.writeText('brew install yt-dlp');
-                        const el = e.currentTarget;
-                        el.textContent = '✓ Copied!';
-                        setTimeout(() => { el.textContent = 'brew install yt-dlp'; }, 1500);
-                      }}
+                {installGuide.command && (
+                  <div className="native-helper-command-row">
+                    <code className="native-helper-command">{installGuide.command}</code>
+                    <button
+                      onClick={() => void handleCopyCommand(installGuide.command!)}
+                      className="native-helper-copy-button"
                     >
-                      brew install yt-dlp
-                    </code>
+                      {copiedCommand === installGuide.command ? 'Copied' : 'Copy'}
+                    </button>
                   </div>
                 )}
-
-                {platform === 'linux' && (
-                  <div className="bg-zinc-900 rounded-lg p-3">
-                    <p className="text-xs text-zinc-500 mb-2">Install yt-dlp for downloads:</p>
-                    <code
-                      className="text-xs text-zinc-300 font-mono block bg-zinc-800 p-2 rounded select-all cursor-pointer"
-                      onClick={(e) => {
-                        navigator.clipboard.writeText('sudo apt install yt-dlp || pip install yt-dlp');
-                        const el = e.currentTarget;
-                        el.textContent = '✓ Copied!';
-                        setTimeout(() => { el.textContent = 'sudo apt install yt-dlp || pip install yt-dlp'; }, 1500);
-                      }}
-                    >
-                      sudo apt install yt-dlp || pip install yt-dlp
-                    </code>
-                  </div>
-                )}
-
-                <button
-                  onClick={handleRetry}
-                  disabled={checking}
-                  className="w-full text-center text-sm text-zinc-400 hover:text-white py-2 transition-colors disabled:opacity-50"
-                >
-                  {checking ? 'Checking...' : 'Check Connection'}
-                </button>
-              </div>
-            ) : (
-              /* Disabled State */
-              <div className="space-y-4">
-                <p className="text-sm text-zinc-500 text-center py-2">
-                  Enable Native Helper above to use video downloads, project saving and FFmpeg decoding.
-                </p>
-                <a
-                  href={downloadLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block w-full text-center text-xs text-zinc-500 hover:text-zinc-300 py-1 transition-colors"
-                >
-                  Download for {platformLabel}
-                </a>
               </div>
             )}
           </div>
         </div>
 
-        {/* Close Button */}
-        <button className="welcome-enter" onClick={handleClose} style={{ animation: 'welcome-fade-up 0.3s ease-out 0.25s both', marginTop: '16px' }}>
-          <span>Close</span>
-          <kbd>Esc</kbd>
-        </button>
+        <div className="native-helper-footer">
+          <button className="welcome-enter" onClick={handleClose}>
+            <span>Close</span>
+            <kbd>Esc</kbd>
+          </button>
+        </div>
       </div>
     </div>
   );

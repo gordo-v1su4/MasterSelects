@@ -1,5 +1,259 @@
 [
   {
+    "date": "2026-03-09",
+    "type": "new",
+    "title": "Native Helper v0.3.1 Target with AI Bridge",
+    "description": "MasterSelects now targets Native Helper v0.3.1, adds a local AI bridge for direct agent control, and removes the old FFmpeg/Turbo-facing baggage from the helper UI. The public GitHub helper release is still v0.2.0 until the new package is published.",
+    "section": "Native Helper",
+    "commits": [
+      "6c203dd",
+      "6ceb3b1"
+    ]
+  },
+  {
+    "date": "2026-03-09",
+    "type": "new",
+    "title": "Firefox Project Persistence and Preview Fallback",
+    "description": "Firefox can now create and open projects through the Native Helper with native folder picking and file-system commands. Also improves Firefox-specific messaging and restores HTML video preview fallback when browser APIs differ.",
+    "section": "Browser",
+    "commits": [
+      "4abf760",
+      "81accd1",
+      "d4e5386",
+      "be29f4d"
+    ]
+  },
+  {
+    "date": "2026-03-09",
+    "type": "fix",
+    "title": "Playback Timing and Scrub Freeze Fixes",
+    "description": "Resolved stuttering from frame-rate limiting and scrub freeze-frame regressions so playback stays responsive after the latest engine changes.",
+    "section": "Playback",
+    "commits": [
+      "98b04a1"
+    ]
+  },
+  {
+    "date": "2026-03-09",
+    "type": "fix",
+    "title": "Keyframe Easing and Context Menu Regressions",
+    "description": "Restored easing interpolation consistency in the timeline, fade curves, and AI keyframe tooling, and fixed broken context menu flows introduced by recent edits.",
+    "section": "Timeline",
+    "commits": [
+      "1993235"
+    ]
+  },
+  {
+    "date": "2026-03-09",
+    "type": "improve",
+    "title": "Documentation Audit and Repo Cleanup",
+    "description": "Audited outdated docs across the repo, corrected developer guidance, and cleaned project ignores and feedback wiring to keep the codebase easier to navigate.",
+    "section": "Docs",
+    "commits": [
+      "3bf0865",
+      "dad42cc"
+    ]
+  },
+  {
+    "date": "2026-03-08",
+    "type": "new",
+    "title": "Media Panel Grid, Marquee, and Source Thumbnail Cache",
+    "description": "The Media panel gets marquee selection, multi-select actions, grid view, better folder and composition badges, and a source-based thumbnail cache so duplicate clips reuse thumbnails instead of regenerating them.",
+    "section": "Media",
+    "commits": [
+      "dd62771",
+      "b76e2fe",
+      "51f2a82",
+      "696b4f2"
+    ]
+  },
+  {
+    "date": "2026-03-08",
+    "type": "improve",
+    "title": "Downloads Show Speed, Progress, and Re-download Actions",
+    "description": "Downloads can use multiple connections, show live speed and percentage in both clips and panel, check for existing files, redownload on demand, and drag finished items straight to the timeline. Also fixes yt-dlp progress parsing and duplicate imports.",
+    "section": "Downloads",
+    "commits": [
+      "449c5a4",
+      "05b8d53",
+      "c3cde7c",
+      "a05a42b",
+      "37ca5be",
+      "e8427f2",
+      "277b3e3",
+      "5921843"
+    ]
+  },
+  {
+    "date": "2026-03-08",
+    "type": "improve",
+    "title": "Sticky Snapping and Cross-Track Guides",
+    "description": "Snaps now hold with hysteresis, track changes preserve an origin guide, and cross-track snapping feels stronger and less jerky during drag operations.",
+    "section": "Timeline",
+    "commits": [
+      "54a33a5",
+      "ef5f02d",
+      "6b65253",
+      "9f2b2c3",
+      "e4fbf36",
+      "0b51f60"
+    ]
+  },
+  {
+    "date": "2026-03-07",
+    "type": "new",
+    "title": "HTTP AI Bridge and Expanded Editing Toolset",
+    "description": "External agents can call AI tools over HTTP, with 18 new editing commands for transforms, effects, keyframes, speed, playback, markers, transitions, undo/redo, plus mask and vertex operations and stats endpoints.",
+    "section": "AI",
+    "commits": [
+      "75d43a3",
+      "8e03c0b",
+      "5e7adda",
+      "e010e79",
+      "7b657d2",
+      "e225029",
+      "ca080d8"
+    ]
+  },
+  {
+    "date": "2026-03-07",
+    "type": "fix",
+    "title": "New Compositions Start with Video and Audio Tracks",
+    "description": "Fresh compositions now open with a sensible 1 video / 1 audio layout, avoiding the accidental two-video-track default.",
+    "section": "Timeline",
+    "commits": [
+      "533acab",
+      "c9e41c0"
+    ]
+  },
+  {
+    "date": "2026-03-07",
+    "type": "improve",
+    "title": "Playback Pipeline Performance Pass",
+    "description": "Reduced monitoring and render overhead across preview, toolbar and panels, the health monitor, GPU readback, and WebGPU canvas setup to keep playback smooth during active editing.",
+    "section": "Engine",
+    "commits": [
+      "0cc4ac7",
+      "5623edd",
+      "0d5807f",
+      "fd43735",
+      "c905f26",
+      "60df236",
+      "2389773",
+      "2548727",
+      "46e951c",
+      "93017cb",
+      "e53cfd7"
+    ]
+  },
+  {
+    "date": "2026-03-07",
+    "type": "fix",
+    "title": "Composition Switching and Scrubbing Stability",
+    "description": "Fixes frozen video after play-stop-play, decoder reset loops, cache destruction races, OOM and STATUS_BREAKPOINT crashes on composition switches, scrub-audio mismatches, and cut-point handoff issues.",
+    "section": "Playback",
+    "commits": [
+      "a6f0824",
+      "a7ac9f9",
+      "715da29",
+      "e65520f",
+      "c89bd43",
+      "52cf40b",
+      "ce24671",
+      "99ced21",
+      "b177b80",
+      "a7c23c7",
+      "71443a2",
+      "e03abf1",
+      "52fbaea",
+      "211132d",
+      "124bc14",
+      "26a2e75"
+    ]
+  },
+  {
+    "date": "2026-03-07",
+    "type": "new",
+    "title": "Local Scene Descriptions with Temporal Video Analysis",
+    "description": "Scene description now runs locally with Qwen-based multi-frame analysis, browser-side frame extraction, chunked context carry-over, and stricter cleanup of model thinking artifacts.",
+    "section": "AI",
+    "commits": [
+      "aabb8b9",
+      "d962391",
+      "deabe51",
+      "790bc3a",
+      "cc56f90",
+      "5112238"
+    ]
+  },
+  {
+    "date": "2026-03-07",
+    "type": "new",
+    "title": "Transcript and Analysis Coverage Badges",
+    "description": "Timeline clips and media items now show transcript and analysis coverage badges, carry coverage when clips are added, and support continue-mode processing for incremental analysis.",
+    "section": "Analysis",
+    "commits": [
+      "47336f2",
+      "70b92c2",
+      "ee7ce77",
+      "f156532",
+      "ddedac7",
+      "04b69a9",
+      "52b03a2",
+      "cdb2c89",
+      "b0a9500"
+    ]
+  },
+  {
+    "date": "2026-03-05",
+    "type": "new",
+    "title": "Full WebCodecs Playback Mode and Pipeline Monitors",
+    "description": "Rolled out a fuller WebCodecs playback path with feature-flag control, hybrid fast and precise scrubbing, decode pipeline monitoring, and HTMLVideo fallback diagnostics while iterating on the runtime.",
+    "section": "Playback",
+    "commits": [
+      "c214e01",
+      "a3ea8fc",
+      "6faecd0",
+      "8865dcc",
+      "42fdb01",
+      "6bf03f9",
+      "6f03e1f",
+      "55c1dbb",
+      "4eebb76",
+      "3e0f71e",
+      "9b5486e",
+      "27659a9",
+      "37ade6b",
+      "ae48045"
+    ]
+  },
+  {
+    "date": "2026-03-05",
+    "type": "fix",
+    "title": "Cut-Boundary Playback, Speed Keyframes, and Drag-Drop Fixes",
+    "description": "Fixes speed-keyframe seeking, audio drag-drop restrictions, linked drag previews, audio preview leakage, a 1300ms audio delay, GPU warmup across cuts, and seamless element handoff at clip boundaries.",
+    "section": "Playback",
+    "commits": [
+      "7705646",
+      "534a59f",
+      "89d806c",
+      "4b5d82e",
+      "f124a55",
+      "ed77db2",
+      "405b76c",
+      "b849868",
+      "ccf78da",
+      "cbc5505",
+      "49b9436",
+      "2a5f7f4",
+      "53c2bdc",
+      "55c4b80",
+      "98aaa93",
+      "1e27a78",
+      "fbeb586"
+    ]
+  },
+  {
     "date": "2026-03-04",
     "type": "fix",
     "title": "Export Respects Clip Speed",

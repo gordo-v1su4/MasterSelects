@@ -129,7 +129,7 @@ export async function handleListVideoFormats(args: Record<string, unknown>): Pro
   }
 
   if (!NativeHelperClient.isConnected()) {
-    return { success: false, error: 'Native Helper not connected. Please start the helper application and enable Turbo Mode in settings.' };
+    return { success: false, error: 'Native Helper not connected. Please start the helper application and enable Native Helper in settings.' };
   }
 
   try {
@@ -197,7 +197,7 @@ export async function handleDownloadAndImportVideo(args: Record<string, unknown>
   }
 
   if (!NativeHelperClient.isConnected()) {
-    return { success: false, error: 'Native Helper not connected. Please start the helper application and enable Turbo Mode in settings.' };
+    return { success: false, error: 'Native Helper not connected. Please start the helper application and enable Native Helper in settings.' };
   }
 
   // Switch to target composition if specified

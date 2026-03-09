@@ -216,7 +216,7 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
         <div className="changelog-content">
           {/* Platform notice */}
           {BUILD_NOTICE && (
-            <div className={`changelog-notice changelog-notice-${BUILD_NOTICE.type}`}>
+            <div className={`changelog-notice changelog-notice-${BUILD_NOTICE.type} ${BUILD_NOTICE.animated ? 'changelog-notice-animated' : ''}`}>
               <div className="changelog-notice-icon">
                 {BUILD_NOTICE.type === 'info' && (
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -228,6 +228,12 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                     <path d="M8 2L1 14h14L8 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
                     <path d="M8 6v4M8 12v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                )}
+                {BUILD_NOTICE.type === 'success' && (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M4.5 8.2l2.1 2.1L11.5 5.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 )}
               </div>

@@ -3,12 +3,10 @@ import { useSettingsStore, type GPUPowerPreference } from '../../../stores/setti
 export function PerformanceSettings() {
   const {
     turboModeEnabled,
-    nativeDecodeEnabled,
     nativeHelperPort,
     nativeHelperConnected,
     gpuPowerPreference,
     setTurboModeEnabled,
-    setNativeDecodeEnabled,
     setNativeHelperPort,
     setGpuPowerPreference,
   } = useSettingsStore();
@@ -37,7 +35,7 @@ export function PerformanceSettings() {
       </div>
 
       <div className="settings-group">
-        <div className="settings-group-title">Native Helper (Turbo Mode)</div>
+        <div className="settings-group-title">Native Helper</div>
 
         <label className="settings-row">
           <span className="settings-label">Enable Native Helper</span>
@@ -46,17 +44,6 @@ export function PerformanceSettings() {
             checked={turboModeEnabled}
             onChange={(e) => setTurboModeEnabled(e.target.checked)}
             className="settings-checkbox"
-          />
-        </label>
-
-        <label className="settings-row">
-          <span className="settings-label">Native Decode/Encode (Turbo)</span>
-          <input
-            type="checkbox"
-            checked={nativeDecodeEnabled}
-            onChange={(e) => setNativeDecodeEnabled(e.target.checked)}
-            className="settings-checkbox"
-            disabled={!turboModeEnabled}
           />
         </label>
 
@@ -80,7 +67,7 @@ export function PerformanceSettings() {
           </span>
         </div>
         <p className="settings-hint">
-          Native Helper enables downloads (yt-dlp). Turbo decode uses FFmpeg for faster video decoding.
+          Native Helper enables downloads, Firefox project save/open, and the local AI bridge.
         </p>
       </div>
     </div>

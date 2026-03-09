@@ -8,7 +8,13 @@ export const BUILD_NOTICE: {
   type: 'info' | 'warning' | 'success';
   title: string;
   message: string;
-} | null = null;
+  animated?: boolean;
+} | null = {
+  type: 'info',
+  title: 'Native Helper v0.3.1 landed',
+  message: 'This build targets the new AI bridge and Firefox project integration. GitHub still publishes helper v0.2.0 until the new package is uploaded.',
+  animated: true,
+};
 
 // Change entry type (used by UI)
 export interface ChangeEntry {
@@ -40,6 +46,28 @@ export interface RawChangeEntry {
 import changelogData from './changelog-data.json';
 const RAW_CHANGELOG: RawChangeEntry[] = changelogData as RawChangeEntry[];
 
+function parseISODateLocal(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatDateShort(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatDateRange(minDate: Date, maxDate: Date): string {
+  if (minDate.getTime() === maxDate.getTime()) {
+    return formatDateShort(maxDate);
+  }
+
+  const sameMonth = minDate.getFullYear() === maxDate.getFullYear() && minDate.getMonth() === maxDate.getMonth();
+  if (sameMonth) {
+    return `${maxDate.toLocaleDateString('en-US', { month: 'short' })} ${minDate.getDate()}-${maxDate.getDate()}`;
+  }
+
+  return `${formatDateShort(minDate)} - ${formatDateShort(maxDate)}`;
+}
+
 // Calculate relative time labels based on current date
 function getTimeLabel(date: Date): { label: string; sortOrder: number } {
   const now = new Date();
@@ -63,19 +91,19 @@ function getTimeLabel(date: Date): { label: string; sortOrder: number } {
 
 // Group changes by time period
 export function getGroupedChangelog(): TimeGroupedChanges[] {
-  const groups = new Map<string, { sortOrder: number; dateRange: string; changes: ChangeEntry[] }>();
+  const groups = new Map<string, { sortOrder: number; minDate: Date; maxDate: Date; changes: ChangeEntry[] }>();
 
   for (const entry of RAW_CHANGELOG) {
-    const date = new Date(entry.date);
+    const date = parseISODateLocal(entry.date);
     const { label, sortOrder } = getTimeLabel(date);
 
     if (!groups.has(label)) {
-      // Format date range
-      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      groups.set(label, { sortOrder, dateRange: dateStr, changes: [] });
+      groups.set(label, { sortOrder, minDate: date, maxDate: date, changes: [] });
     }
 
     const group = groups.get(label)!;
+    if (date < group.minDate) group.minDate = date;
+    if (date > group.maxDate) group.maxDate = date;
     group.changes.push({
       type: entry.type,
       title: entry.title,
@@ -83,26 +111,13 @@ export function getGroupedChangelog(): TimeGroupedChanges[] {
       section: entry.section,
       commits: entry.commits,
     });
-
-    // Update date range if needed
-    const currentDate = new Date(entry.date);
-    const dateStr = currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    if (!group.dateRange.includes('-') && dateStr !== group.dateRange) {
-      // Create a range
-      const [firstPart] = group.dateRange.split(' ');
-      const [, secondDay] = dateStr.split(' ');
-      if (firstPart === dateStr.split(' ')[0]) {
-        // Same month
-        group.dateRange = `${group.dateRange.split(' ')[0]} ${secondDay}-${group.dateRange.split(' ')[1]}`;
-      }
-    }
   }
 
   // Sort groups by sortOrder and return
   return Array.from(groups.entries())
     .map(([label, data]) => ({
       label,
-      dateRange: data.dateRange,
+      dateRange: formatDateRange(data.minDate, data.maxDate),
       changes: data.changes,
     }))
     .sort((a, b) => {
