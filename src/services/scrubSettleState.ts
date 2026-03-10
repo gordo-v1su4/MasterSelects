@@ -1,38 +1,46 @@
 export type ScrubSettleStage = 'settle' | 'retry' | 'warmup';
+export type ScrubSettleReason = 'manual-seek' | 'scrub-stop' | 'playback-stop';
 
 export interface ScrubSettleEntry {
   clipId: string;
   targetTime: number;
   stage: ScrubSettleStage;
+  reason: ScrubSettleReason;
   deadlineAt: number;
 }
 
 class ScrubSettleState {
   private entries = new Map<string, ScrubSettleEntry>();
 
-  begin(clipId: string, targetTime: number, timeoutMs: number): void {
+  begin(clipId: string, targetTime: number, timeoutMs: number, reason?: ScrubSettleReason): void {
+    const previous = this.entries.get(clipId);
     this.entries.set(clipId, {
       clipId,
       targetTime,
       stage: 'settle',
+      reason: reason ?? previous?.reason ?? 'manual-seek',
       deadlineAt: performance.now() + timeoutMs,
     });
   }
 
-  markRetry(clipId: string, targetTime: number, timeoutMs: number): void {
+  markRetry(clipId: string, targetTime: number, timeoutMs: number, reason?: ScrubSettleReason): void {
+    const previous = this.entries.get(clipId);
     this.entries.set(clipId, {
       clipId,
       targetTime,
       stage: 'retry',
+      reason: reason ?? previous?.reason ?? 'manual-seek',
       deadlineAt: performance.now() + timeoutMs,
     });
   }
 
-  markWarmup(clipId: string, targetTime: number, timeoutMs: number): void {
+  markWarmup(clipId: string, targetTime: number, timeoutMs: number, reason?: ScrubSettleReason): void {
+    const previous = this.entries.get(clipId);
     this.entries.set(clipId, {
       clipId,
       targetTime,
       stage: 'warmup',
+      reason: reason ?? previous?.reason ?? 'manual-seek',
       deadlineAt: performance.now() + timeoutMs,
     });
   }

@@ -84,6 +84,18 @@ export class RenderDispatcher {
     );
   }
 
+  private isFrameNearTarget(
+    frame: { mediaTime?: number } | null | undefined,
+    targetTime: number,
+    maxDeltaSeconds: number = 0.35
+  ): boolean {
+    return (
+      typeof frame?.mediaTime === 'number' &&
+      Number.isFinite(frame.mediaTime) &&
+      Math.abs(frame.mediaTime - targetTime) <= maxDeltaSeconds
+    );
+  }
+
   private toMediaTimeMs(time?: number): number | undefined {
     if (typeof time !== 'number' || !Number.isFinite(time)) {
       return undefined;
@@ -104,6 +116,10 @@ export class RenderDispatcher {
     const displayedTimeMs =
       fallback?.displayedTimeMs ??
       this.toMediaTimeMs(primary?.displayedMediaTime ?? primary?.targetMediaTime);
+    const previewPath =
+      primary?.previewPath ??
+      primary?.layer.source?.type ??
+      mode;
     const signature = layerData && layerData.length > 0
       ? layerData
         .slice(0, 4)
@@ -128,6 +144,7 @@ export class RenderDispatcher {
       mode,
       changed: changed ? 'true' : 'false',
       targetMoved: targetMoved ? 'true' : 'false',
+      previewPath,
       ...(clipId ? { clipId } : {}),
       ...(targetTimeMs !== undefined ? { targetTimeMs } : {}),
       ...(displayedTimeMs !== undefined ? { displayedTimeMs } : {}),
@@ -402,23 +419,51 @@ export class RenderDispatcher {
         const targetTime = this.getTargetVideoTime(layer, video);
         const isDragging = useTimelineStore.getState().isDraggingPlayhead;
         const isSettling = scrubSettleState.isPending(layer.sourceClipId);
+        const isPausedSettle = !(d.renderLoop?.getIsPlaying() ?? false) && !isDragging && isSettling;
         const lastPresentedTime = scrubbingCache?.getLastPresentedTime(video);
-        const hasFreshPresentedFrame =
+        const lastPresentedOwner = scrubbingCache?.getLastPresentedOwner(video);
+        const hasPresentedOwnerMismatch =
+          !!layer.sourceClipId &&
+          !!lastPresentedOwner &&
+          lastPresentedOwner !== layer.sourceClipId;
+        const hasConfirmedPresentedFrame =
+          !hasPresentedOwnerMismatch &&
           typeof lastPresentedTime === 'number' &&
+          Number.isFinite(lastPresentedTime);
+        const displayedTime = hasConfirmedPresentedFrame ? lastPresentedTime : undefined;
+        const hasFreshPresentedFrame =
+          hasConfirmedPresentedFrame &&
           Math.abs(lastPresentedTime - targetTime) <= 0.12;
+        const awaitingPausedTargetFrame =
+          hasPresentedOwnerMismatch ||
+          !(d.renderLoop?.getIsPlaying() ?? false) &&
+          !isDragging &&
+          (!isSettling &&
+            (!hasConfirmedPresentedFrame || Math.abs(lastPresentedTime - targetTime) > 0.05));
         const cacheSearchDistanceFrames = isDragging ? 12 : 6;
-        const dragHoldFrame = isSettling && layer.sourceClipId
+        const lastSameClipFrame = layer.sourceClipId
           ? scrubbingCache?.getLastFrame(video, layer.sourceClipId) ?? null
           : null;
+        const dragHoldFrame = isDragging
+          ? lastSameClipFrame
+          : (isSettling || awaitingPausedTargetFrame) && this.isFrameNearTarget(lastSameClipFrame, targetTime)
+            ? lastSameClipFrame
+            : null;
         const emergencyHoldFrame = isDragging && layer.sourceClipId
-          ? scrubbingCache?.getLastFrame(video, layer.sourceClipId) ?? null
+          ? lastSameClipFrame
           : dragHoldFrame;
         const safeFallback = this.getSafePreviewFallback(layer, video) ?? dragHoldFrame;
-        const allowLiveVideoImport = (!isDragging && !isSettling) || hasFreshPresentedFrame || !safeFallback;
-        const allowConfirmedFrameCaching = (!isDragging && !isSettling) || hasFreshPresentedFrame;
+        const allowLiveVideoImport = !hasPresentedOwnerMismatch && (isPausedSettle
+          ? hasFreshPresentedFrame
+          : !awaitingPausedTargetFrame &&
+            (((!isDragging && !isSettling) || hasFreshPresentedFrame || !safeFallback)));
+        const allowConfirmedFrameCaching = !hasPresentedOwnerMismatch && (isPausedSettle
+          ? hasFreshPresentedFrame
+          : !awaitingPausedTargetFrame &&
+            (((!isDragging && !isSettling) || hasFreshPresentedFrame)));
         const captureOwnerId = allowConfirmedFrameCaching ? layer.sourceClipId : undefined;
         if (video.readyState >= 2) {
-          if (video.seeking && scrubbingCache) {
+          if ((video.seeking || awaitingPausedTargetFrame) && scrubbingCache) {
             const cachedView =
               scrubbingCache.getCachedFrame(video.src, targetTime) ??
               scrubbingCache.getNearestCachedFrame(video.src, targetTime, cacheSearchDistanceFrames);
@@ -480,7 +525,6 @@ export class RenderDispatcher {
             ? d.textureManager?.importVideoTexture(video)
             : null;
           if (extTex) {
-            const displayedTime = lastPresentedTime ?? video.currentTime;
             if (scrubbingCache && allowConfirmedFrameCaching && !(d.renderLoop?.getIsPlaying() ?? false)) {
               const now = performance.now();
               const lastCapture = scrubbingCache.getLastCaptureTime(video);
@@ -490,13 +534,15 @@ export class RenderDispatcher {
               }
               scrubbingCache.cacheFrameAtTime(video, targetTime);
             } else if (scrubbingCache && !(d.renderLoop?.getIsPlaying() ?? false)) {
-              scrubbingCache.captureVideoFrameIfCloser(
-                video,
-                targetTime,
-                displayedTime,
-                layer.sourceClipId
-              );
-              if (Number.isFinite(displayedTime)) {
+              if (typeof displayedTime === 'number' && Number.isFinite(displayedTime)) {
+                scrubbingCache.captureVideoFrameIfCloser(
+                  video,
+                  targetTime,
+                  displayedTime,
+                  layer.sourceClipId
+                );
+              }
+              if (typeof displayedTime === 'number' && Number.isFinite(displayedTime)) {
                 scrubbingCache.cacheFrameAtTime(video, displayedTime);
               }
             }

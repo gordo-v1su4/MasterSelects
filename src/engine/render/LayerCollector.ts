@@ -399,6 +399,18 @@ export class LayerCollector {
     return deps.scrubbingCache?.getLastFrame(video, layer.sourceClipId) ?? null;
   }
 
+  private isFrameNearTarget(
+    frame: { mediaTime?: number } | null | undefined,
+    targetTime: number,
+    maxDeltaSeconds: number = 0.35
+  ): boolean {
+    return (
+      typeof frame?.mediaTime === 'number' &&
+      Number.isFinite(frame.mediaTime) &&
+      Math.abs(frame.mediaTime - targetTime) <= maxDeltaSeconds
+    );
+  }
+
   private getTargetVideoTime(layer: Layer, video: HTMLVideoElement): number {
     return layer.source?.mediaTime ?? video.currentTime;
   }
@@ -446,20 +458,46 @@ export class LayerCollector {
       const targetTime = this.getTargetVideoTime(layer, video);
       const isDragging = useTimelineStore.getState().isDraggingPlayhead;
       const isSettling = scrubSettleState.isPending(layer.sourceClipId);
+      const isPausedSettle = !deps.isPlaying && !isDragging && isSettling;
       const lastPresentedTime = deps.scrubbingCache?.getLastPresentedTime(video);
-      const hasFreshPresentedFrame =
+      const lastPresentedOwner = deps.scrubbingCache?.getLastPresentedOwner(video);
+      const hasPresentedOwnerMismatch =
+        !!layer.sourceClipId &&
+        !!lastPresentedOwner &&
+        lastPresentedOwner !== layer.sourceClipId;
+      const hasConfirmedPresentedFrame =
+        !hasPresentedOwnerMismatch &&
         typeof lastPresentedTime === 'number' &&
+        Number.isFinite(lastPresentedTime);
+      const displayedTime = hasConfirmedPresentedFrame ? lastPresentedTime : undefined;
+      const hasFreshPresentedFrame =
+        hasConfirmedPresentedFrame &&
         Math.abs(lastPresentedTime - targetTime) <= 0.12;
+      const awaitingPausedTargetFrame =
+        hasPresentedOwnerMismatch ||
+        !deps.isPlaying &&
+        !isDragging &&
+        (!isSettling &&
+          (!hasConfirmedPresentedFrame || Math.abs(lastPresentedTime - targetTime) > 0.05));
       const cacheSearchDistanceFrames = isDragging ? 12 : 6;
-      const dragHoldFrame = isSettling
-        ? this.getDragHoldFrame(layer, video, deps)
+      const lastSameClipFrame = this.getDragHoldFrame(layer, video, deps);
+      const dragHoldFrame = isDragging
+        ? lastSameClipFrame
+        : (isSettling || awaitingPausedTargetFrame) && this.isFrameNearTarget(lastSameClipFrame, targetTime)
+          ? lastSameClipFrame
         : null;
       const emergencyHoldFrame = isDragging
-        ? this.getDragHoldFrame(layer, video, deps)
+        ? lastSameClipFrame
         : dragHoldFrame;
       const safeFallback = this.getSafeLastFrameFallback(layer, video, deps, targetTime) ?? dragHoldFrame;
-      const allowLiveVideoImport = (!isDragging && !isSettling) || hasFreshPresentedFrame || !safeFallback;
-      const allowConfirmedFrameCaching = (!isDragging && !isSettling) || hasFreshPresentedFrame;
+      const allowLiveVideoImport = !hasPresentedOwnerMismatch && (isPausedSettle
+        ? hasFreshPresentedFrame
+        : !awaitingPausedTargetFrame &&
+          (((!isDragging && !isSettling) || hasFreshPresentedFrame || !safeFallback)));
+      const allowConfirmedFrameCaching = !hasPresentedOwnerMismatch && (isPausedSettle
+        ? hasFreshPresentedFrame
+        : !awaitingPausedTargetFrame &&
+          (((!isDragging && !isSettling) || hasFreshPresentedFrame)));
       const captureOwnerId = allowConfirmedFrameCaching ? layer.sourceClipId : undefined;
 
       // Keep using the live HTML video frame even when currentTime is unchanged.
@@ -470,7 +508,7 @@ export class LayerCollector {
 
       // If video is seeking, try per-time scrubbing cache first (exact frame for this position),
       // then fall back to generic last-frame cache
-      if (video.seeking && !deps.isExporting) {
+      if ((video.seeking || awaitingPausedTargetFrame) && !deps.isExporting) {
         // Try per-time cache: if we've visited this position before, show the exact frame
         const cachedFrame =
           deps.scrubbingCache?.getCachedFrameEntry(video.src, targetTime) ??
@@ -580,7 +618,7 @@ export class LayerCollector {
             textureView: copiedFrame.view,
             sourceWidth: copiedFrame.width,
             sourceHeight: copiedFrame.height,
-            displayedMediaTime: copiedFrame.mediaTime ?? currentTime,
+            displayedMediaTime: copiedFrame.mediaTime ?? displayedTime,
             targetMediaTime: targetTime,
             previewPath: 'copied-preview',
           };
@@ -599,7 +637,6 @@ export class LayerCollector {
         if (!deps.isPlaying && allowLiveVideoImport) {
           const now = performance.now();
           const lastCapture = deps.scrubbingCache?.getLastCaptureTime(video) || 0;
-          const displayedTime = lastPresentedTime ?? currentTime;
           if (allowConfirmedFrameCaching && now - lastCapture > 50) {
             deps.scrubbingCache?.captureVideoFrame(video, captureOwnerId);
             deps.scrubbingCache?.setLastCaptureTime(video, now);
@@ -609,13 +646,15 @@ export class LayerCollector {
           if (allowConfirmedFrameCaching) {
             deps.scrubbingCache?.cacheFrameAtTime(video, targetTime);
           } else {
-            deps.scrubbingCache?.captureVideoFrameIfCloser(
-              video,
-              targetTime,
-              displayedTime,
-              layer.sourceClipId
-            );
-            if (Number.isFinite(displayedTime)) {
+            if (typeof displayedTime === 'number' && Number.isFinite(displayedTime)) {
+              deps.scrubbingCache?.captureVideoFrameIfCloser(
+                video,
+                targetTime,
+                displayedTime,
+                layer.sourceClipId
+              );
+            }
+            if (typeof displayedTime === 'number' && Number.isFinite(displayedTime)) {
               deps.scrubbingCache?.cacheFrameAtTime(video, displayedTime);
             }
           }
@@ -631,7 +670,7 @@ export class LayerCollector {
           textureView: null,
           sourceWidth: video.videoWidth,
           sourceHeight: video.videoHeight,
-          displayedMediaTime: lastPresentedTime ?? currentTime,
+          displayedMediaTime: displayedTime,
           targetMediaTime: targetTime,
           previewPath: 'live-import',
         };

@@ -76,6 +76,18 @@ export class NestedCompRenderer {
     return this.scrubbingCache?.getLastFrame(video, layer.sourceClipId) ?? null;
   }
 
+  private isFrameNearTarget(
+    frame: { mediaTime?: number } | null | undefined,
+    targetTime: number,
+    maxDeltaSeconds: number = 0.35
+  ): boolean {
+    return (
+      typeof frame?.mediaTime === 'number' &&
+      Number.isFinite(frame.mediaTime) &&
+      Math.abs(frame.mediaTime - targetTime) <= maxDeltaSeconds
+    );
+  }
+
   private isPendingWebCodecsFrameStable(
     provider: NonNullable<Layer['source']>['webCodecsPlayer'] | undefined
   ): boolean {
@@ -446,18 +458,46 @@ export class NestedCompRenderer {
         const targetTime = this.getTargetVideoTime(layer, video);
         const isDragging = useTimelineStore.getState().isDraggingPlayhead;
         const isSettling = scrubSettleState.isPending(layer.sourceClipId);
+        const isPausedSettle = !useTimelineStore.getState().isPlaying && !isDragging && isSettling;
         const lastPresentedTime = this.scrubbingCache?.getLastPresentedTime(video);
-        const hasFreshPresentedFrame =
+        const lastPresentedOwner = this.scrubbingCache?.getLastPresentedOwner(video);
+        const hasPresentedOwnerMismatch =
+          !!layer.sourceClipId &&
+          !!lastPresentedOwner &&
+          lastPresentedOwner !== layer.sourceClipId;
+        const hasConfirmedPresentedFrame =
+          !hasPresentedOwnerMismatch &&
           typeof lastPresentedTime === 'number' &&
+          Number.isFinite(lastPresentedTime);
+        const displayedTime = hasConfirmedPresentedFrame ? lastPresentedTime : undefined;
+        const hasFreshPresentedFrame =
+          hasConfirmedPresentedFrame &&
           Math.abs(lastPresentedTime - targetTime) <= 0.12;
+        const awaitingPausedTargetFrame =
+          hasPresentedOwnerMismatch ||
+          !useTimelineStore.getState().isPlaying &&
+          !isDragging &&
+          (!isSettling &&
+            (!hasConfirmedPresentedFrame || Math.abs(lastPresentedTime - targetTime) > 0.05));
         const cacheSearchDistanceFrames = isDragging ? 12 : 6;
-        const dragHoldFrame = isSettling ? this.getDragHoldFrame(layer, video) : null;
-        const emergencyHoldFrame = isDragging ? this.getDragHoldFrame(layer, video) : dragHoldFrame;
+        const lastSameClipFrame = this.getDragHoldFrame(layer, video);
+        const dragHoldFrame = isDragging
+          ? lastSameClipFrame
+          : (isSettling || awaitingPausedTargetFrame) && this.isFrameNearTarget(lastSameClipFrame, targetTime)
+            ? lastSameClipFrame
+            : null;
+        const emergencyHoldFrame = isDragging ? lastSameClipFrame : dragHoldFrame;
         const safeFallback = this.getSafeLastFrameFallback(layer, video, targetTime) ?? dragHoldFrame;
-        const allowLiveVideoImport = (!isDragging && !isSettling) || hasFreshPresentedFrame || !safeFallback;
-        const allowConfirmedFrameCaching = (!isDragging && !isSettling) || hasFreshPresentedFrame;
+        const allowLiveVideoImport = !hasPresentedOwnerMismatch && (isPausedSettle
+          ? hasFreshPresentedFrame
+          : !awaitingPausedTargetFrame &&
+            (((!isDragging && !isSettling) || hasFreshPresentedFrame || !safeFallback)));
+        const allowConfirmedFrameCaching = !hasPresentedOwnerMismatch && (isPausedSettle
+          ? hasFreshPresentedFrame
+          : !awaitingPausedTargetFrame &&
+            (((!isDragging && !isSettling) || hasFreshPresentedFrame)));
         const captureOwnerId = allowConfirmedFrameCaching ? layer.sourceClipId : undefined;
-        if (video.seeking && this.scrubbingCache) {
+        if ((video.seeking || awaitingPausedTargetFrame) && this.scrubbingCache) {
           const cachedView =
             this.scrubbingCache.getCachedFrame(video.src, targetTime) ??
             this.scrubbingCache.getNearestCachedFrame(video.src, targetTime, cacheSearchDistanceFrames);
@@ -511,7 +551,6 @@ export class NestedCompRenderer {
             if (this.scrubbingCache) {
               const now = performance.now();
               const lastCapture = this.scrubbingCache.getLastCaptureTime(video);
-              const displayedTime = lastPresentedTime ?? video.currentTime;
               if (allowConfirmedFrameCaching && now - lastCapture > 50) {
                 this.scrubbingCache.captureVideoFrame(video, captureOwnerId);
                 this.scrubbingCache.setLastCaptureTime(video, now);
@@ -519,13 +558,15 @@ export class NestedCompRenderer {
               if (allowConfirmedFrameCaching) {
                 this.scrubbingCache.cacheFrameAtTime(video, targetTime);
               } else {
-                this.scrubbingCache.captureVideoFrameIfCloser(
-                  video,
-                  targetTime,
-                  displayedTime,
-                  layer.sourceClipId
-                );
-                if (Number.isFinite(displayedTime)) {
+                if (typeof displayedTime === 'number' && Number.isFinite(displayedTime)) {
+                  this.scrubbingCache.captureVideoFrameIfCloser(
+                    video,
+                    targetTime,
+                    displayedTime,
+                    layer.sourceClipId
+                  );
+                }
+                if (typeof displayedTime === 'number' && Number.isFinite(displayedTime)) {
                   this.scrubbingCache.cacheFrameAtTime(video, displayedTime);
                 }
               }

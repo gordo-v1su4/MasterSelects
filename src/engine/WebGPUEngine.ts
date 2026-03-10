@@ -565,12 +565,16 @@ export class WebGPUEngine {
     this.cacheManager.ensureVideoFrameCached(video, ownerId);
   }
 
-  markVideoFramePresented(video: HTMLVideoElement, time?: number): void {
-    this.cacheManager.markVideoFramePresented(video, time);
+  markVideoFramePresented(video: HTMLVideoElement, time?: number, ownerId?: string): void {
+    this.cacheManager.markVideoFramePresented(video, time, ownerId);
   }
 
   getLastPresentedVideoTime(video: HTMLVideoElement): number | undefined {
     return this.cacheManager.getLastPresentedVideoTime(video);
+  }
+
+  getLastPresentedVideoOwner(video: HTMLVideoElement): string | undefined {
+    return this.cacheManager.getLastPresentedVideoOwner(video);
   }
 
   /**

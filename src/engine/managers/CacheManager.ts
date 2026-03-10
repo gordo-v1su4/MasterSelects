@@ -55,12 +55,16 @@ export class CacheManager {
     }
   }
 
-  markVideoFramePresented(video: HTMLVideoElement, time?: number): void {
-    this.scrubbingCache?.markFramePresented(video, time);
+  markVideoFramePresented(video: HTMLVideoElement, time?: number, ownerId?: string): void {
+    this.scrubbingCache?.markFramePresented(video, time, ownerId);
   }
 
   getLastPresentedVideoTime(video: HTMLVideoElement): number | undefined {
     return this.scrubbingCache?.getLastPresentedTime(video);
+  }
+
+  getLastPresentedVideoOwner(video: HTMLVideoElement): string | undefined {
+    return this.scrubbingCache?.getLastPresentedOwner(video);
   }
 
   async preCacheVideoFrame(video: HTMLVideoElement, ownerId?: string): Promise<boolean> {

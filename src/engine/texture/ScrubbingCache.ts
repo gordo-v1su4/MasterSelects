@@ -26,6 +26,7 @@ export class ScrubbingCache {
   private lastFrameOwners = new WeakMap<HTMLVideoElement, string>();
   private lastCaptureTime: Map<HTMLVideoElement, number> = new Map();
   private lastPresentedFrameTimes = new WeakMap<HTMLVideoElement, number>();
+  private lastPresentedFrameOwners = new WeakMap<HTMLVideoElement, string>();
   private lastOwnerMissSignature = new WeakMap<HTMLVideoElement, string>();
   private lastOwnerMissAt = new WeakMap<HTMLVideoElement, number>();
 
@@ -440,9 +441,20 @@ export class ScrubbingCache {
     return this.lastPresentedFrameTimes.get(video);
   }
 
-  markFramePresented(video: HTMLVideoElement, time: number = video.currentTime): void {
+  getLastPresentedOwner(video: HTMLVideoElement): string | undefined {
+    return this.lastPresentedFrameOwners.get(video);
+  }
+
+  markFramePresented(
+    video: HTMLVideoElement,
+    time: number = video.currentTime,
+    ownerId?: string
+  ): void {
     if (Number.isFinite(time)) {
       this.lastPresentedFrameTimes.set(video, time);
+    }
+    if (ownerId) {
+      this.lastPresentedFrameOwners.set(video, ownerId);
     }
   }
 
@@ -456,6 +468,7 @@ export class ScrubbingCache {
     this.lastFrameOwners.delete(video);
     this.lastCaptureTime.delete(video);
     this.lastPresentedFrameTimes.delete(video);
+    this.lastPresentedFrameOwners.delete(video);
   }
 
   // === RAM PREVIEW COMPOSITE CACHE ===

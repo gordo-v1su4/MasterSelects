@@ -18,6 +18,7 @@ import {
   getScrubRuntimeSource,
 } from '../mediaRuntime/runtimePlayback';
 import { Logger } from '../logger';
+import { scrubSettleState } from '../scrubSettleState';
 import { flags } from '../../engine/featureFlags';
 import { getInterpolatedClipTransform } from '../../utils/keyframeInterpolation';
 import { useTimelineStore } from '../../stores/timeline';
@@ -483,6 +484,11 @@ export class LayerBuilderService {
 
     // Check for seamless cut handoff (same-source sequential clips reuse previous element)
     const handoffVideo = this.videoSyncManager.getHandoffVideoElement(clip.id);
+    const settle = scrubSettleState.get(clip.id);
+    const useHandoffVideo = !!handoffVideo && (
+      ctx.isPlaying ||
+      (settle?.reason === 'playback-stop' && scrubSettleState.isPending(clip.id))
+    );
     const allowSharedPreviewSession = canUseSharedPreviewRuntimeSession(clip, ctx.clipsAtTime);
     const useScrubRuntime = !ctx.isPlaying && ctx.isDraggingPlayhead;
     const previewRuntimeSource = useScrubRuntime
@@ -518,7 +524,7 @@ export class LayerBuilderService {
       blendMode: transform.blendMode as BlendMode,
       source: {
         type: 'video',
-        videoElement: handoffVideo ?? clip.source!.videoElement,
+        videoElement: useHandoffVideo ? handoffVideo : clip.source!.videoElement,
         mediaTime: timeInfo.clipTime,
         // Keep the clip's decoder attached even when audio uses a handoff element.
         webCodecsPlayer: visualProvider ?? undefined,

@@ -84,6 +84,7 @@ export class VideoSyncManager {
   }>();
   private activeHandoffs = new Map<string, HTMLVideoElement>();
   private handoffElements = new Set<HTMLVideoElement>();
+  private static readonly PAUSED_PRECISE_SEEK_THRESHOLD = 0.015;
 
   /**
    * Reset all per-clip state. Called during composition switch to prevent
@@ -196,9 +197,10 @@ export class VideoSyncManager {
     clipId: string,
     video: HTMLVideoElement,
     targetTime: number,
-    detail?: Record<string, string>
+    detail?: Record<string, string>,
+    reason?: 'manual-seek' | 'scrub-stop' | 'playback-stop'
   ): void {
-    scrubSettleState.begin(clipId, targetTime, VideoSyncManager.SCRUB_SETTLE_TIMEOUT_MS);
+    scrubSettleState.begin(clipId, targetTime, VideoSyncManager.SCRUB_SETTLE_TIMEOUT_MS, reason);
 
     const pendingTarget = this.pendingSeekTargets[clipId];
     const hasNearPendingTarget =
@@ -801,12 +803,32 @@ export class VideoSyncManager {
    * and syncVideoElements() (for sync + pause prevention).
    */
   computeHandoffs(ctx: FrameContext): void {
+    if (ctx.isDraggingPlayhead) {
+      this.activeHandoffs.clear();
+      this.handoffElements.clear();
+      return;
+    }
+
+    if (!ctx.isPlaying) {
+      for (const clipId of [...this.activeHandoffs.keys()]) {
+        const settle = scrubSettleState.get(clipId);
+        const keepHandoff =
+          settle?.reason === 'playback-stop' &&
+          scrubSettleState.isPending(clipId);
+        if (!keepHandoff) {
+          this.activeHandoffs.delete(clipId);
+        }
+      }
+
+      this.handoffElements.clear();
+      for (const handoff of this.activeHandoffs.values()) {
+        this.handoffElements.add(handoff);
+      }
+      return;
+    }
+
     this.activeHandoffs.clear();
     this.handoffElements.clear();
-
-    // Handoffs are needed during playback (seamless cut transitions)
-    // Only skip during scrubbing where we don't need seamless video
-    if (ctx.isDraggingPlayhead) return;
 
     for (const clip of ctx.clipsAtTime) {
       if (!clip.source?.videoElement || !clip.trackId) continue;
@@ -1026,13 +1048,16 @@ export class VideoSyncManager {
           this.forceVideoFrameDecode(nestedClip.id, video);
         }
 
-        const seekThreshold = ctx.isDraggingPlayhead ? 0.1 : 0.05;
+        const seekThreshold = ctx.isDraggingPlayhead
+          ? 0.1
+          : VideoSyncManager.PAUSED_PRECISE_SEEK_THRESHOLD;
         if (timeDiff > seekThreshold) {
           if (!ctx.isDraggingPlayhead) {
             scrubSettleState.begin(
               nestedClip.id,
               nestedClipTime,
-              VideoSyncManager.SCRUB_SETTLE_TIMEOUT_MS
+              VideoSyncManager.SCRUB_SETTLE_TIMEOUT_MS,
+              'manual-seek'
             );
           }
           this.throttledSeek(nestedClip.id, video, nestedClipTime, ctx);
@@ -1148,7 +1173,7 @@ export class VideoSyncManager {
     }
 
     const finishWarmup = (fallback = false) => {
-      engine.markVideoFramePresented(video);
+      engine.markVideoFramePresented(video, undefined, clipId);
       engine.ensureVideoFrameCached(video, clipId);
       scrubSettleState.resolve(clipId);
       video.pause();
@@ -1204,8 +1229,15 @@ export class VideoSyncManager {
 
     if (!clip.source?.videoElement) return;
 
-    // Use handoff element if available (seamless cut transition)
-    const video = this.activeHandoffs.get(clip.id) ?? clip.source.videoElement;
+    // Keep using the handoff element only during playback or while the clip's
+    // own element is still settling onto the pause/scrub target.
+    const handoffVideo = this.activeHandoffs.get(clip.id);
+    const settle = scrubSettleState.get(clip.id);
+    const useHandoffVideo = !!handoffVideo && (
+      ctx.isPlaying ||
+      (settle?.reason === 'playback-stop' && scrubSettleState.isPending(clip.id))
+    );
+    const video = useHandoffVideo ? handoffVideo : clip.source.videoElement;
     const timeInfo = getClipTimeInfo(ctx, clip);
     const mediaFile = getMediaFileForClip(ctx, clip);
 
@@ -1283,7 +1315,7 @@ export class VideoSyncManager {
         clearTimeout(this.preciseSeekTimers[clip.id]);
         delete this.preciseSeekTimers[clip.id];
         if (timeDiff > 0.001) {
-          this.beginOrQueueSettleSeek(clip.id, video, timeInfo.clipTime);
+          this.beginOrQueueSettleSeek(clip.id, video, timeInfo.clipTime, undefined, 'scrub-stop');
           video.addEventListener('seeked', () => engine.requestNewFrameRender(), { once: true });
         } else {
           scrubSettleState.resolve(clip.id);
@@ -1308,7 +1340,7 @@ export class VideoSyncManager {
         clearTimeout(this.preciseSeekTimers[clip.id]);
         delete this.preciseSeekTimers[clip.id];
         if (timeDiff > 0.001) {
-          this.beginOrQueueSettleSeek(clip.id, video, timeInfo.clipTime);
+          this.beginOrQueueSettleSeek(clip.id, video, timeInfo.clipTime, undefined, 'scrub-stop');
           video.addEventListener('seeked', () => engine.requestNewFrameRender(), { once: true });
         } else {
           scrubSettleState.resolve(clip.id);
@@ -1374,6 +1406,7 @@ export class VideoSyncManager {
         if (justStopped) {
           this.clipWasPlaying.delete(clip.id);
           scrubSettleState.resolve(clip.id);
+          const clipVideo = clip.source.videoElement;
           // If handoff was active, the actual playing element differs from clip's own
           const prevTrack = this.lastTrackState.get(clip.trackId);
           const actualVideo = (prevTrack && prevTrack.videoElement !== video)
@@ -1396,9 +1429,24 @@ export class VideoSyncManager {
             playheadState.position = newPlayheadPos;
             useTimelineStore.setState({ playheadPosition: newPlayheadPos });
           }
-          // If handoff was active, seek clip's own element so it's ready for scrubbing
-          if (actualVideo !== video) {
-            video.currentTime = this.safeSeekTime(video, timeInfo.clipTime);
+          // If playback used a handoff element, transition back to the clip's own
+          // element immediately so pause/step/scrub can't keep showing the old
+          // playing element's frame.
+          const handoffReleased = clipVideo !== actualVideo;
+          if (handoffReleased) {
+            const ownVideoTimeDiff = Math.abs(clipVideo.currentTime - timeInfo.clipTime);
+            if (ownVideoTimeDiff > 0.001) {
+              this.beginOrQueueSettleSeek(
+                clip.id,
+                clipVideo,
+                timeInfo.clipTime,
+                { handoffRelease: 'true' },
+                'playback-stop'
+              );
+            } else {
+              scrubSettleState.resolve(clip.id);
+            }
+            engine.requestNewFrameRender();
           }
           return;
         }
@@ -1419,7 +1467,7 @@ export class VideoSyncManager {
           // Always do a precise seek to the exact playhead position,
           // bypassing throttle — this is the definitive "settle" seek.
           if (timeDiff > 0.001) {
-            this.beginOrQueueSettleSeek(clip.id, video, timeInfo.clipTime);
+            this.beginOrQueueSettleSeek(clip.id, video, timeInfo.clipTime, undefined, 'scrub-stop');
           } else {
             scrubSettleState.resolve(clip.id);
           }
@@ -1431,7 +1479,9 @@ export class VideoSyncManager {
         } else {
           // 0.04s ≈ slightly more than 1 frame at 30fps.
           // Previous 0.1s threshold skipped up to 3 frames during slow scrubbing.
-          const seekThreshold = ctx.isDraggingPlayhead ? 0.04 : 0.04;
+          const seekThreshold = ctx.isDraggingPlayhead
+            ? 0.04
+            : VideoSyncManager.PAUSED_PRECISE_SEEK_THRESHOLD;
           if (timeDiff > seekThreshold) {
             this.throttledSeek(clip.id, video, timeInfo.clipTime, ctx);
           }
@@ -1606,7 +1656,7 @@ export class VideoSyncManager {
         }, 120);
       } else {
         // Not dragging: precise seek immediately (click, arrow keys, etc.)
-        scrubSettleState.begin(clipId, time, VideoSyncManager.SCRUB_SETTLE_TIMEOUT_MS);
+        scrubSettleState.begin(clipId, time, VideoSyncManager.SCRUB_SETTLE_TIMEOUT_MS, 'manual-seek');
         this.pendingSeekTargets[clipId] = time;
         this.pendingSeekStartedAt[clipId] = ctx.now;
         video.currentTime = this.safeSeekTime(video, time);
@@ -1635,7 +1685,7 @@ export class VideoSyncManager {
         delete this.rvfcHandles[clipId];
         delete this.pendingSeekTargets[clipId];
         delete this.pendingSeekStartedAt[clipId];
-        engine.markVideoFramePresented(video);
+        engine.markVideoFramePresented(video, undefined, clipId);
         scrubSettleState.resolve(clipId);
         vfPipelineMonitor.record('vf_seek_done', { clipId });
         this.flushQueuedSeekTarget(clipId, video, 'rvfc');
@@ -1741,9 +1791,14 @@ export class VideoSyncManager {
     for (const clip of ctx.clipsAtTime) {
       if (!clip.source?.videoElement || !clip.trackId) continue;
 
-      // Use the actual playing element (handoff or clip's own)
       const handoffElement = this.activeHandoffs.get(clip.id);
-      const video = handoffElement ?? clip.source.videoElement;
+      // Only propagate handoff elements during real playback. While paused,
+      // storing the bridged element here can poison later manual seeks/steps
+      // with a stale frame from an earlier clip.
+      const video =
+        ctx.isPlaying && handoffElement
+          ? handoffElement
+          : clip.source.videoElement;
 
       const fileId = clip.source.mediaFileId || clip.mediaFileId || '';
 
