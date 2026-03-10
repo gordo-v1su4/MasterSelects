@@ -561,8 +561,16 @@ export class WebGPUEngine {
    * Ensure the scrubbing cache has at least one frame for this video.
    * Called before seeking to provide a fallback frame during seek.
    */
-  ensureVideoFrameCached(video: HTMLVideoElement): void {
-    this.cacheManager.ensureVideoFrameCached(video);
+  ensureVideoFrameCached(video: HTMLVideoElement, ownerId?: string): void {
+    this.cacheManager.ensureVideoFrameCached(video, ownerId);
+  }
+
+  markVideoFramePresented(video: HTMLVideoElement, time?: number): void {
+    this.cacheManager.markVideoFramePresented(video, time);
+  }
+
+  getLastPresentedVideoTime(video: HTMLVideoElement): number | undefined {
+    return this.cacheManager.getLastPresentedVideoTime(video);
   }
 
   /**
@@ -570,8 +578,8 @@ export class WebGPUEngine {
    * This is the ONLY way to get a real frame from a never-played video after reload.
    * Call from canplaythrough handlers during project restore.
    */
-  async preCacheVideoFrame(video: HTMLVideoElement): Promise<boolean> {
-    const success = await this.cacheManager.preCacheVideoFrame(video);
+  async preCacheVideoFrame(video: HTMLVideoElement, ownerId?: string): Promise<boolean> {
+    const success = await this.cacheManager.preCacheVideoFrame(video, ownerId);
     if (success) {
       this.requestRender();
     }

@@ -50,8 +50,11 @@ export class LayerBuilderService {
   private getPausedVisualProvider(
     source: TimelineClip['source'],
     runtimeProvider: ReturnType<typeof getRuntimeFrameProvider>,
-    targetTime: number
+    targetTime: number,
+    options?: { preferFreshRuntime?: boolean }
   ) {
+    const preferFreshRuntime = options?.preferFreshRuntime === true;
+    const freshFrameTolerance = 0.12;
     const providerDistance = (
       provider:
         | {
@@ -100,6 +103,19 @@ export class LayerBuilderService {
     const clipDistance = providerDistance(clipPlayer);
     if (!clipPlayer?.isFullMode()) {
       return runtimeHasFrame && runtimeProvider?.isFullMode() ? runtimeProvider : undefined;
+    }
+
+    if (preferFreshRuntime && runtimeProvider?.isFullMode()) {
+      const runtimeIsFresh = runtimeHasFrame && runtimeDistance <= freshFrameTolerance;
+      const clipIsFresh = clipHasFrame && clipDistance <= freshFrameTolerance;
+
+      if (runtimeIsFresh && runtimeDistance <= clipDistance) {
+        return runtimeProvider;
+      }
+      if (clipIsFresh) {
+        return clipPlayer;
+      }
+      return runtimeProvider;
     }
 
     if (runtimeHasFrame && runtimeDistance < clipDistance) {
@@ -489,7 +505,9 @@ export class LayerBuilderService {
       ? previewRuntimeSource?.webCodecsPlayer ?? clip.source?.webCodecsPlayer
       : preferHtmlScrubPreview
         ? undefined
-        : this.getPausedVisualProvider(clip.source, runtimeProvider, timeInfo.clipTime);
+        : this.getPausedVisualProvider(clip.source, runtimeProvider, timeInfo.clipTime, {
+            preferFreshRuntime: useScrubRuntime,
+          });
 
     const layer: Layer = {
       id: `${ctx.activeCompId}_layer_${layerIndex}`,
@@ -501,6 +519,7 @@ export class LayerBuilderService {
       source: {
         type: 'video',
         videoElement: handoffVideo ?? clip.source!.videoElement,
+        mediaTime: timeInfo.clipTime,
         // Keep the clip's decoder attached even when audio uses a handoff element.
         webCodecsPlayer: visualProvider ?? undefined,
         runtimeSourceId: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSourceId,
@@ -897,11 +916,14 @@ export class LayerBuilderService {
         source: {
           type: 'video',
           videoElement: nestedClip.source!.videoElement,
+          mediaTime: nestedClipTime,
           webCodecsPlayer: ctx.isPlaying
             ? previewRuntimeSource?.webCodecsPlayer ?? nestedClip.source!.webCodecsPlayer
             : preferHtmlScrubPreview
               ? undefined
-              : this.getPausedVisualProvider(nestedClip.source, runtimeProvider, nestedClipTime),
+              : this.getPausedVisualProvider(nestedClip.source, runtimeProvider, nestedClipTime, {
+                  preferFreshRuntime: useScrubRuntime,
+                }),
           runtimeSourceId: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSourceId,
           runtimeSessionKey: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSessionKey,
         },

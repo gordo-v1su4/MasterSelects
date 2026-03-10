@@ -49,15 +49,23 @@ export class CacheManager {
     this.scrubbingCache?.clearScrubbingCache(videoSrc);
   }
 
-  ensureVideoFrameCached(video: HTMLVideoElement): void {
-    if (this.scrubbingCache && !this.scrubbingCache.getLastFrame(video)) {
-      this.scrubbingCache.captureVideoFrame(video);
+  ensureVideoFrameCached(video: HTMLVideoElement, ownerId?: string): void {
+    if (this.scrubbingCache && !this.scrubbingCache.getLastFrame(video, ownerId)) {
+      this.scrubbingCache.captureVideoFrame(video, ownerId);
     }
   }
 
-  async preCacheVideoFrame(video: HTMLVideoElement): Promise<boolean> {
+  markVideoFramePresented(video: HTMLVideoElement, time?: number): void {
+    this.scrubbingCache?.markFramePresented(video, time);
+  }
+
+  getLastPresentedVideoTime(video: HTMLVideoElement): number | undefined {
+    return this.scrubbingCache?.getLastPresentedTime(video);
+  }
+
+  async preCacheVideoFrame(video: HTMLVideoElement, ownerId?: string): Promise<boolean> {
     if (!this.scrubbingCache) return false;
-    return this.scrubbingCache.captureVideoFrameViaImageBitmap(video);
+    return this.scrubbingCache.captureVideoFrameViaImageBitmap(video, ownerId);
   }
 
   cleanupVideoCache(video: HTMLVideoElement): void {
