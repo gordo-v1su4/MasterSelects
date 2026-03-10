@@ -565,6 +565,10 @@ export class WebGPUEngine {
     this.cacheManager.ensureVideoFrameCached(video, ownerId);
   }
 
+  captureVideoFrameAtTime(video: HTMLVideoElement, time: number, ownerId?: string): boolean {
+    return this.cacheManager.captureVideoFrameAtTime(video, time, ownerId);
+  }
+
   markVideoFramePresented(video: HTMLVideoElement, time?: number, ownerId?: string): void {
     this.cacheManager.markVideoFramePresented(video, time, ownerId);
   }
@@ -575,6 +579,10 @@ export class WebGPUEngine {
 
   getLastPresentedVideoOwner(video: HTMLVideoElement): string | undefined {
     return this.cacheManager.getLastPresentedVideoOwner(video);
+  }
+
+  markVideoGpuReady(video: HTMLVideoElement): void {
+    this.layerCollector?.markVideoGpuReady(video);
   }
 
   /**

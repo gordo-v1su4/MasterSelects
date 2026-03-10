@@ -581,6 +581,24 @@ export class NestedCompRenderer {
           }
         }
 
+        const notReadyCachedFrame =
+          this.scrubbingCache?.getCachedFrameEntry(video.src, targetTime) ??
+          this.scrubbingCache?.getNearestCachedFrameEntry(video.src, targetTime, cacheSearchDistanceFrames);
+        if (notReadyCachedFrame) {
+          result.push({
+            layer,
+            isVideo: false,
+            externalTexture: null,
+            textureView: notReadyCachedFrame.view,
+            sourceWidth: video.videoWidth,
+            sourceHeight: video.videoHeight,
+            displayedMediaTime: notReadyCachedFrame.mediaTime,
+            targetMediaTime: targetTime,
+            previewPath: 'not-ready-scrub-cache',
+          });
+          continue;
+        }
+
         if (safeFallback) {
           log.debug('Using cached frame fallback for nested video', { layerId: layer.id });
           result.push({

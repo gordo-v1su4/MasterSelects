@@ -55,6 +55,10 @@ export class CacheManager {
     }
   }
 
+  captureVideoFrameAtTime(video: HTMLVideoElement, time: number, ownerId?: string): boolean {
+    return this.scrubbingCache?.captureVideoFrameAtTime(video, time, ownerId) ?? false;
+  }
+
   markVideoFramePresented(video: HTMLVideoElement, time?: number, ownerId?: string): void {
     this.scrubbingCache?.markFramePresented(video, time, ownerId);
   }

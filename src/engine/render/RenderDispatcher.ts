@@ -548,11 +548,29 @@ export class RenderDispatcher {
             }
             layerData.push({ layer, isVideo: true, externalTexture: extTex, textureView: null, sourceWidth: video.videoWidth, sourceHeight: video.videoHeight });
             continue;
-          }
+        }
 
-          if (safeFallback) {
-            layerData.push({
-              layer,
+        const notReadyCachedFrame =
+          scrubbingCache?.getCachedFrameEntry(video.src, targetTime) ??
+          scrubbingCache?.getNearestCachedFrameEntry(video.src, targetTime, cacheSearchDistanceFrames);
+        if (notReadyCachedFrame) {
+          layerData.push({
+            layer,
+            isVideo: false,
+            externalTexture: null,
+            textureView: notReadyCachedFrame.view,
+            sourceWidth: video.videoWidth,
+            sourceHeight: video.videoHeight,
+            displayedMediaTime: notReadyCachedFrame.mediaTime,
+            targetMediaTime: targetTime,
+            previewPath: 'not-ready-scrub-cache',
+          });
+          continue;
+        }
+
+        if (safeFallback) {
+          layerData.push({
+            layer,
               isVideo: false,
               externalTexture: null,
               textureView: safeFallback.view,

@@ -711,14 +711,33 @@ export class LayerCollector {
     } else {
       // Video not ready - try cache
       const targetTime = this.getTargetVideoTime(layer, video);
+      const isDragging = useTimelineStore.getState().isDraggingPlayhead;
+      const cacheSearchDistanceFrames = isDragging ? 12 : 6;
       const isSettling = scrubSettleState.isPending(layer.sourceClipId);
       const dragHoldFrame = isSettling
         ? this.getDragHoldFrame(layer, video, deps)
         : null;
-      const emergencyHoldFrame = useTimelineStore.getState().isDraggingPlayhead
+      const emergencyHoldFrame = isDragging
         ? this.getDragHoldFrame(layer, video, deps)
         : dragHoldFrame;
       const safeFallback = this.getSafeLastFrameFallback(layer, video, deps, targetTime) ?? dragHoldFrame;
+      const cachedFrame =
+        deps.scrubbingCache?.getCachedFrameEntry(video.src, targetTime) ??
+        deps.scrubbingCache?.getNearestCachedFrameEntry(video.src, targetTime, cacheSearchDistanceFrames);
+      if (cachedFrame) {
+        this.traceScrubPath(layer, 'not-ready-scrub-cache', video, targetTime, deps.scrubbingCache?.getLastPresentedTime(video));
+        return {
+          layer,
+          isVideo: false,
+          externalTexture: null,
+          textureView: cachedFrame.view,
+          sourceWidth: video.videoWidth,
+          sourceHeight: video.videoHeight,
+          displayedMediaTime: cachedFrame.mediaTime,
+          targetMediaTime: targetTime,
+          previewPath: 'not-ready-scrub-cache',
+        };
+      }
       if (safeFallback) {
         this.traceScrubPath(layer, 'not-ready-cache', video, targetTime, deps.scrubbingCache?.getLastPresentedTime(video));
         return {
@@ -800,6 +819,10 @@ export class LayerCollector {
 
   isVideoGpuReady(video: HTMLVideoElement): boolean {
     return this.videoGpuReady.has(video);
+  }
+
+  markVideoGpuReady(video: HTMLVideoElement): void {
+    this.videoGpuReady.add(video);
   }
 
   resetVideoGpuReady(video: HTMLVideoElement): void {

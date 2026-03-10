@@ -193,6 +193,30 @@ export class VideoSyncManager {
     return Math.max(clip.inPoint, Math.min(clip.outPoint, startPoint + sourceTime));
   }
 
+  private getWarmupClipTime(ctx: FrameContext, clip: TimelineClip): number {
+    if (!ctx.isDraggingPlayhead) {
+      return this.getClipStartTime(ctx, clip);
+    }
+
+    const clipEnd = clip.startTime + clip.duration;
+    const sampleTimelineTime = Math.max(
+      clip.startTime,
+      Math.min(Math.max(ctx.playheadPosition, clip.startTime), clipEnd - 1 / 120)
+    );
+    const clipLocalTime = Math.max(0, sampleTimelineTime - clip.startTime);
+    const speed = ctx.getInterpolatedSpeed(clip.id, clipLocalTime);
+    const startPoint = speed >= 0 ? clip.inPoint : clip.outPoint;
+
+    let sourceTime = 0;
+    try {
+      sourceTime = ctx.getSourceTimeForClip(clip.id, clipLocalTime);
+    } catch {
+      sourceTime = 0;
+    }
+
+    return Math.max(clip.inPoint, Math.min(clip.outPoint, startPoint + sourceTime));
+  }
+
   private beginOrQueueSettleSeek(
     clipId: string,
     video: HTMLVideoElement,
@@ -927,6 +951,15 @@ export class VideoSyncManager {
     // Compute handoffs for seamless cut transitions
     this.computeHandoffs(ctx);
 
+    // Proactively warm upcoming clips before sync so boundary crossings during
+    // playback or drag scrubbing are less likely to hit a cold decoder surface.
+    if (ctx.isPlaying || ctx.isDraggingPlayhead) {
+      this.warmupUpcomingClips(ctx);
+    }
+    if (ctx.isPlaying) {
+      this.preBufferUpcomingVideoAudio(ctx);
+    }
+
     // Sync each clip at playhead
     for (const clip of ctx.clipsAtTime) {
       this.syncClipVideo(clip, ctx);
@@ -967,13 +1000,6 @@ export class VideoSyncManager {
           }
         }
       }
-    }
-
-    // Proactive GPU warmup + audio pre-buffering: look ahead and prepare
-    // video elements for clips about to become active.
-    if (ctx.isPlaying) {
-      this.warmupUpcomingClips(ctx);
-      this.preBufferUpcomingVideoAudio(ctx);
     }
 
     // Update track state for seamless cut transition detection
@@ -1173,8 +1199,12 @@ export class VideoSyncManager {
     }
 
     const finishWarmup = (fallback = false) => {
-      engine.markVideoFramePresented(video, undefined, clipId);
-      engine.ensureVideoFrameCached(video, clipId);
+      const presentedTime = video.currentTime;
+      engine.markVideoFramePresented(video, presentedTime, clipId);
+      if (!engine.captureVideoFrameAtTime(video, presentedTime, clipId)) {
+        engine.ensureVideoFrameCached(video, clipId);
+      }
+      engine.markVideoGpuReady(video);
       scrubSettleState.resolve(clipId);
       video.pause();
       this.warmingUpVideos.delete(video);
@@ -1415,9 +1445,14 @@ export class VideoSyncManager {
             actualVideo.pause();
             vfPipelineMonitor.record('vf_pause', { clipId: clip.id });
           }
+          const pauseTargetTime = actualVideo.currentTime;
+          engine.markVideoFramePresented(actualVideo, pauseTargetTime, clip.id);
+          if (!engine.captureVideoFrameAtTime(actualVideo, pauseTargetTime, clip.id)) {
+            engine.ensureVideoFrameCached(actualVideo, clip.id);
+          }
           // Convert actualVideo.currentTime back to timeline position
           const effectiveSpeed = timeInfo.absSpeed > 0.01 ? timeInfo.absSpeed : 1;
-          const videoClipTime = actualVideo.currentTime;
+          const videoClipTime = pauseTargetTime;
           const newPlayheadPos = clip.reversed
             ? clip.startTime + (clip.outPoint - videoClipTime) / effectiveSpeed
             : clip.startTime + (videoClipTime - clip.inPoint) / effectiveSpeed;
@@ -1434,20 +1469,30 @@ export class VideoSyncManager {
           // playing element's frame.
           const handoffReleased = clipVideo !== actualVideo;
           if (handoffReleased) {
-            const ownVideoTimeDiff = Math.abs(clipVideo.currentTime - timeInfo.clipTime);
-            if (ownVideoTimeDiff > 0.001) {
+            this.activeHandoffs.set(clip.id, actualVideo);
+            this.handoffElements.add(actualVideo);
+            const ownVideoTimeDiff = Math.abs(clipVideo.currentTime - pauseTargetTime);
+            if (ownVideoTimeDiff > 0.001 || clipVideo.readyState < 2) {
               this.beginOrQueueSettleSeek(
                 clip.id,
                 clipVideo,
-                timeInfo.clipTime,
+                pauseTargetTime,
                 { handoffRelease: 'true' },
                 'playback-stop'
               );
             } else {
+              engine.markVideoFramePresented(clipVideo, pauseTargetTime, clip.id);
+              if (!engine.captureVideoFrameAtTime(clipVideo, pauseTargetTime, clip.id)) {
+                engine.ensureVideoFrameCached(clipVideo, clip.id);
+              }
               scrubSettleState.resolve(clip.id);
+              this.activeHandoffs.delete(clip.id);
+              this.handoffElements.delete(actualVideo);
             }
             engine.requestNewFrameRender();
+            return;
           }
+          engine.requestNewFrameRender();
           return;
         }
 
@@ -1682,10 +1727,12 @@ export class VideoSyncManager {
         (video as any).cancelVideoFrameCallback(prevHandle);
       }
       this.rvfcHandles[clipId] = rvfc.call(video, () => {
+        const presentedTime = video.currentTime;
         delete this.rvfcHandles[clipId];
         delete this.pendingSeekTargets[clipId];
         delete this.pendingSeekStartedAt[clipId];
-        engine.markVideoFramePresented(video, undefined, clipId);
+        engine.markVideoFramePresented(video, presentedTime, clipId);
+        engine.captureVideoFrameAtTime(video, presentedTime, clipId);
         scrubSettleState.resolve(clipId);
         vfPipelineMonitor.record('vf_seek_done', { clipId });
         this.flushQueuedSeekTarget(clipId, video, 'rvfc');
@@ -1700,6 +1747,8 @@ export class VideoSyncManager {
   // Videos whose GPU surface has been confirmed active via RVFC
   private gpuWarmedUp = new WeakSet<HTMLVideoElement>();
   private static readonly LOOKAHEAD_TIME = 1.5; // seconds (increased from 0.5 for reliable GPU warmup)
+  private static readonly SCRUB_WARMUP_LOOKAHEAD = 0.9;
+  private static readonly SCRUB_WARMUP_LOOKBEHIND = 0.25;
   private static readonly SCRUB_SETTLE_TIMEOUT_MS = 220;
   private static readonly SCRUB_SETTLE_RVFC_DEFER_MS = 90;
   private static readonly SCRUB_DRAG_RVFC_FOLLOW_THRESHOLD = 0.16;
@@ -1716,14 +1765,29 @@ export class VideoSyncManager {
    * requestVideoFrameCallback to confirm actual frame presentation.
    */
   private warmupUpcomingClips(ctx: FrameContext): void {
-    const lookaheadEnd = ctx.playheadPosition + VideoSyncManager.LOOKAHEAD_TIME;
+    const windowStart = ctx.isDraggingPlayhead
+      ? Math.max(0, ctx.playheadPosition - VideoSyncManager.SCRUB_WARMUP_LOOKBEHIND)
+      : ctx.playheadPosition;
+    const windowEnd = ctx.playheadPosition + (
+      ctx.isDraggingPlayhead
+        ? VideoSyncManager.SCRUB_WARMUP_LOOKAHEAD
+        : VideoSyncManager.LOOKAHEAD_TIME
+    );
 
     for (const clip of ctx.clips) {
       const clipStart = clip.startTime;
-      const clipTime = this.getClipStartTime(ctx, clip);
+      const clipEnd = clip.startTime + clip.duration;
+      const clipTime = this.getWarmupClipTime(ctx, clip);
+      const isCurrentlyActive = clipStart <= ctx.playheadPosition && clipEnd > ctx.playheadPosition;
 
-      // Is this clip about to become active? (starts within lookahead window, not yet active)
-      if (clipStart <= ctx.playheadPosition || clipStart > lookaheadEnd) continue;
+      if (ctx.isDraggingPlayhead) {
+        // While dragging, warm clips near the playhead on both sides so boundary
+        // crossings do not cold-start the GPU surface.
+        if (isCurrentlyActive || clipEnd <= windowStart || clipStart > windowEnd) continue;
+      } else {
+        // During playback, only warm clips that start soon ahead of the playhead.
+        if (clipStart <= ctx.playheadPosition || clipStart > windowEnd) continue;
+      }
 
       if (flags.useFullWebCodecsPlayback) {
         this.prewarmUpcomingWebCodecsClip(ctx, clip, clipTime);
