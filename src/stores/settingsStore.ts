@@ -81,6 +81,9 @@ interface SettingsState {
   // Tutorial campaign completion tracking
   completedTutorials: string[];
 
+  // Changelog settings
+  showChangelogOnStartup: boolean;
+
   // UI state
   isSettingsOpen: boolean;
 
@@ -111,6 +114,7 @@ interface SettingsState {
   setHasSeenTutorialPart2: (seen: boolean) => void;
   setUserBackground: (bg: string) => void;
   completeTutorial: (campaignId: string) => void;
+  setShowChangelogOnStartup: (show: boolean) => void;
   openSettings: () => void;
   closeSettings: () => void;
   toggleSettings: () => void;
@@ -160,6 +164,7 @@ export const useSettingsStore = create<SettingsState>()(
       hasSeenTutorialPart2: false, // Show timeline tutorial after part 1
       userBackground: null, // Which program the user comes from
       completedTutorials: [], // Campaign IDs that have been completed
+      showChangelogOnStartup: true, // Show changelog dialog on every startup
       isSettingsOpen: false,
 
       // Output settings
@@ -262,6 +267,7 @@ export const useSettingsStore = create<SettingsState>()(
         }
       },
 
+      setShowChangelogOnStartup: (show) => set({ showChangelogOnStartup: show }),
       openSettings: () => set({ isSettingsOpen: true }),
       closeSettings: () => set({ isSettingsOpen: false }),
       toggleSettings: () => set((state) => ({ isSettingsOpen: !state.isSettingsOpen })),
@@ -331,6 +337,7 @@ export const useSettingsStore = create<SettingsState>()(
         hasSeenTutorialPart2: state.hasSeenTutorialPart2,
         userBackground: state.userBackground,
         completedTutorials: state.completedTutorials,
+        showChangelogOnStartup: state.showChangelogOnStartup,
         outputResolution: state.outputResolution,
         fps: state.fps,
       }),

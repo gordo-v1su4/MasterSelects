@@ -114,6 +114,7 @@ export function MediaPanel() {
   const itemListRef = useRef<HTMLDivElement>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const renameTimerRef = useRef<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId?: string } | null>(null);
 
   // Marquee selection state
@@ -483,12 +484,16 @@ export function MediaPanel() {
     setRenamingId(null);
   }, [renamingId, renameValue, files, folders, compositions, renameFile, renameFolder, updateComposition]);
 
-  // Handle click on item name to start rename
+  // Handle click on item name to start rename (delayed so drag can cancel it)
   const handleNameClick = useCallback((e: React.MouseEvent, id: string, currentName: string) => {
     // Only start rename if item is already selected (double-click on name effect)
     if (selectedIds.includes(id)) {
       e.stopPropagation();
-      startRename(id, currentName);
+      if (renameTimerRef.current) clearTimeout(renameTimerRef.current);
+      renameTimerRef.current = window.setTimeout(() => {
+        renameTimerRef.current = null;
+        startRename(id, currentName);
+      }, 300);
     }
   }, [selectedIds, startRename]);
 
@@ -585,6 +590,11 @@ export function MediaPanel() {
 
   // Handle drag start for media files and compositions (to drag to Timeline OR to folders)
   const handleDragStart = useCallback((e: React.DragEvent, item: ProjectItem) => {
+    // Cancel pending rename — drag wins over rename
+    if (renameTimerRef.current) {
+      clearTimeout(renameTimerRef.current);
+      renameTimerRef.current = null;
+    }
     const isFolder = 'isExpanded' in item;
     clearExternalDragPayload();
 
@@ -605,7 +615,9 @@ export function MediaPanel() {
     if (item.type === 'composition') {
       const comp = item as Composition;
       // Don't allow dragging comp into itself (check active comp)
-      if (comp.id === activeCompositionId) {
+      // Exception: in slot grid view, dragging active comp to a slot is fine
+      const inSlotView = useTimelineStore.getState().slotGridProgress > 0.5;
+      if (comp.id === activeCompositionId && !inSlotView) {
         e.preventDefault();
         return;
       }
@@ -948,6 +960,7 @@ export function MediaPanel() {
                 type="text"
                 className="media-item-rename"
                 value={renameValue}
+                size={Math.max(1, renameValue.length)}
                 onChange={(e) => setRenameValue(e.target.value)}
                 onBlur={finishRename}
                 onKeyDown={(e) => {
@@ -1224,18 +1237,19 @@ export function MediaPanel() {
         <span className="media-panel-count">{totalItems} items</span>
         <div className="media-panel-actions">
           <button
-            className={`btn btn-sm btn-icon media-view-toggle ${viewMode === 'list' ? 'active' : ''}`}
-            onClick={() => { const m = 'list'; setViewMode(m); setGridFolderId(null); localStorage.setItem('media-panel-view-mode', m); }}
-            title="List View"
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="0.5"/><rect x="1" y="7" width="14" height="2" rx="0.5"/><rect x="1" y="12" width="14" height="2" rx="0.5"/></svg>
-          </button>
-          <button
             className={`btn btn-sm btn-icon media-view-toggle ${viewMode === 'grid' ? 'active' : ''}`}
-            onClick={() => { const m = 'grid'; setViewMode(m); localStorage.setItem('media-panel-view-mode', m); }}
-            title="Grid View"
+            onClick={() => {
+              const m = viewMode === 'grid' ? 'list' : 'grid';
+              setViewMode(m);
+              if (m === 'list') setGridFolderId(null);
+              localStorage.setItem('media-panel-view-mode', m);
+            }}
+            title={viewMode === 'grid' ? 'Switch to List View' : 'Switch to Grid View'}
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+            {viewMode === 'grid'
+              ? <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><rect x="1" y="2" width="14" height="2" rx="0.5"/><rect x="1" y="7" width="14" height="2" rx="0.5"/><rect x="1" y="12" width="14" height="2" rx="0.5"/></svg>
+              : <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+            }
           </button>
           {filesNeedReload && (
             <button

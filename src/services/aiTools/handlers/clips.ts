@@ -2,12 +2,15 @@
 
 import { useTimelineStore } from '../../../stores/timeline';
 import { useMediaStore } from '../../../stores/mediaStore';
-import { createVideoElement, createAudioElement, initWebCodecsPlayer } from '../../../stores/timeline/helpers/webCodecsHelpers';
+import { createVideoElement, createAudioElement } from '../../../stores/timeline/helpers/webCodecsHelpers';
 import type { TimelineClip } from '../../../types';
 import type { ToolResult } from '../types';
 import { formatClipInfo } from '../utils';
-import { isAIExecutionActive } from '../executionState';
+import { isAIExecutionActive, consumeStaggerDelay } from '../executionState';
 import { activateDockPanel } from '../aiFeedback';
+import { Logger } from '../../../services/logger';
+
+const log = Logger.create('AITool:Clips');
 
 /** Resolve clip background color for ghost overlays */
 function getClipColor(clip: TimelineClip): string {
@@ -18,6 +21,50 @@ function getClipColor(clip: TimelineClip): string {
 }
 
 type TimelineStore = ReturnType<typeof useTimelineStore.getState>;
+
+function getHeapSnapshot():
+  | {
+      heapUsedMB: number;
+      heapTotalMB: number;
+      heapLimitMB: number;
+    }
+  | undefined {
+  const perf = performance as Performance & {
+    memory?: {
+      usedJSHeapSize: number;
+      totalJSHeapSize: number;
+      jsHeapSizeLimit: number;
+    };
+  };
+  const memory = perf.memory;
+  if (!memory) return undefined;
+
+  return {
+    heapUsedMB: Math.round(memory.usedJSHeapSize / (1024 * 1024)),
+    heapTotalMB: Math.round(memory.totalJSHeapSize / (1024 * 1024)),
+    heapLimitMB: Math.round(memory.jsHeapSizeLimit / (1024 * 1024)),
+  };
+}
+
+function logSplitCheckpoint(
+  stage: string,
+  clip: TimelineClip,
+  splitCount: number,
+  withLinked: boolean
+): void {
+  const state = useTimelineStore.getState();
+  log.warn(`[split-checkpoint:${stage}] ${clip.id}`, {
+    clipId: clip.id,
+    clipName: clip.name,
+    splitCount,
+    withLinked,
+    aiExecutionActive: isAIExecutionActive(),
+    totalClips: state.clips.length,
+    totalTracks: state.tracks.length,
+    selectedClipIds: state.selectedClipIds.size,
+    ...getHeapSnapshot(),
+  });
+}
 
 /**
  * Deep clone serializable clip properties (effects, masks, transforms, etc.)
@@ -33,39 +80,55 @@ function deepCloneClipProps(clip: TimelineClip): Partial<TimelineClip> {
   };
 }
 
+function cloneVideoElementForSplit(clip: TimelineClip): HTMLVideoElement {
+  const existingSrc = clip.source?.videoElement?.src;
+  if (existingSrc) {
+    const video = document.createElement('video');
+    video.src = existingSrc;
+    video.preload = 'none';
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = 'anonymous';
+    return video;
+  }
+
+  const video = createVideoElement(clip.file);
+  video.preload = 'none';
+  return video;
+}
+
+function cloneAudioElementForSplit(
+  clip: Pick<TimelineClip, 'file' | 'source'>
+): HTMLAudioElement {
+  const existingSrc = clip.source?.audioElement?.src;
+  if (existingSrc) {
+    const audio = document.createElement('audio');
+    audio.src = existingSrc;
+    audio.preload = 'none';
+    return audio;
+  }
+
+  const audio = createAudioElement(clip.file);
+  audio.preload = 'none';
+  return audio;
+}
+
 /**
  * Clone video/audio source for a new clip part.
- * Creates new HTMLMediaElements so each clip can seek independently.
- * Returns the cloned source and fires async WebCodecs init.
+ * Creates fresh HTMLMediaElements for independent seeking while reusing the
+ * existing decoder/runtime state from the original source where possible.
  */
-function cloneSourceForPart(
-  clip: TimelineClip,
-  partClipId: string
-): TimelineClip['source'] {
+function cloneSourceForPart(clip: TimelineClip): TimelineClip['source'] {
   if (clip.source?.type === 'video' && clip.source.videoElement && clip.file) {
-    const newVideo = createVideoElement(clip.file);
-    const newSource = {
+    return {
       ...clip.source,
-      videoElement: newVideo,
-      webCodecsPlayer: undefined,
+      videoElement: cloneVideoElementForSplit(clip),
+      webCodecsPlayer: clip.source.webCodecsPlayer,
     };
-    // Async WebCodecs init — updates the clip source once ready
-    initWebCodecsPlayer(newVideo, clip.name).then(player => {
-      if (player) {
-        const { clips: currentClips } = useTimelineStore.getState();
-        useTimelineStore.setState({
-          clips: currentClips.map(c => {
-            if (c.id !== partClipId || !c.source) return c;
-            return { ...c, source: { ...c.source, webCodecsPlayer: player } };
-          }),
-        });
-      }
-    });
-    return newSource;
   } else if (clip.source?.type === 'audio' && clip.source.audioElement && clip.file) {
     return {
       ...clip.source,
-      audioElement: createAudioElement(clip.file),
+      audioElement: cloneAudioElementForSplit(clip),
     };
   }
   return clip.source;
@@ -83,6 +146,7 @@ function cloneLinkedSourceForPart(
       // Async create audio from mixdown buffer
       import('../../../services/compositionAudioMixer').then(({ compositionAudioMixer }) => {
         const newAudio = compositionAudioMixer.createAudioElement(linkedClip.mixdownBuffer!);
+        newAudio.preload = 'none';
         const { clips: currentClips } = useTimelineStore.getState();
         useTimelineStore.setState({
           clips: currentClips.map(c => {
@@ -95,7 +159,7 @@ function cloneLinkedSourceForPart(
     } else if (linkedClip.file && linkedClip.file.size > 0) {
       return {
         ...linkedClip.source,
-        audioElement: createAudioElement(linkedClip.file),
+        audioElement: cloneAudioElementForSplit(linkedClip),
       };
     }
   }
@@ -132,7 +196,7 @@ function splitClipBatch(clip: TimelineClip, splitTimes: number[], withLinked = t
     const linkedPartId = linkedClip ? `clip-${timestamp}-${randomSuffix}-lp${i}` : undefined;
 
     // First part keeps the original source; subsequent parts get cloned sources
-    const partSource = i === 0 ? clip.source : cloneSourceForPart(clip, partId);
+    const partSource = i === 0 ? clip.source : cloneSourceForPart(clip);
 
     const partClip: TimelineClip = {
       ...clip,
@@ -574,33 +638,23 @@ export async function handleSplitClipEvenly(
     splitTimes.push(clipStart + partDuration * i);
   }
 
-  // Staggered split: each cut happens one by one with visual feedback
   if (isAIExecutionActive()) {
-    const STAGGER_MS = 300;
+    logSplitCheckpoint('split-evenly:start', clip, splitTimes.length, withLinked);
     const trackId = clip.trackId;
-    // Do first split immediately
-    splitClipBatch(clip, [splitTimes[0]], withLinked);
-    useTimelineStore.getState().addAIOverlay({
-      type: 'split-glow', trackId, timePosition: splitTimes[0], duration: 1000,
-    });
-    // Schedule remaining splits
-    for (let i = 1; i < splitTimes.length; i++) {
-      const t = splitTimes[i];
-      await new Promise(resolve => setTimeout(resolve, STAGGER_MS));
-      // Find the clip that contains this split time
-      const currentClips = useTimelineStore.getState().clips;
-      const target = currentClips.find(c =>
-        c.trackId === trackId && c.startTime < t && c.startTime + c.duration > t + 0.001
-      );
-      if (target) {
-        splitClipBatch(target, [t], withLinked);
-      }
-      useTimelineStore.getState().addAIOverlay({
-        type: 'split-glow', trackId, timePosition: t, duration: 1000,
-      });
-    }
+    // Bulk split: single state update for all cuts at once
+    splitClipBatch(clip, splitTimes, withLinked);
+    logSplitCheckpoint('split-evenly:after-batch', clip, splitTimes.length, withLinked);
+    // Staggered overlays via CSS animation-delay (single state update, no JS timers)
+    const totalAnimMs = Math.min(3000, splitTimes.length * 100);
+    const delayStep = splitTimes.length <= 1 ? 0 : totalAnimMs / (splitTimes.length - 1);
+    useTimelineStore.getState().addAIOverlaysBatch(
+      splitTimes.map((t, i) => ({
+        type: 'split-glow' as const, trackId, timePosition: t,
+        duration: 1000, animationDelay: Math.round(i * delayStep),
+      }))
+    );
+    logSplitCheckpoint('split-evenly:after-overlays', clip, splitTimes.length, withLinked);
   } else {
-    // Non-AI execution: do all splits at once (no visual feedback)
     splitClipBatch(clip, splitTimes, withLinked);
   }
 
@@ -635,30 +689,22 @@ export async function handleSplitClipAtTimes(
     return { success: false, error: `No valid split times within clip range (${clipStart}s - ${clipEnd}s)` };
   }
 
-  // Staggered split: each cut happens one by one with visual feedback
   if (isAIExecutionActive()) {
-    const STAGGER_MS = 300;
+    logSplitCheckpoint('split-at-times:start', clip, validTimes.length, withLinked);
     const trackId = clip.trackId;
-    // Do first split immediately
-    splitClipBatch(clip, [validTimes[0]], withLinked);
-    useTimelineStore.getState().addAIOverlay({
-      type: 'split-glow', trackId, timePosition: validTimes[0], duration: 1000,
-    });
-    // Schedule remaining splits
-    for (let i = 1; i < validTimes.length; i++) {
-      const t = validTimes[i];
-      await new Promise(resolve => setTimeout(resolve, STAGGER_MS));
-      const currentClips = useTimelineStore.getState().clips;
-      const target = currentClips.find(c =>
-        c.trackId === trackId && c.startTime < t && c.startTime + c.duration > t + 0.001
-      );
-      if (target) {
-        splitClipBatch(target, [t], withLinked);
-      }
-      useTimelineStore.getState().addAIOverlay({
-        type: 'split-glow', trackId, timePosition: t, duration: 1000,
-      });
-    }
+    // Bulk split: single state update for all cuts at once
+    splitClipBatch(clip, validTimes, withLinked);
+    logSplitCheckpoint('split-at-times:after-batch', clip, validTimes.length, withLinked);
+    // Staggered overlays via CSS animation-delay (single state update, no JS timers)
+    const totalAnimMs = Math.min(3000, validTimes.length * 100);
+    const delayStep = validTimes.length <= 1 ? 0 : totalAnimMs / (validTimes.length - 1);
+    useTimelineStore.getState().addAIOverlaysBatch(
+      validTimes.map((t, i) => ({
+        type: 'split-glow' as const, trackId, timePosition: t,
+        duration: 1000, animationDelay: Math.round(i * delayStep),
+      }))
+    );
+    logSplitCheckpoint('split-at-times:after-overlays', clip, validTimes.length, withLinked);
   } else {
     splitClipBatch(clip, validTimes, withLinked);
   }
@@ -718,8 +764,6 @@ export async function handleReorderClips(
 
   // Staggered reorder: move clips one by one with visual feedback
   if (isAIExecutionActive()) {
-    const STAGGER_MS = 150;
-
     // Build ordered list of moves (only clips that actually move)
     const moves: { clipId: string; linkedId?: string; newStart: number; linkedNewStart?: number }[] = [];
     for (const clip of orderedClips) {
@@ -757,7 +801,7 @@ export async function handleReorderClips(
       });
 
       if (i < moves.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, STAGGER_MS));
+        await new Promise(resolve => setTimeout(resolve, consumeStaggerDelay(moves.length - 1 - i)));
       }
     }
   } else {
