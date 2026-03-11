@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { APP_VERSION, BUILD_NOTICE, getGroupedChangelog, type ChangeEntry } from '../../version';
+import { useSettingsStore } from '../../stores/settingsStore';
 
 interface WhatsNewDialogProps {
   onClose: () => void;
@@ -114,16 +115,19 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
 export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
   const [isClosing, setIsClosing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'new' | 'fix' | 'improve' | 'refactor'>('all');
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+  const setShowChangelogOnStartup = useSettingsStore((s) => s.setShowChangelogOnStartup);
 
   const groupedChangelog = useMemo(() => getGroupedChangelog(), []);
 
   const handleClose = useCallback(() => {
     if (isClosing) return;
+    if (dontShowAgain) setShowChangelogOnStartup(false);
     setIsClosing(true);
     setTimeout(() => {
       onClose();
     }, 120);
-  }, [onClose, isClosing]);
+  }, [onClose, isClosing, dontShowAgain, setShowChangelogOnStartup]);
 
   // Handle Escape key to close
   useEffect(() => {
@@ -275,6 +279,14 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
 
         {/* Footer */}
         <div className="changelog-footer">
+          <label className="changelog-dont-show">
+            <input
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
+            />
+            <span>Don't show on startup</span>
+          </label>
           <button className="welcome-enter" onClick={handleClose}>
             <span>Got it</span>
             <kbd>Esc</kbd>

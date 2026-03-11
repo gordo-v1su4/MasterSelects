@@ -53,6 +53,7 @@ export function Toolbar() {
     isSettingsOpen, openSettings, closeSettings,
     autosaveEnabled, setAutosaveEnabled,
     autosaveInterval, setAutosaveInterval,
+    showChangelogOnStartup, setShowChangelogOnStartup,
   } = useSettingsStore(useShallow(s => ({
     isSettingsOpen: s.isSettingsOpen,
     openSettings: s.openSettings,
@@ -61,6 +62,8 @@ export function Toolbar() {
     setAutosaveEnabled: s.setAutosaveEnabled,
     autosaveInterval: s.autosaveInterval,
     setAutosaveInterval: s.setAutosaveInterval,
+    showChangelogOnStartup: s.showChangelogOnStartup,
+    setShowChangelogOnStartup: s.setShowChangelogOnStartup,
   })));
 
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
@@ -757,6 +760,14 @@ export function Toolbar() {
               </button>
               <button className="menu-option" onClick={() => { window.dispatchEvent(new CustomEvent('start-timeline-tutorial')); closeMenu(); }}>
                 <span>Timeline Tour</span>
+              </button>
+              <div className="menu-separator" />
+              <button className="menu-option" onClick={() => {
+                setShowChangelogOnStartup(!showChangelogOnStartup);
+                window.dispatchEvent(new CustomEvent('open-changelog'));
+                closeMenu();
+              }}>
+                <span>{showChangelogOnStartup ? '✓ ' : '   '}Changelog on Startup</span>
               </button>
               <div className="menu-separator" />
               <button className="menu-option" onClick={() => { setShowInfoDialog(true); closeMenu(); }}>
