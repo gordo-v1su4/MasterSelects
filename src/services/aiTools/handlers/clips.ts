@@ -576,7 +576,7 @@ export async function handleSplitClipEvenly(
 
   // Staggered split: each cut happens one by one with visual feedback
   if (isAIExecutionActive()) {
-    const STAGGER_MS = 300;
+    const staggerMs = splitTimes.length <= 1 ? 0 : Math.min(1000, Math.floor(3000 / (splitTimes.length - 1)));
     const trackId = clip.trackId;
     // Do first split immediately
     splitClipBatch(clip, [splitTimes[0]], withLinked);
@@ -586,7 +586,7 @@ export async function handleSplitClipEvenly(
     // Schedule remaining splits
     for (let i = 1; i < splitTimes.length; i++) {
       const t = splitTimes[i];
-      await new Promise(resolve => setTimeout(resolve, STAGGER_MS));
+      await new Promise(resolve => setTimeout(resolve, staggerMs));
       // Find the clip that contains this split time
       const currentClips = useTimelineStore.getState().clips;
       const target = currentClips.find(c =>
@@ -637,7 +637,7 @@ export async function handleSplitClipAtTimes(
 
   // Staggered split: each cut happens one by one with visual feedback
   if (isAIExecutionActive()) {
-    const STAGGER_MS = 300;
+    const staggerMs = validTimes.length <= 1 ? 0 : Math.min(1000, Math.floor(3000 / (validTimes.length - 1)));
     const trackId = clip.trackId;
     // Do first split immediately
     splitClipBatch(clip, [validTimes[0]], withLinked);
@@ -647,7 +647,7 @@ export async function handleSplitClipAtTimes(
     // Schedule remaining splits
     for (let i = 1; i < validTimes.length; i++) {
       const t = validTimes[i];
-      await new Promise(resolve => setTimeout(resolve, STAGGER_MS));
+      await new Promise(resolve => setTimeout(resolve, staggerMs));
       const currentClips = useTimelineStore.getState().clips;
       const target = currentClips.find(c =>
         c.trackId === trackId && c.startTime < t && c.startTime + c.duration > t + 0.001
@@ -718,8 +718,6 @@ export async function handleReorderClips(
 
   // Staggered reorder: move clips one by one with visual feedback
   if (isAIExecutionActive()) {
-    const STAGGER_MS = 150;
-
     // Build ordered list of moves (only clips that actually move)
     const moves: { clipId: string; linkedId?: string; newStart: number; linkedNewStart?: number }[] = [];
     for (const clip of orderedClips) {
@@ -730,6 +728,8 @@ export async function handleReorderClips(
         moves.push({ clipId: clip!.id, linkedId, newStart, linkedNewStart });
       }
     }
+
+    const staggerMs = moves.length <= 1 ? 0 : Math.min(1000, Math.floor(3000 / (moves.length - 1)));
 
     for (let i = 0; i < moves.length; i++) {
       const { clipId, linkedId, newStart, linkedNewStart } = moves[i];
@@ -757,7 +757,7 @@ export async function handleReorderClips(
       });
 
       if (i < moves.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, STAGGER_MS));
+        await new Promise(resolve => setTimeout(resolve, staggerMs));
       }
     }
   } else {
