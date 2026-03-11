@@ -605,7 +605,9 @@ export function MediaPanel() {
     if (item.type === 'composition') {
       const comp = item as Composition;
       // Don't allow dragging comp into itself (check active comp)
-      if (comp.id === activeCompositionId) {
+      // Exception: in slot grid view, dragging active comp to a slot is fine
+      const inSlotView = useTimelineStore.getState().slotGridProgress > 0.5;
+      if (comp.id === activeCompositionId && !inSlotView) {
         e.preventDefault();
         return;
       }
