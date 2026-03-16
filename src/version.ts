@@ -1,15 +1,32 @@
 // App version - INCREMENT ON EVERY COMMIT!
 // Format: MAJOR.MINOR.PATCH
 // Increment PATCH (0.0.X) for each commit
-export const APP_VERSION = '1.3.4';
+export const APP_VERSION = '1.3.5';
 
-// Build/Platform notice shown at top of changelog (set to null to hide)
-export const BUILD_NOTICE: {
-  type: 'info' | 'warning' | 'success';
+export interface ChangelogNotice {
+  type: 'info' | 'warning' | 'success' | 'danger';
   title: string;
   message: string;
   animated?: boolean;
+}
+
+// Featured video shown at top of changelog (set to null to hide)
+export const FEATURED_VIDEO: {
+  youtubeId: string;
+  title: string;
+  banner?: ChangelogNotice;
 } | null = {
+  youtubeId: '5ezX5ra0RTI',
+  title: 'MasterSelects Demo',
+  banner: {
+    type: 'danger',
+    title: 'Playback Fixes',
+    message: 'Fixed the playback bugs on Win/Linux.',
+  },
+};
+
+// Build/Platform notice shown at top of changelog (set to null to hide)
+export const BUILD_NOTICE: ChangelogNotice | null = {
   type: 'success',
   title: 'Native Helper v0.3.1 available',
   message: 'Includes the local AI bridge, Firefox project save/open support, and the refreshed helper workflow.',
@@ -27,7 +44,7 @@ export interface ChangeEntry {
 
 // Time-grouped changelog entry
 export interface TimeGroupedChanges {
-  label: string; // "Today", "Last Week", "This Month", "Earlier"
+  label: string;
   dateRange: string; // "Jan 20" or "Jan 13-19" etc
   changes: ChangeEntry[];
 }
@@ -68,34 +85,81 @@ function formatDateRange(minDate: Date, maxDate: Date): string {
   return `${formatDateShort(minDate)} - ${formatDateShort(maxDate)}`;
 }
 
-// Calculate relative time labels based on current date
-function getTimeLabel(date: Date): { label: string; sortOrder: number } {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const monthAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
 
-  if (date >= today) {
-    return { label: 'Today', sortOrder: 0 };
-  } else if (date >= yesterday) {
-    return { label: 'Yesterday', sortOrder: 1 };
-  } else if (date >= weekAgo) {
-    return { label: 'Last Week', sortOrder: 2 };
-  } else if (date >= monthAgo) {
-    return { label: 'This Month', sortOrder: 3 };
-  } else {
-    return { label: 'Earlier', sortOrder: 4 };
+function getMonthDiff(now: Date, date: Date): number {
+  return (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth());
+}
+
+function formatMonthLabel(date: Date, now: Date): string {
+  const includeYear = date.getFullYear() !== now.getFullYear();
+  return date.toLocaleDateString('en-US', includeYear
+    ? { month: 'long', year: 'numeric' }
+    : { month: 'long' });
+}
+
+function getInitialCommitDate(entries: RawChangeEntry[]): Date | null {
+  if (entries.length === 0) {
+    return null;
   }
+
+  return entries
+    .map((entry) => parseISODateLocal(entry.date))
+    .reduce((earliest, date) => (date < earliest ? date : earliest));
+}
+
+// Calculate relative time labels based on current date
+function getTimeLabel(
+  date: Date,
+  now: Date,
+  initialCommitDate: Date | null
+): { label: string; sortOrder: number } {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayMs = 24 * 60 * 60 * 1000;
+  const normalizedDate = startOfDay(date);
+  const dayDiff = Math.round((today.getTime() - normalizedDate.getTime()) / dayMs);
+  const monthDiff = getMonthDiff(today, normalizedDate);
+
+  if (dayDiff <= 0) {
+    return { label: 'Today', sortOrder: 0 };
+  }
+  if (dayDiff === 1) {
+    return { label: 'Yesterday', sortOrder: 1 };
+  }
+  if (dayDiff === 2) {
+    return { label: 'Day Before Yesterday', sortOrder: 2 };
+  }
+  if (dayDiff < 7) {
+    return { label: 'Last Week', sortOrder: 3 };
+  }
+  if (monthDiff === 0) {
+    return { label: formatMonthLabel(normalizedDate, now), sortOrder: 4 };
+  }
+  if (monthDiff === 1) {
+    return { label: 'Last Month', sortOrder: 5 };
+  }
+  if (
+    initialCommitDate &&
+    startOfDay(initialCommitDate).getTime() === normalizedDate.getTime()
+  ) {
+    return { label: 'Initial Commit', sortOrder: 10_000 };
+  }
+  return { label: formatMonthLabel(normalizedDate, now), sortOrder: 5 + monthDiff };
 }
 
 // Group changes by time period
-export function getGroupedChangelog(): TimeGroupedChanges[] {
+export function getGroupedChangelog(
+  entries: RawChangeEntry[] = RAW_CHANGELOG,
+  now: Date = new Date()
+): TimeGroupedChanges[] {
   const groups = new Map<string, { sortOrder: number; minDate: Date; maxDate: Date; changes: ChangeEntry[] }>();
+  const initialCommitDate = getInitialCommitDate(entries);
 
-  for (const entry of RAW_CHANGELOG) {
+  for (const entry of entries) {
     const date = parseISODateLocal(entry.date);
-    const { label, sortOrder } = getTimeLabel(date);
+    const { label, sortOrder } = getTimeLabel(date, now, initialCommitDate);
 
     if (!groups.has(label)) {
       groups.set(label, { sortOrder, minDate: date, maxDate: date, changes: [] });
