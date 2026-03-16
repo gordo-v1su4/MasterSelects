@@ -232,23 +232,20 @@ export function AIVideoPanel() {
 
   // Fetch account balance
   const fetchAccountBalance = useCallback(async () => {
-    if (selectedService === 'kieai') {
-      // Kie.ai has no public balance endpoint
-      setAccountInfo(null);
-      return;
-    }
-    if (!apiKeys.piapi) return;
+    const activeKey = selectedService === 'kieai' ? apiKeys.kieai : apiKeys.piapi;
+    if (!activeKey) return;
 
     setIsLoadingBalance(true);
     try {
-      const info = await piApiService.getAccountInfo();
+      const service = selectedService === 'kieai' ? kieAiService : piApiService;
+      const info = await service.getAccountInfo();
       setAccountInfo(info);
     } catch (err) {
       log.error('Failed to fetch account balance', err);
     } finally {
       setIsLoadingBalance(false);
     }
-  }, [apiKeys.piapi, selectedService]);
+  }, [apiKeys.piapi, apiKeys.kieai, selectedService]);
 
   // Set API key when it changes and fetch balance
   useEffect(() => {
@@ -940,27 +937,27 @@ export function AIVideoPanel() {
 
           {/* Credit Info */}
           <div className="credit-info">
-            {selectedService === 'piapi' && (
-              <div className="credit-balance">
-                {accountInfo ? (
-                  <span className="balance-amount">
-                    Balance: ${accountInfo.creditsUsd.toFixed(2)}
-                  </span>
-                ) : (
-                  <span className="balance-loading">
-                    {isLoadingBalance ? 'Loading...' : 'Balance: --'}
-                  </span>
-                )}
-                <button
-                  className="btn-refresh-balance"
-                  onClick={fetchAccountBalance}
-                  disabled={isLoadingBalance}
-                  title="Refresh balance"
-                >
-                  {isLoadingBalance ? '...' : '↻'}
-                </button>
-              </div>
-            )}
+            <div className="credit-balance">
+              {accountInfo ? (
+                <span className="balance-amount">
+                  Balance: {selectedService === 'kieai'
+                    ? `${accountInfo.credits} credits`
+                    : `$${accountInfo.creditsUsd.toFixed(2)}`}
+                </span>
+              ) : (
+                <span className="balance-loading">
+                  {isLoadingBalance ? 'Loading...' : 'Balance: --'}
+                </span>
+              )}
+              <button
+                className="btn-refresh-balance"
+                onClick={fetchAccountBalance}
+                disabled={isLoadingBalance}
+                title="Refresh balance"
+              >
+                {isLoadingBalance ? '...' : '↻'}
+              </button>
+            </div>
             <span className="credit-cost">
               Est. cost: ~${currentCost.toFixed(2)}
             </span>

@@ -380,14 +380,34 @@ class KieAiService {
     throw new Error('Task timed out after 10 minutes');
   }
 
-  // Kie.ai doesn't have a public account info endpoint
-  // Return a placeholder
+  // Get remaining credits from Kie.ai
+  // Endpoint: GET /api/v1/chat/credit
+  // Response: { code: 200, msg: "success", data: <credits as integer> }
   async getAccountInfo(): Promise<AccountInfo> {
+    if (!this.hasApiKey()) {
+      throw new Error('Kie.ai API key not set');
+    }
+
+    const response = await fetch(`${BASE_URL}/api/v1/chat/credit`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get account info: ${response.status}`);
+    }
+
+    const result = await response.json();
+    log.debug('Kie.ai credit info:', result);
+
+    const credits = result.data ?? 0;
     return {
       accountName: 'Kie.ai',
       accountId: '',
-      credits: 0,
-      creditsUsd: 0,
+      credits,
+      creditsUsd: credits, // Kie.ai credits map 1:1 to USD
     };
   }
 }
