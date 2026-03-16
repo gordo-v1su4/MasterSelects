@@ -1,5 +1,19 @@
 [
   {
+    "date": "2026-03-17",
+    "type": "fix",
+    "title": "FAST Export Restores Project Media Sources and Advancing Video Frames",
+    "description": "Project saves now persist the canonical Raw media path, export and scrub-audio resolution prefer the project copy after reload, large or unstable FAST decode paths retry more safely, and sequential WebCodecs export layers now pass their current VideoFrame directly into rendering. Together these fixes address black exports, stale file-handle failures, and one-frame/still-image exports after the MediaBunny migration.",
+    "section": "Export / Media"
+  },
+  {
+    "date": "2026-03-17",
+    "type": "fix",
+    "title": "Changelog Suppression Tracks the Current Version Explicitly",
+    "description": "Closing the changelog now stores the current version only when 'Don't auto-show this version again' is enabled and clears that marker when it is not, so the dialog no longer keeps a stale suppressed state just because startup auto-show was toggled earlier.",
+    "section": "Changelog"
+  },
+  {
     "date": "2026-03-16",
     "type": "improve",
     "title": "Changelog Menu Entry Opens Directly and Persists Per-Project Hide State",

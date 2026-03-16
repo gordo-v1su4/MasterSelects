@@ -31,6 +31,7 @@ function convertMediaFiles(files: MediaFile[]): ProjectMediaFile[] {
     name: file.name,
     type: file.type as 'video' | 'audio' | 'image',
     sourcePath: file.filePath || file.name,
+    projectPath: file.projectPath,
     duration: file.duration,
     width: file.width,
     height: file.height,

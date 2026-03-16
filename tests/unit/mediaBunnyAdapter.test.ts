@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
+import { MediaBunnyMuxerAdapter } from '../../src/engine/export/MediaBunnyMuxerAdapter';
 
 /**
  * Tests for the MediaBunny MuxerAdapter interface contract.
@@ -396,5 +397,71 @@ describe('Backward Compatibility with codecHelpers', () => {
       const mbCodec = webmToMediaBunny[webmCodec];
       expect(['vp9', 'av1']).toContain(mbCodec);
     }
+  });
+});
+
+class MockEncodedChunk {
+  readonly byteLength: number;
+  readonly type: 'key' | 'delta';
+  readonly timestamp: number;
+  readonly duration: number;
+  private readonly bytes: Uint8Array;
+
+  constructor(init: {
+    data?: Uint8Array;
+    type: 'key' | 'delta';
+    timestamp: number;
+    duration: number;
+  }) {
+    this.bytes = init.data ?? new Uint8Array([1, 2, 3]);
+    this.byteLength = this.bytes.byteLength;
+    this.type = init.type;
+    this.timestamp = init.timestamp;
+    this.duration = init.duration;
+  }
+
+  copyTo(destination: Uint8Array) {
+    destination.set(this.bytes);
+  }
+}
+
+afterEach(() => {
+  delete (globalThis as Record<string, unknown>).EncodedVideoChunk;
+  delete (globalThis as Record<string, unknown>).EncodedAudioChunk;
+});
+
+describe('MediaBunnyMuxerAdapter packet sequencing', () => {
+  it('assigns monotonic sequence numbers to queued video packets', () => {
+    (globalThis as Record<string, unknown>).EncodedVideoChunk = MockEncodedChunk;
+    (globalThis as Record<string, unknown>).EncodedAudioChunk = MockEncodedChunk;
+
+    const adapter = new MediaBunnyMuxerAdapter({
+      container: 'mp4',
+      videoCodec: 'h264',
+      fps: 30,
+      hasAudio: false,
+      audioCodec: 'aac',
+    }) as unknown as {
+      addVideoChunk(chunk: EncodedVideoChunk): void;
+      queue: Array<{ packet: { sequenceNumber: number } }>;
+    };
+
+    adapter.addVideoChunk(new MockEncodedChunk({
+      type: 'key',
+      timestamp: 0,
+      duration: 33_333,
+    }) as unknown as EncodedVideoChunk);
+    adapter.addVideoChunk(new MockEncodedChunk({
+      type: 'delta',
+      timestamp: 33_333,
+      duration: 33_333,
+    }) as unknown as EncodedVideoChunk);
+    adapter.addVideoChunk(new MockEncodedChunk({
+      type: 'delta',
+      timestamp: 66_666,
+      duration: 33_333,
+    }) as unknown as EncodedVideoChunk);
+
+    expect(adapter.queue.map(entry => entry.packet.sequenceNumber)).toEqual([0, 1, 2]);
   });
 });

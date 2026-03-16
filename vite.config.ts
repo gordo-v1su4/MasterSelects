@@ -256,8 +256,8 @@ export default defineConfig(({ command, mode }) => ({
   ],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
-    // Show changelog: always in production builds, only with --mode changelog in dev
-    __SHOW_CHANGELOG__: command === 'build' || mode === 'changelog',
+    // Show changelog in the app by default; tests override this separately.
+    __SHOW_CHANGELOG__: true,
   },
   server: {
     headers: {

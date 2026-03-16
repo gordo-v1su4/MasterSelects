@@ -148,6 +148,7 @@ interface SettingsState {
   setUserBackground: (bg: string) => void;
   completeTutorial: (campaignId: string) => void;
   setShowChangelogOnStartup: (show: boolean) => void;
+  setLastSeenChangelogVersion: (version: string | null) => void;
   markChangelogSeen: (version: string) => void;
   openSettings: () => void;
   closeSettings: () => void;
@@ -316,6 +317,10 @@ export const useSettingsStore = create<SettingsState>()(
       setShowChangelogOnStartup: (show) => {
         set({ showChangelogOnStartup: show });
         persistChangelogStateToProject(show, get().lastSeenChangelogVersion);
+      },
+      setLastSeenChangelogVersion: (version) => {
+        set({ lastSeenChangelogVersion: version });
+        persistChangelogStateToProject(get().showChangelogOnStartup, version);
       },
       markChangelogSeen: (version) => {
         set({ lastSeenChangelogVersion: version });

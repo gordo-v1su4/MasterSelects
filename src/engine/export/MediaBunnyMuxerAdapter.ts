@@ -114,6 +114,8 @@ export class MediaBunnyMuxerAdapter implements MuxerAdapter {
   private audioSource: EncodedAudioPacketSource | null = null;
   private target: BufferTarget;
   private queue: QueuedEntry[] = [];
+  private nextVideoSequenceNumber = 0;
+  private nextAudioSequenceNumber = 0;
   private started = false;
   private cancelled = false;
 
@@ -162,12 +164,12 @@ export class MediaBunnyMuxerAdapter implements MuxerAdapter {
   // that could be neutered by the browser before flush time.
 
   addVideoChunk(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): void {
-    const packet = EncodedPacket.fromEncodedChunk(chunk);
+    const packet = this.createSequencedPacket(chunk, this.nextVideoSequenceNumber++);
     this.queue.push({ kind: 'video', packet, meta });
   }
 
   addAudioChunk(chunk: EncodedAudioChunk, meta?: EncodedAudioChunkMetadata): void {
-    const packet = EncodedPacket.fromEncodedChunk(chunk);
+    const packet = this.createSequencedPacket(chunk, this.nextAudioSequenceNumber++);
     this.queue.push({ kind: 'audio', packet, meta });
   }
 
@@ -204,6 +206,16 @@ export class MediaBunnyMuxerAdapter implements MuxerAdapter {
   }
 
   // -- Internal helpers -----------------------------------------------------
+
+  private createSequencedPacket(
+    chunk: EncodedVideoChunk | EncodedAudioChunk,
+    sequenceNumber: number,
+  ): EncodedPacket {
+    // MediaBunny relies on packet sequence numbers to preserve decode order.
+    // The default fromEncodedChunk() value is -1 for every packet, which makes
+    // ordering ambiguous for muxing paths that consume queued packets later.
+    return EncodedPacket.fromEncodedChunk(chunk).clone({ sequenceNumber });
+  }
 
   private async flushQueue(): Promise<void> {
     const count = this.queue.length;

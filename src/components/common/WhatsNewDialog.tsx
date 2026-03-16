@@ -392,11 +392,10 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
   const [activeTab, setActiveTab] = useState<'all' | 'new' | 'fix' | 'improve' | 'refactor'>('all');
   const [isFeaturedVideoExpanded, setIsFeaturedVideoExpanded] = useState(false);
   const [publishedHelperRelease, setPublishedHelperRelease] = useState<NativeHelperPublishedRelease | null>(null);
-  const showChangelogOnStartup = useSettingsStore((s) => s.showChangelogOnStartup);
   const lastSeenChangelogVersion = useSettingsStore((s) => s.lastSeenChangelogVersion);
   const setShowChangelogOnStartup = useSettingsStore((s) => s.setShowChangelogOnStartup);
-  const markChangelogSeen = useSettingsStore((s) => s.markChangelogSeen);
-  const isCurrentVersionSuppressed = !showChangelogOnStartup && lastSeenChangelogVersion === APP_VERSION;
+  const setLastSeenChangelogVersion = useSettingsStore((s) => s.setLastSeenChangelogVersion);
+  const isCurrentVersionSuppressed = lastSeenChangelogVersion === APP_VERSION;
   const [dontShowAgain, setDontShowAgain] = useState(isCurrentVersionSuppressed);
   const featuredVideoFrameRef = useRef<HTMLIFrameElement | null>(null);
   const featuredVideoPlayerRef = useRef<YouTubePlayerInstance | null>(null);
@@ -490,13 +489,18 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
 
   const handleClose = useCallback(() => {
     if (isClosing) return;
-    setShowChangelogOnStartup(!dontShowAgain);
-    markChangelogSeen(APP_VERSION);
+    if (dontShowAgain) {
+      setShowChangelogOnStartup(false);
+      setLastSeenChangelogVersion(APP_VERSION);
+    } else {
+      setShowChangelogOnStartup(true);
+      setLastSeenChangelogVersion(null);
+    }
     setIsClosing(true);
     setTimeout(() => {
       onClose();
     }, 200);
-  }, [onClose, isClosing, dontShowAgain, markChangelogSeen, setShowChangelogOnStartup]);
+  }, [onClose, isClosing, dontShowAgain, setLastSeenChangelogVersion, setShowChangelogOnStartup]);
 
   // Handle Escape key to close
   useEffect(() => {
