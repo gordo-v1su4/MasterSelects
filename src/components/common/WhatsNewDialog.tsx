@@ -1,8 +1,14 @@
 // WhatsNewDialog - Shows changelog grouped by time periods
-// Displays changes categorized as "Today", "Last Week", "This Month", "Earlier"
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { APP_VERSION, BUILD_NOTICE, FEATURED_VIDEO, getGroupedChangelog, type ChangeEntry } from '../../version';
+import {
+  APP_VERSION,
+  BUILD_NOTICE,
+  FEATURED_VIDEO,
+  getGroupedChangelog,
+  type ChangeEntry,
+  type ChangelogNotice as ChangelogNoticeConfig,
+} from '../../version';
 import { useSettingsStore } from '../../stores/settingsStore';
 
 interface WhatsNewDialogProps {
@@ -47,6 +53,62 @@ function GitHubIcon() {
     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
       <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
     </svg>
+  );
+}
+
+function NoticeIcon({ type }: { type: ChangelogNoticeConfig['type'] }) {
+  if (type === 'warning') {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 2L1 14h14L8 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M8 6v4M8 12v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    );
+  }
+
+  if (type === 'success') {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M4.5 8.2l2.1 2.1L11.5 5.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+  }
+
+  if (type === 'danger') {
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M8 4.5v4.5M8 11.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    );
+  }
+
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
+      <path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function NoticeCard({
+  notice,
+  className = '',
+}: {
+  notice: ChangelogNoticeConfig;
+  className?: string;
+}) {
+  return (
+    <div className={`changelog-notice changelog-notice-${notice.type} ${notice.animated ? 'changelog-notice-animated' : ''} ${className}`.trim()}>
+      <div className="changelog-notice-icon">
+        <NoticeIcon type={notice.type} />
+      </div>
+      <div className="changelog-notice-content">
+        <span className="changelog-notice-title">{notice.title}</span>
+        <span className="changelog-notice-message">{notice.message}</span>
+      </div>
+    </div>
   );
 }
 
@@ -178,89 +240,96 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
       <div className="welcome-overlay whats-new-dialog changelog-dialog">
         {/* Header */}
         <div className="changelog-header">
-          <h2 className="changelog-title">Changelog</h2>
+          <div className="changelog-header-left">
+            <div className="changelog-heading">
+              <span className="changelog-brand" aria-label="MasterSelects">
+                <span className="changelog-brand-master">Master</span>
+                <span className="changelog-brand-selects">Selects</span>
+              </span>
+              <h2 className="changelog-header-title">Changelog</h2>
+            </div>
+          </div>
           <span className="changelog-version">v{APP_VERSION}</span>
-        </div>
-
-        {/* Filter tabs */}
-        <div className="changelog-tabs">
-          <button
-            className={`changelog-tab ${activeTab === 'all' ? 'active' : ''}`}
-            onClick={() => setActiveTab('all')}
-          >
-            All <span className="changelog-tab-count">{counts.all}</span>
-          </button>
-          <button
-            className={`changelog-tab changelog-tab-new ${activeTab === 'new' ? 'active' : ''}`}
-            onClick={() => setActiveTab('new')}
-          >
-            New <span className="changelog-tab-count">{counts.new}</span>
-          </button>
-          <button
-            className={`changelog-tab changelog-tab-fix ${activeTab === 'fix' ? 'active' : ''}`}
-            onClick={() => setActiveTab('fix')}
-          >
-            Fixes <span className="changelog-tab-count">{counts.fix}</span>
-          </button>
-          <button
-            className={`changelog-tab changelog-tab-improve ${activeTab === 'improve' ? 'active' : ''}`}
-            onClick={() => setActiveTab('improve')}
-          >
-            Improved <span className="changelog-tab-count">{counts.improve}</span>
-          </button>
-          <button
-            className={`changelog-tab changelog-tab-refactor ${activeTab === 'refactor' ? 'active' : ''}`}
-            onClick={() => setActiveTab('refactor')}
-          >
-            Refactor <span className="changelog-tab-count">{counts.refactor}</span>
-          </button>
         </div>
 
         {/* Scrollable content */}
         <div className="changelog-content">
-          {/* Featured video */}
-          {FEATURED_VIDEO && (
-            <div className="changelog-video">
-              <div className="changelog-video-container">
-                <iframe
-                  src={`https://www.youtube.com/embed/${FEATURED_VIDEO.youtubeId}?rel=0`}
-                  title={FEATURED_VIDEO.title}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
+          {(FEATURED_VIDEO || BUILD_NOTICE) && (
+            <div className="changelog-featured">
+              <div className="changelog-featured-notices">
+                {FEATURED_VIDEO?.banner && (
+                  <NoticeCard notice={FEATURED_VIDEO.banner} className="changelog-video-notice" />
+                )}
+                {BUILD_NOTICE && (
+                  <NoticeCard notice={BUILD_NOTICE} />
+                )}
               </div>
+
+              {FEATURED_VIDEO && (
+                <div className="changelog-video">
+                  <a
+                    className="changelog-video-card"
+                    href={`https://www.youtube.com/watch?v=${FEATURED_VIDEO.youtubeId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <div className="changelog-video-container">
+                      <img
+                        className="changelog-video-thumbnail"
+                        src={`https://i.ytimg.com/vi/${FEATURED_VIDEO.youtubeId}/hqdefault.jpg`}
+                        alt={FEATURED_VIDEO.title}
+                      />
+                      <div className="changelog-video-overlay">
+                        <div className="changelog-video-play" aria-hidden="true">
+                          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                            <path d="M6 4.5v9l7-4.5-7-4.5z" fill="currentColor" />
+                          </svg>
+                        </div>
+                        <div className="changelog-video-meta">
+                          <span className="changelog-video-title">{FEATURED_VIDEO.title}</span>
+                          <span className="changelog-video-action">Open on YouTube</span>
+                        </div>
+                      </div>
+                    </div>
+                  </a>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Platform notice */}
-          {BUILD_NOTICE && (
-            <div className={`changelog-notice changelog-notice-${BUILD_NOTICE.type} ${BUILD_NOTICE.animated ? 'changelog-notice-animated' : ''}`}>
-              <div className="changelog-notice-icon">
-                {BUILD_NOTICE.type === 'info' && (
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
-                    <path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                )}
-                {BUILD_NOTICE.type === 'warning' && (
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M8 2L1 14h14L8 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-                    <path d="M8 6v4M8 12v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                )}
-                {BUILD_NOTICE.type === 'success' && (
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5"/>
-                    <path d="M4.5 8.2l2.1 2.1L11.5 5.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-              </div>
-              <div className="changelog-notice-content">
-                <span className="changelog-notice-title">{BUILD_NOTICE.title}</span>
-                <span className="changelog-notice-message">{BUILD_NOTICE.message}</span>
-              </div>
-            </div>
-          )}
+          {/* Filter tabs */}
+          <div className="changelog-tabs">
+            <button
+              className={`changelog-tab ${activeTab === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveTab('all')}
+            >
+              All <span className="changelog-tab-count">{counts.all}</span>
+            </button>
+            <button
+              className={`changelog-tab changelog-tab-new ${activeTab === 'new' ? 'active' : ''}`}
+              onClick={() => setActiveTab('new')}
+            >
+              New <span className="changelog-tab-count">{counts.new}</span>
+            </button>
+            <button
+              className={`changelog-tab changelog-tab-fix ${activeTab === 'fix' ? 'active' : ''}`}
+              onClick={() => setActiveTab('fix')}
+            >
+              Fixes <span className="changelog-tab-count">{counts.fix}</span>
+            </button>
+            <button
+              className={`changelog-tab changelog-tab-improve ${activeTab === 'improve' ? 'active' : ''}`}
+              onClick={() => setActiveTab('improve')}
+            >
+              Improved <span className="changelog-tab-count">{counts.improve}</span>
+            </button>
+            <button
+              className={`changelog-tab changelog-tab-refactor ${activeTab === 'refactor' ? 'active' : ''}`}
+              onClick={() => setActiveTab('refactor')}
+            >
+              Refactor <span className="changelog-tab-count">{counts.refactor}</span>
+            </button>
+          </div>
 
           {filteredGroups.map((group, groupIndex) => {
             // Split changes into left and right columns (alternating)
