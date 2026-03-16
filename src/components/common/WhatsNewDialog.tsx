@@ -12,6 +12,11 @@ import {
   type ChangeEntry,
   type ChangelogNotice as ChangelogNoticeConfig,
 } from '../../version';
+import {
+  fetchLatestPublishedNativeHelperRelease,
+  NATIVE_HELPER_RELEASES_URL,
+  type NativeHelperPublishedRelease,
+} from '../../services/nativeHelper/releases';
 import { useSettingsStore } from '../../stores/settingsStore';
 
 interface WhatsNewDialogProps {
@@ -239,6 +244,36 @@ function NoticeCard({
   );
 }
 
+function getHelperBuildNotice(
+  publishedRelease: NativeHelperPublishedRelease | null,
+): ChangelogNoticeConfig | null {
+  if (!BUILD_NOTICE) {
+    return null;
+  }
+
+  const fallbackNotice: ChangelogNoticeConfig = {
+    ...BUILD_NOTICE,
+    title: 'Native Helper release available',
+    link: BUILD_NOTICE.link ?? {
+      label: 'GitHub Releases',
+      href: NATIVE_HELPER_RELEASES_URL,
+    },
+  };
+
+  if (!publishedRelease) {
+    return fallbackNotice;
+  }
+
+  return {
+    ...fallbackNotice,
+    title: `Native Helper v${publishedRelease.version} available`,
+    link: {
+      label: 'Download release',
+      href: publishedRelease.url,
+    },
+  };
+}
+
 function ReleaseCalendar({ weeks }: { weeks: ChangelogCalendarDay[][] }) {
   return (
     <div className="changelog-calendar" aria-label="Recent changelog activity">
@@ -357,18 +392,20 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
   const [activeTab, setActiveTab] = useState<'all' | 'new' | 'fix' | 'improve' | 'refactor'>('all');
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [isFeaturedVideoExpanded, setIsFeaturedVideoExpanded] = useState(false);
+  const [publishedHelperRelease, setPublishedHelperRelease] = useState<NativeHelperPublishedRelease | null>(null);
   const setShowChangelogOnStartup = useSettingsStore((s) => s.setShowChangelogOnStartup);
   const featuredVideoFrameRef = useRef<HTMLIFrameElement | null>(null);
   const featuredVideoPlayerRef = useRef<YouTubePlayerInstance | null>(null);
 
   const groupedChangelog = useMemo(() => getGroupedChangelog(), []);
   const changelogCalendar = useMemo(() => getChangelogCalendar(), []);
+  const buildNotice = useMemo(() => getHelperBuildNotice(publishedHelperRelease), [publishedHelperRelease]);
   const featuredNotices = useMemo(
     () =>
-      [FEATURED_VIDEO?.banner, BUILD_NOTICE, WIP_NOTICE].filter(
+      [FEATURED_VIDEO?.banner, buildNotice, WIP_NOTICE].filter(
         (notice): notice is ChangelogNoticeConfig => Boolean(notice)
       ),
-    []
+    [buildNotice]
   );
   const featuredVideoEmbedUrl = useMemo(
     () =>
@@ -385,6 +422,20 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
       node.src = featuredVideoEmbedUrl;
     }
   }, [featuredVideoEmbedUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchLatestPublishedNativeHelperRelease().then((release) => {
+      if (!cancelled) {
+        setPublishedHelperRelease(release);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!FEATURED_VIDEO || !featuredVideoFrameRef.current || !featuredVideoEmbedUrl) {
