@@ -51,11 +51,12 @@ Pipeline: HTMLVideoElement → requestVideoFrameCallback → GPU Compositor → 
 
 ### FFmpeg WASM Export
 
-**Best for: Professional codecs (ProRes, DNxHR, HAP)**
+**⚠ Experimental** — Professional codecs (ProRes, DNxHR, FFV1, UTVideo, MJPEG)
 
 - Loads FFmpeg WASM on-demand (~20MB)
-- Supports broadcast-quality codecs
-- Requires SharedArrayBuffer headers
+- Single-threaded ASYNCIFY build (slower than WebCodecs)
+- Requires SharedArrayBuffer headers and custom WASM build
+- HAP is NOT available (requires snappy library, incompatible with Emscripten)
 - See [FFmpeg Export](#ffmpeg-export) section below
 
 ### FCP XML Export
@@ -340,29 +341,32 @@ Key types and utilities used throughout the export pipeline:
 
 ---
 
-## FFmpeg Export
+## FFmpeg Export (Experimental)
+
+> **⚠ Experimental** — This export path uses a single-threaded ASYNCIFY FFmpeg WASM build. It only includes native FFmpeg encoders (no libx264, libx265, libvpx — these require pkg-config which doesn't work in Emscripten). For production export, use the WebCodecs pipeline above.
 
 ### Overview
-FFmpeg WASM integration provides professional codec support for broadcast and VJ workflows. Loads on-demand (~20MB).
+FFmpeg WASM integration provides experimental professional codec support for broadcast and VJ workflows. Loads on-demand (~20MB).
 
 ### Professional Codecs
 
-| Codec | Category | Description |
-|-------|----------|-------------|
-| **ProRes** | Professional | Apple ProRes (Proxy, LT, 422, HQ, 4444, 4444 XQ) |
-| **DNxHR** | Professional | Avid DNxHR (LB, SQ, HQ, HQX, 444) |
-| **HAP** | Real-time | GPU-accelerated VJ codec (HAP, HAP Alpha, HAP Q) |
-| **FFV1** | Lossless | Open archival codec |
-| **Ut Video** | Lossless | Fast lossless with alpha |
+| Codec | Category | Description | Status |
+|-------|----------|-------------|--------|
+| **ProRes** | Professional | Apple ProRes (Proxy, LT, 422, HQ, 4444, 4444 XQ) | Experimental |
+| **DNxHR** | Professional | Avid DNxHR (LB, SQ, HQ, HQX, 444) | Experimental |
+| **FFV1** | Lossless | Open archival codec | Experimental |
+| **Ut Video** | Lossless | Fast lossless with alpha | Experimental |
+| **MJPEG** | Motion JPEG | Frame-by-frame JPEG compression | Experimental |
+| ~~HAP~~ | ~~Real-time~~ | ~~GPU-accelerated VJ codec~~ | **Not available** (requires snappy) |
 
-### Delivery Codecs
+### Delivery Codecs (WebCodecs — Production)
 
-| Codec | Features |
-|-------|----------|
-| H.264 (x264) | Universal compatibility |
-| H.265 (x265) | HDR support, smaller files |
-| VP9 | Alpha channel support |
-| AV1 (SVT) | Next-gen, best compression |
+| Codec | Features | Status |
+|-------|----------|--------|
+| H.264 | Universal compatibility | Production |
+| H.265 | HDR support, smaller files | Production |
+| VP9 | Alpha channel support | Production |
+| AV1 | Next-gen, best compression | Production |
 
 ### Container Formats
 
@@ -383,12 +387,11 @@ FFmpeg WASM integration provides professional codec support for broadcast and VJ
 | Vimeo | H.264 | MP4 |
 | Instagram | H.264 | MP4 |
 | TikTok | H.264 | MP4 |
-| Adobe Premiere | ProRes HQ | MOV |
-| Final Cut Pro | ProRes HQ | MOV |
-| DaVinci Resolve | DNxHR HQ | MXF |
-| Avid | DNxHR HQ | MXF |
-| VJ / Media Server | HAP Q | MOV |
-| Archive | FFV1 | MKV |
+| Adobe Premiere | ProRes HQ | MOV | Experimental |
+| Final Cut Pro | ProRes HQ | MOV | Experimental |
+| DaVinci Resolve | DNxHR HQ | MXF | Experimental |
+| Avid | DNxHR HQ | MXF | Experimental |
+| Archive | FFV1 | MKV | Experimental |
 
 ### Loading FFmpeg
 FFmpeg WASM is loaded on-demand when first used:
@@ -400,7 +403,8 @@ FFmpeg WASM is loaded on-demand when first used:
 - Requires SharedArrayBuffer (COOP/COEP headers)
 - Uses @ffmpeg/ffmpeg from npm
 - Frames rendered via GPU, then encoded by FFmpeg
-- Professional codecs (ProRes, HAP, DNxHR) require custom WASM build
+- Professional codecs (ProRes, DNxHR) require custom WASM build
+- HAP is NOT available (requires snappy library, incompatible with Emscripten)
 
 ### Source Files
 - `src/engine/ffmpeg/FFmpegBridge.ts` - Core bridge

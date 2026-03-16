@@ -138,11 +138,11 @@ cargo run --release    # WebSocket :9876, HTTP :9877
 
 | Capability | Details |
 |---|---|
-| **Decode** | H.264, ProRes, DNxHD + LRU frame cache |
-| **Encode** | ProRes, DNxHR, H.264, H.265, VP9, FFV1, UTVideo, MJPEG |
 | **Storage** | Native project persistence backend for Firefox |
 | **AI Control** | Local HTTP bridge for external agents to steer the running editor |
 | **Download** | yt-dlp integration for YouTube, TikTok, Instagram, Twitter/X, Vimeo, and other supported sites |
+
+**Export codecs:** H.264, H.265, VP9, AV1 via WebCodecs (production). ProRes, DNxHR, FFV1, UTVideo, MJPEG via experimental FFmpeg WASM path (single-threaded, requires custom build).
 
 **Platforms:** Windows, Linux, macOS. Requires Rust + FFmpeg. Downloads also require `yt-dlp`. See [Native Helper docs](tools/native-helper/README.md) for platform-specific setup.
 
