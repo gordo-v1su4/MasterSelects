@@ -35,7 +35,7 @@ MASterSelects is a browser-based professional video editing application built on
 | **Parallel Decoding** | Multi-clip parallel decode for faster exports |
 | **Output Manager** | Source routing, slice management, corner pin warping, multi-window control |
 | **Slot Grid** | Resolume-style 4x12 grid with multi-layer playback and column activation |
-| **Native Helper** | Optional 10x faster ProRes/DNxHD decode with hardware accel |
+| **Native Helper** | Project storage for Firefox, yt-dlp downloads, AI bridge |
 | **Local Storage** | Project folder with Raw media, autosave, backups, smart relinking |
 | **Mobile Support** | Responsive UI with touch gestures |
 
@@ -81,7 +81,7 @@ UI Framework      Custom dockable panel system with mobile support
 | [Project Persistence](./Project-Persistence.md) | Local folders, Raw media, autosave, backups |
 | [Proxy System](./Proxy-System.md) | GPU-accelerated proxy generation |
 | [Download Panel](./Download-Panel.md) | YouTube, TikTok, Instagram, Twitter/X downloads |
-| [Native Helper](./Native-Helper.md) | Turbo Mode for ProRes/DNxHD, YouTube downloads |
+| [Native Helper](./Native-Helper.md) | Project storage (Firefox), yt-dlp downloads, AI bridge |
 | [Multicam AI](./Multicam-AI.md) | Audio-based sync, cross-correlation |
 | [Keyboard Shortcuts](./Keyboard-Shortcuts.md) | Complete shortcut reference |
 | [Debugging](./Debugging.md) | Logger service, module filtering, AI-agent inspection |

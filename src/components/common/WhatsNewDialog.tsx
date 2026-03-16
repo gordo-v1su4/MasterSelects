@@ -1,6 +1,6 @@
 // WhatsNewDialog - Shows changelog grouped by time periods
 
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import {
   APP_VERSION,
   BUILD_NOTICE,
@@ -16,6 +16,94 @@ import { useSettingsStore } from '../../stores/settingsStore';
 
 interface WhatsNewDialogProps {
   onClose: () => void;
+}
+
+type YouTubePlayerStateValue = -1 | 0 | 1 | 2 | 3 | 5;
+
+interface YouTubePlayerStateChangeEvent {
+  data: YouTubePlayerStateValue;
+}
+
+interface YouTubePlayerInstance {
+  destroy: () => void;
+}
+
+interface YouTubePlayerNamespace {
+  Player: new (
+    element: HTMLIFrameElement,
+    options?: {
+      events?: {
+        onStateChange?: (event: YouTubePlayerStateChangeEvent) => void;
+      };
+    }
+  ) => YouTubePlayerInstance;
+  PlayerState: {
+    ENDED: 0;
+    PLAYING: 1;
+    PAUSED: 2;
+    CUED: 5;
+  };
+  ready?: (callback: () => void) => void;
+}
+
+declare global {
+  interface Window {
+    YT?: YouTubePlayerNamespace;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+let youtubeIframeApiPromise: Promise<YouTubePlayerNamespace> | null = null;
+
+function loadYouTubeIframeApi(): Promise<YouTubePlayerNamespace> {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('YouTube iframe API requires a browser environment.'));
+  }
+
+  if (window.YT?.Player) {
+    return Promise.resolve(window.YT);
+  }
+
+  if (youtubeIframeApiPromise) {
+    return youtubeIframeApiPromise;
+  }
+
+  youtubeIframeApiPromise = new Promise((resolve, reject) => {
+    const scriptSrc = 'https://www.youtube.com/iframe_api';
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${scriptSrc}"]`);
+    const previousReadyHandler = window.onYouTubeIframeAPIReady;
+
+    const resolveIfReady = () => {
+      if (window.YT?.Player) {
+        resolve(window.YT);
+        return true;
+      }
+      return false;
+    };
+
+    window.onYouTubeIframeAPIReady = () => {
+      previousReadyHandler?.();
+      resolveIfReady();
+    };
+
+    if (resolveIfReady()) {
+      return;
+    }
+
+    if (!existingScript) {
+      const script = document.createElement('script');
+      script.src = scriptSrc;
+      script.async = true;
+      script.onerror = () => reject(new Error('Failed to load YouTube iframe API.'));
+      document.head.appendChild(script);
+    }
+
+    window.setTimeout(() => {
+      resolveIfReady();
+    }, 0);
+  });
+
+  return youtubeIframeApiPromise;
 }
 
 // Icon components for change types
@@ -159,9 +247,17 @@ function ReleaseCalendar({ weeks }: { weeks: ChangelogCalendarDay[][] }) {
           {week.map((day) => (
             <div
               key={day.date}
-              className={`changelog-calendar-day changelog-calendar-level-${day.level} ${day.isFuture ? 'is-future' : ''} ${day.isToday ? 'is-today' : ''} ${day.isOutOfRange ? 'is-outside-range' : ''}`}
+              className={`changelog-calendar-day changelog-calendar-level-${day.level} changelog-calendar-community-level-${day.communityLevel} ${day.communityCount > 0 ? 'has-community' : ''} ${day.isFuture ? 'is-future' : ''} ${day.isToday ? 'is-today' : ''} ${day.isOutOfRange ? 'is-outside-range' : ''}`}
               aria-label={day.isOutOfRange ? undefined : day.tooltip}
             >
+              {!day.isOutOfRange && (
+                <>
+                  <span className="changelog-calendar-fill changelog-calendar-fill-main" />
+                  {day.communityCount > 0 && (
+                    <span className="changelog-calendar-fill changelog-calendar-fill-community" />
+                  )}
+                </>
+              )}
               {!day.isOutOfRange && (
                 <span className="changelog-calendar-tooltip">{day.tooltip}</span>
               )}
@@ -178,6 +274,7 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
   const hasDescription = !!change.description;
   const hasCommits = change.commits && change.commits.length > 0;
   const hasExpandableContent = hasDescription || hasCommits;
+  const isCommunityHighlight = change.highlight === 'community';
 
   const handleCommitClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't toggle expand when clicking link
@@ -185,7 +282,7 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
 
   return (
     <div
-      className={`changelog-item changelog-item-${change.type} ${hasExpandableContent ? 'has-description' : ''} ${expanded ? 'expanded' : ''}`}
+      className={`changelog-item changelog-item-${change.type} ${hasExpandableContent ? 'has-description' : ''} ${expanded ? 'expanded' : ''} ${isCommunityHighlight ? 'changelog-item-community' : ''}`.trim()}
       onClick={() => hasExpandableContent && setExpanded(!expanded)}
     >
       <div className="changelog-item-header">
@@ -196,6 +293,9 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
           {change.type === 'refactor' && <RefactorIcon />}
         </span>
         <span className="changelog-title">{change.title}</span>
+        {isCommunityHighlight && (
+          <span className="changelog-badge changelog-badge-community">Community</span>
+        )}
         {hasCommits && (
           <span className="changelog-commit-count">{change.commits!.length}</span>
         )}
@@ -211,6 +311,23 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
         <div className="changelog-description-wrapper">
           <div className="changelog-description">
             {change.description && <span>{change.description}</span>}
+            {change.contributorName && (
+              change.contributorUrl ? (
+                <a
+                  href={change.contributorUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="changelog-contributor-link"
+                  onClick={handleCommitClick}
+                >
+                  Community contribution by {change.contributorName}
+                </a>
+              ) : (
+                <span className="changelog-contributor-label">
+                  Community contribution by {change.contributorName}
+                </span>
+              )
+            )}
             {hasCommits && (
               <div className="changelog-commits">
                 {change.commits!.map((hash) => (
@@ -239,7 +356,10 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
   const [isClosing, setIsClosing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'new' | 'fix' | 'improve' | 'refactor'>('all');
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [isFeaturedVideoExpanded, setIsFeaturedVideoExpanded] = useState(false);
   const setShowChangelogOnStartup = useSettingsStore((s) => s.setShowChangelogOnStartup);
+  const featuredVideoFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const featuredVideoPlayerRef = useRef<YouTubePlayerInstance | null>(null);
 
   const groupedChangelog = useMemo(() => getGroupedChangelog(), []);
   const changelogCalendar = useMemo(() => getChangelogCalendar(), []);
@@ -253,16 +373,60 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
   const featuredVideoEmbedUrl = useMemo(
     () =>
       FEATURED_VIDEO
-        ? `https://www.youtube.com/embed/${FEATURED_VIDEO.youtubeId}?rel=0&modestbranding=1&playsinline=1`
+        ? `https://www.youtube.com/embed/${FEATURED_VIDEO.youtubeId}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1${typeof window !== 'undefined' ? `&origin=${encodeURIComponent(window.location.origin)}` : ''}`
         : '',
     []
   );
   const attachCredentiallessVideoFrame = useCallback((node: HTMLIFrameElement | null) => {
+    featuredVideoFrameRef.current = node;
     if (!node || !featuredVideoEmbedUrl) return;
     node.setAttribute('credentialless', '');
     if (node.src !== featuredVideoEmbedUrl) {
       node.src = featuredVideoEmbedUrl;
     }
+  }, [featuredVideoEmbedUrl]);
+
+  useEffect(() => {
+    if (!FEATURED_VIDEO || !featuredVideoFrameRef.current || !featuredVideoEmbedUrl) {
+      return;
+    }
+
+    let disposed = false;
+
+    loadYouTubeIframeApi()
+      .then((YT) => {
+        if (disposed || !featuredVideoFrameRef.current) {
+          return;
+        }
+
+        featuredVideoPlayerRef.current?.destroy();
+        featuredVideoPlayerRef.current = new YT.Player(featuredVideoFrameRef.current, {
+          events: {
+            onStateChange: (event) => {
+              if (event.data === YT.PlayerState.PLAYING) {
+                setIsFeaturedVideoExpanded(true);
+                return;
+              }
+              if (
+                event.data === YT.PlayerState.PAUSED ||
+                event.data === YT.PlayerState.ENDED ||
+                event.data === YT.PlayerState.CUED
+              ) {
+                setIsFeaturedVideoExpanded(false);
+              }
+            },
+          },
+        });
+      })
+      .catch(() => {
+        // Keep the embed usable even if the API script fails; only the auto-expand is skipped.
+      });
+
+    return () => {
+      disposed = true;
+      featuredVideoPlayerRef.current?.destroy();
+      featuredVideoPlayerRef.current = null;
+    };
   }, [featuredVideoEmbedUrl]);
 
   const handleClose = useCallback(() => {
@@ -271,7 +435,7 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
     setIsClosing(true);
     setTimeout(() => {
       onClose();
-    }, 120);
+    }, 200);
   }, [onClose, isClosing, dontShowAgain, setShowChangelogOnStartup]);
 
   // Handle Escape key to close
@@ -345,7 +509,7 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
         {/* Scrollable content */}
         <div className="changelog-content">
           {(FEATURED_VIDEO || BUILD_NOTICE) && (
-            <div className="changelog-featured">
+            <div className={`changelog-featured ${isFeaturedVideoExpanded ? 'is-video-expanded' : ''}`.trim()}>
               <div className="changelog-featured-notices">
                 {featuredNotices.map((notice, index) => (
                   <NoticeCard
