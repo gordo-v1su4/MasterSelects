@@ -1,7 +1,7 @@
 // App version - INCREMENT ON EVERY COMMIT!
 // Format: MAJOR.MINOR.PATCH
 // Increment PATCH (0.0.X) for each commit
-export const APP_VERSION = '1.3.5';
+export const APP_VERSION = '1.3.6';
 
 export interface ChangelogNotice {
   type: 'info' | 'warning' | 'success' | 'danger';
@@ -64,6 +64,9 @@ export interface ChangeEntry {
   description?: string;
   section?: string; // Optional section header to create visual dividers
   commits?: string[]; // Git commit hashes for linking to GitHub
+  highlight?: 'community';
+  contributorName?: string;
+  contributorUrl?: string;
 }
 
 // Time-grouped changelog entry
@@ -77,7 +80,9 @@ export interface ChangelogCalendarDay {
   date: string;
   tooltip: string;
   count: number;
+  communityCount: number;
   level: 0 | 1 | 2 | 3 | 4;
+  communityLevel: 0 | 1 | 2 | 3 | 4;
   isFuture: boolean;
   isToday: boolean;
   isOutOfRange: boolean;
@@ -91,6 +96,9 @@ export interface RawChangeEntry {
   description?: string;
   section?: string;
   commits?: string[];
+  highlight?: 'community';
+  contributorName?: string;
+  contributorUrl?: string;
 }
 
 // Import changelog data from JSON
@@ -142,7 +150,7 @@ function startOfQuarter(date: Date): Date {
   return new Date(date.getFullYear(), quarterStartMonth, 1);
 }
 
-function formatCalendarTooltip(date: Date, count: number): string {
+function formatCalendarTooltip(date: Date, count: number, communityCount: number): string {
   const label = date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -151,7 +159,15 @@ function formatCalendarTooltip(date: Date, count: number): string {
   if (count === 0) {
     return label;
   }
-  return `${label}: ${count} ${count === 1 ? 'change' : 'changes'}`;
+  if (communityCount === 0) {
+    return `${label}: ${count} ${count === 1 ? 'change' : 'changes'}`;
+  }
+
+  const coreCount = Math.max(0, count - communityCount);
+  const countLabel = `${count} ${count === 1 ? 'change' : 'changes'}`;
+  const communityLabel = `${communityCount} community`;
+  const coreLabel = coreCount > 0 ? `, ${coreCount} core` : '';
+  return `${label}: ${countLabel} (${communityLabel}${coreLabel})`;
 }
 
 function getCalendarLevel(count: number): 0 | 1 | 2 | 3 | 4 {
@@ -247,6 +263,9 @@ export function getGroupedChangelog(
       description: entry.description,
       section: entry.section,
       commits: entry.commits,
+      highlight: entry.highlight,
+      contributorName: entry.contributorName,
+      contributorUrl: entry.contributorUrl,
     });
   }
 
@@ -271,8 +290,12 @@ export function getChangelogCalendar(
 ): ChangelogCalendarDay[][] {
   const normalizedNow = startOfDay(now);
   const countsByDate = new Map<string, number>();
+  const communityCountsByDate = new Map<string, number>();
   for (const entry of entries) {
     countsByDate.set(entry.date, (countsByDate.get(entry.date) ?? 0) + 1);
+    if (entry.highlight === 'community') {
+      communityCountsByDate.set(entry.date, (communityCountsByDate.get(entry.date) ?? 0) + 1);
+    }
   }
 
   let firstWeekStart: Date;
@@ -311,12 +334,15 @@ export function getChangelogCalendar(
       const isOutOfRange = !!(rangeStart && rangeEnd && (date < rangeStart || date > rangeEnd));
       const isFuture = !isOutOfRange && date.getTime() > normalizedNow.getTime();
       const count = isOutOfRange || isFuture ? 0 : (countsByDate.get(isoDate) ?? 0);
+      const communityCount = isOutOfRange || isFuture ? 0 : (communityCountsByDate.get(isoDate) ?? 0);
 
       days.push({
         date: isoDate,
-        tooltip: isOutOfRange ? '' : formatCalendarTooltip(date, count),
+        tooltip: isOutOfRange ? '' : formatCalendarTooltip(date, count, communityCount),
         count,
+        communityCount,
         level: isOutOfRange || isFuture ? 0 : getCalendarLevel(count),
+        communityLevel: isOutOfRange || isFuture ? 0 : getCalendarLevel(communityCount),
         isFuture,
         isToday: !isOutOfRange && date.getTime() === normalizedNow.getTime(),
         isOutOfRange,

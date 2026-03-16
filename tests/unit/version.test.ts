@@ -26,6 +26,28 @@ describe('getGroupedChangelog', () => {
       'Initial Commit',
     ]);
   });
+
+  it('preserves community highlight metadata on grouped entries', () => {
+    const entries: RawChangeEntry[] = [
+      {
+        date: '2026-03-14',
+        type: 'fix',
+        title: 'Community item',
+        highlight: 'community',
+        contributorName: 'Florian Thonig',
+        contributorUrl: 'https://github.com/florianthonig',
+      },
+    ];
+
+    const groups = getGroupedChangelog(entries, new Date(2026, 2, 16, 12, 0, 0));
+
+    expect(groups[0]?.changes[0]).toMatchObject({
+      title: 'Community item',
+      highlight: 'community',
+      contributorName: 'Florian Thonig',
+      contributorUrl: 'https://github.com/florianthonig',
+    });
+  });
 });
 
 describe('getChangelogCalendar', () => {
@@ -55,6 +77,27 @@ describe('getChangelogCalendar', () => {
       isFuture: true,
       isOutOfRange: false,
     });
+  });
+
+  it('tracks community contributions separately for split calendar slots', () => {
+    const entries: RawChangeEntry[] = [
+      { date: '2026-03-14', type: 'fix', title: 'Core item' },
+      { date: '2026-03-14', type: 'fix', title: 'Community item', highlight: 'community' },
+    ];
+
+    const calendar = getChangelogCalendar(entries, new Date(2026, 2, 16, 12, 0, 0), 2);
+    const communityDay = calendar.flat().find((day) => day.date === '2026-03-14');
+
+    expect(communityDay).toMatchObject({
+      date: '2026-03-14',
+      count: 2,
+      communityCount: 1,
+      level: 2,
+      communityLevel: 1,
+      isFuture: false,
+      isOutOfRange: false,
+    });
+    expect(communityDay?.tooltip).toContain('1 community');
   });
 
   it('defaults to the current quarter including leading filler days before quarter start', () => {

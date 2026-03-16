@@ -39,6 +39,19 @@
   },
   {
     "date": "2026-03-14",
+    "type": "fix",
+    "title": "macOS Folder Picker Main-Thread Fix",
+    "description": "Uses osascript for the macOS folder picker so save/open flows avoid the main-thread constraint in the native dialog path.",
+    "section": "macOS / Community",
+    "commits": [
+      "e7629258"
+    ],
+    "highlight": "community",
+    "contributorName": "Florian Thonig",
+    "contributorUrl": "https://github.com/florianthonig"
+  },
+  {
+    "date": "2026-03-14",
     "type": "refactor",
     "title": "Project Vision and Platform Direction Note",
     "description": "Added a project vision note that outlines the roadmap toward broader format support and the June 2026 universal media goal.",

@@ -247,9 +247,17 @@ function ReleaseCalendar({ weeks }: { weeks: ChangelogCalendarDay[][] }) {
           {week.map((day) => (
             <div
               key={day.date}
-              className={`changelog-calendar-day changelog-calendar-level-${day.level} ${day.isFuture ? 'is-future' : ''} ${day.isToday ? 'is-today' : ''} ${day.isOutOfRange ? 'is-outside-range' : ''}`}
+              className={`changelog-calendar-day changelog-calendar-level-${day.level} changelog-calendar-community-level-${day.communityLevel} ${day.communityCount > 0 ? 'has-community' : ''} ${day.isFuture ? 'is-future' : ''} ${day.isToday ? 'is-today' : ''} ${day.isOutOfRange ? 'is-outside-range' : ''}`}
               aria-label={day.isOutOfRange ? undefined : day.tooltip}
             >
+              {!day.isOutOfRange && (
+                <>
+                  <span className="changelog-calendar-fill changelog-calendar-fill-main" />
+                  {day.communityCount > 0 && (
+                    <span className="changelog-calendar-fill changelog-calendar-fill-community" />
+                  )}
+                </>
+              )}
               {!day.isOutOfRange && (
                 <span className="changelog-calendar-tooltip">{day.tooltip}</span>
               )}
@@ -266,6 +274,7 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
   const hasDescription = !!change.description;
   const hasCommits = change.commits && change.commits.length > 0;
   const hasExpandableContent = hasDescription || hasCommits;
+  const isCommunityHighlight = change.highlight === 'community';
 
   const handleCommitClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't toggle expand when clicking link
@@ -273,7 +282,7 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
 
   return (
     <div
-      className={`changelog-item changelog-item-${change.type} ${hasExpandableContent ? 'has-description' : ''} ${expanded ? 'expanded' : ''}`}
+      className={`changelog-item changelog-item-${change.type} ${hasExpandableContent ? 'has-description' : ''} ${expanded ? 'expanded' : ''} ${isCommunityHighlight ? 'changelog-item-community' : ''}`.trim()}
       onClick={() => hasExpandableContent && setExpanded(!expanded)}
     >
       <div className="changelog-item-header">
@@ -284,6 +293,9 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
           {change.type === 'refactor' && <RefactorIcon />}
         </span>
         <span className="changelog-title">{change.title}</span>
+        {isCommunityHighlight && (
+          <span className="changelog-badge changelog-badge-community">Community</span>
+        )}
         {hasCommits && (
           <span className="changelog-commit-count">{change.commits!.length}</span>
         )}
@@ -299,6 +311,23 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
         <div className="changelog-description-wrapper">
           <div className="changelog-description">
             {change.description && <span>{change.description}</span>}
+            {change.contributorName && (
+              change.contributorUrl ? (
+                <a
+                  href={change.contributorUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="changelog-contributor-link"
+                  onClick={handleCommitClick}
+                >
+                  Community contribution by {change.contributorName}
+                </a>
+              ) : (
+                <span className="changelog-contributor-label">
+                  Community contribution by {change.contributorName}
+                </span>
+              )
+            )}
             {hasCommits && (
               <div className="changelog-commits">
                 {change.commits!.map((hash) => (
