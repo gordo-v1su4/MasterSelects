@@ -735,6 +735,33 @@ export function AIVideoPanel() {
         </div>
       )}
 
+      {/* Balance bar - always visible at top */}
+      {hasApiKey && (
+        <div className="balance-bar">
+          <div className="credit-balance">
+            {accountInfo ? (
+              <span className="balance-amount">
+                {selectedService === 'kieai'
+                  ? `${accountInfo.credits} credits`
+                  : `$${accountInfo.creditsUsd.toFixed(2)}`}
+              </span>
+            ) : (
+              <span className="balance-loading">
+                {isLoadingBalance ? 'Loading...' : '--'}
+              </span>
+            )}
+            <button
+              className="btn-refresh-balance"
+              onClick={fetchAccountBalance}
+              disabled={isLoadingBalance}
+              title="Refresh balance"
+            >
+              {isLoadingBalance ? '...' : '↻'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       {activeTab === 'generate' ? (
         <div className="ai-video-content">
@@ -935,31 +962,12 @@ export function AIVideoPanel() {
             </label>
           </div>
 
-          {/* Credit Info */}
+          {/* Est. cost */}
           <div className="credit-info">
-            <div className="credit-balance">
-              {accountInfo ? (
-                <span className="balance-amount">
-                  Balance: {selectedService === 'kieai'
-                    ? `${accountInfo.credits} credits`
-                    : `$${accountInfo.creditsUsd.toFixed(2)}`}
-                </span>
-              ) : (
-                <span className="balance-loading">
-                  {isLoadingBalance ? 'Loading...' : 'Balance: --'}
-                </span>
-              )}
-              <button
-                className="btn-refresh-balance"
-                onClick={fetchAccountBalance}
-                disabled={isLoadingBalance}
-                title="Refresh balance"
-              >
-                {isLoadingBalance ? '...' : '↻'}
-              </button>
-            </div>
             <span className="credit-cost">
-              Est. cost: ~${currentCost.toFixed(2)}
+              Est. cost: ~{selectedService === 'kieai'
+                ? `${currentCost} credits`
+                : `$${currentCost.toFixed(2)}`}
             </span>
           </div>
 
@@ -969,7 +977,9 @@ export function AIVideoPanel() {
             onClick={generateVideo}
             disabled={isGenerating || !prompt.trim()}
           >
-            {isGenerating ? 'Starting...' : `Generate (~$${currentCost.toFixed(2)})`}
+            {isGenerating ? 'Starting...' : `Generate (~${selectedService === 'kieai'
+              ? `${currentCost} credits`
+              : `$${currentCost.toFixed(2)}`})`}
           </button>
 
           {/* Error */}

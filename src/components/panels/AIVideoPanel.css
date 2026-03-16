@@ -582,6 +582,18 @@
 }
 
 /* Credit Info */
+/* Balance bar at top */
+.balance-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  font-size: var(--font-sm);
+}
+
 .credit-info {
   display: flex;
   justify-content: space-between;

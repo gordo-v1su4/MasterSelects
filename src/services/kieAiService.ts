@@ -25,27 +25,24 @@ const KIEAI_PROVIDERS: VideoProvider[] = [
     description: 'Latest Kling model via Kie.ai',
     versions: ['3.0'],
     supportedModes: ['std', 'pro'],
-    supportedDurations: [5, 10],
+    supportedDurations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     supportedAspectRatios: ['16:9', '9:16', '1:1'],
     supportsImageToVideo: true,
     supportsTextToVideo: true,
   },
 ];
 
-// Pricing for Kie.ai (per-second rates from docs)
-// std: $0.10/s (no audio), $0.15/s (audio)
-// pro: $0.135/s (no audio), $0.20/s (audio)
-const KIEAI_PRICING: Record<string, Record<string, Record<number, number>>> = {
+// Kie.ai Kling 3.0 pricing in CREDITS per second
+// Source: https://kie.ai/kling-3-0
+// std no-audio: 20 credits/s ($0.10/s)
+// std audio:    30 credits/s ($0.15/s)
+// pro no-audio: 27 credits/s ($0.135/s)
+// pro audio:    40 credits/s ($0.20/s)
+// 1 credit = $0.005
+const KIEAI_CREDITS_PER_SECOND: Record<string, Record<string, { normal: number; audio: number }>> = {
   'kling-3.0': {
-    'std': { 5: 0.50, 10: 1.00 },
-    'pro': { 5: 0.675, 10: 1.35 },
-  },
-};
-
-const KIEAI_PRICING_AUDIO: Record<string, Record<string, Record<number, number>>> = {
-  'kling-3.0': {
-    'std': { 5: 0.75, 10: 1.50 },
-    'pro': { 5: 1.00, 10: 2.00 },
+    'std': { normal: 20, audio: 30 },
+    'pro': { normal: 27, audio: 40 },
   },
 };
 
@@ -57,13 +54,14 @@ export function getKieAiProvider(providerId: string): VideoProvider | undefined 
   return KIEAI_PROVIDERS.find(p => p.id === providerId);
 }
 
+// Calculate cost in credits for Kie.ai
 export function calculateKieAiCost(provider: string, mode: string, duration: number, sound = false): number {
-  const table = sound ? KIEAI_PRICING_AUDIO : KIEAI_PRICING;
-  const providerPricing = table[provider];
-  if (!providerPricing) return 0.50;
-  const modePricing = providerPricing[mode];
-  if (!modePricing) return 0.50;
-  return modePricing[duration] ?? 0.50;
+  const providerRates = KIEAI_CREDITS_PER_SECOND[provider];
+  if (!providerRates) return duration * 20; // fallback
+  const modeRates = providerRates[mode];
+  if (!modeRates) return duration * 20;
+  const ratePerSecond = sound ? modeRates.audio : modeRates.normal;
+  return duration * ratePerSecond;
 }
 
 interface KieAiTaskResponse {
