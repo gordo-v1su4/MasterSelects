@@ -7,8 +7,6 @@
 [![Version](https://img.shields.io/badge/version-1.3.5-blue.svg)](https://github.com/Sportinger/MASterSelects/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-<video src="https://github.com/user-attachments/assets/197f6894-3af3-4279-af46-b893e2aa0a18" autoplay loop muted playsinline width="100%"></video>
-
 [![WebGPU](https://img.shields.io/badge/WebGPU-Powered-990000?style=flat-square&logo=webgpu&logoColor=white)](#)
 [![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](#)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](#)
@@ -25,7 +23,7 @@
 </tr>
 </table>
 
-![MASterSelects Screenshot](docs/images/screenshot-main.png)
+<video src="https://github.com/user-attachments/assets/197f6894-3af3-4279-af46-b893e2aa0a18" autoplay loop muted playsinline width="100%"></video>
 
 </div>
 
