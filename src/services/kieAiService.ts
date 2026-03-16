@@ -220,6 +220,7 @@ class KieAiService {
   }
 
   async createTextToVideo(params: TextToVideoParams): Promise<string> {
+    // Kie.ai Kling 3.0 API: no cfg_scale, no negative_prompt
     const input: Record<string, unknown> = {
       prompt: params.prompt,
       duration: String(params.duration),
@@ -228,10 +229,6 @@ class KieAiService {
       sound: params.sound ?? false,
       multi_shots: false,
     };
-
-    if (params.negativePrompt) {
-      input.negative_prompt = params.negativePrompt;
-    }
 
     const body = {
       model: 'kling-3.0/video',
@@ -281,9 +278,7 @@ class KieAiService {
       input.image_urls = imageUrls;
     }
 
-    if (params.negativePrompt) {
-      input.negative_prompt = params.negativePrompt;
-    }
+    // Kie.ai Kling 3.0: no cfg_scale, no negative_prompt
 
     const body = {
       model: 'kling-3.0/video',

@@ -846,18 +846,20 @@ export function AIVideoPanel() {
             />
           </div>
 
-          {/* Negative Prompt */}
-          <div className="input-group">
-            <label>Negative Prompt (optional)</label>
-            <textarea
-              className="prompt-input negative"
-              value={negativePrompt}
-              onChange={(e) => setNegativePrompt(e.target.value)}
-              placeholder="What to avoid in the generation..."
-              disabled={isGenerating}
-              rows={2}
-            />
-          </div>
+          {/* Negative Prompt (PiAPI only - not supported by Kie.ai Kling 3.0) */}
+          {selectedService === 'piapi' && (
+            <div className="input-group">
+              <label>Negative Prompt (optional)</label>
+              <textarea
+                className="prompt-input negative"
+                value={negativePrompt}
+                onChange={(e) => setNegativePrompt(e.target.value)}
+                placeholder="What to avoid in the generation..."
+                disabled={isGenerating}
+                rows={2}
+              />
+            </div>
+          )}
 
           {/* Parameters Grid */}
           <div className="params-grid">
@@ -921,8 +923,8 @@ export function AIVideoPanel() {
               </div>
             )}
 
-            {/* CFG Scale (Kling only) */}
-            {(selectedProvider === 'kling' || selectedProvider === 'kling-3.0') && (
+            {/* CFG Scale (PiAPI Kling only - not supported by Kie.ai) */}
+            {selectedProvider === 'kling' && selectedService === 'piapi' && (
               <div className="param-group cfg-slider">
                 <label>CFG Scale: {cfgScale.toFixed(2)}</label>
                 <input
