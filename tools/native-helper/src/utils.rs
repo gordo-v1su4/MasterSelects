@@ -1,6 +1,6 @@
 //! Cross-platform utility functions
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Apply CREATE_NO_WINDOW flag on Windows to prevent terminal popups.
 /// Call this on any `tokio::process::Command` before `.output()` or `.spawn()`.
@@ -112,6 +112,31 @@ fn has_traversal_segments(path: &std::path::Path) -> bool {
     path_str.contains("..")
 }
 
+#[cfg(windows)]
+fn normalized_components(path: &Path) -> Vec<String> {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy().to_lowercase())
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn normalized_components(path: &Path) -> Vec<String> {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy().into_owned())
+        .collect()
+}
+
+fn path_is_within_allowed_prefix(path: &Path, prefix: &Path) -> bool {
+    let path_components = normalized_components(path);
+    let prefix_components = normalized_components(prefix);
+
+    path_components.len() >= prefix_components.len()
+        && path_components
+            .iter()
+            .zip(prefix_components.iter())
+            .all(|(path_component, prefix_component)| path_component == prefix_component)
+}
+
 /// Check if a path is within allowed directories.
 ///
 /// Rejects paths with `..` traversal segments and attempts path canonicalization
@@ -150,33 +175,15 @@ pub fn is_path_allowed(path: &std::path::Path) -> bool {
         }
     };
 
-    // Normalize for case-insensitive comparison on Windows
-    // Also normalize path separators (frontend may send forward slashes)
-    #[cfg(windows)]
-    {
-        let path_str = effective_path.to_string_lossy().to_lowercase().replace('/', "\\");
-        return allowed.iter().any(|prefix| {
-            let prefix_canonical = prefix.canonicalize().unwrap_or_else(|_| prefix.clone());
-            let prefix_str = prefix_canonical.to_string_lossy().to_lowercase().replace('/', "\\");
-            path_str.starts_with(&*prefix_str)
-        });
-    }
-
-    #[cfg(not(windows))]
-    {
-        let path_str = effective_path.to_string_lossy();
-        return allowed.iter().any(|prefix| {
-            let prefix_canonical = prefix.canonicalize().unwrap_or_else(|_| prefix.clone());
-            let prefix_str = prefix_canonical.to_string_lossy();
-            path_str.starts_with(prefix_str.as_ref())
-        });
-    }
+    allowed.iter().any(|prefix| {
+        let prefix_canonical = prefix.canonicalize().unwrap_or_else(|_| prefix.clone());
+        path_is_within_allowed_prefix(&effective_path, &prefix_canonical)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn test_allowed_path_in_project_root() {
@@ -205,13 +212,7 @@ mod tests {
         // After removing the home directory fallback, a bare path under home
         // that isn't in Downloads/Documents/Desktop/Videos should be rejected
         if let Some(home) = dirs::home_dir() {
-            let test_path = home.join(".ssh").join("id_rsa");
-            // .ssh is not under any of the allowed specific directories
             let prefixes = get_allowed_prefixes();
-            let is_under_specific = prefixes.iter().any(|p| test_path.starts_with(p));
-            // This should NOT be allowed (unless .ssh happens to be under Documents, etc.)
-            // We can't assert false unconditionally because home might equal a prefix on some systems
-            // But the key point is that home itself is NOT in the prefix list
             let home_in_prefixes = prefixes.iter().any(|p| p == &home);
             assert!(!home_in_prefixes, "Home directory should not be in allowed prefixes");
         }
@@ -244,6 +245,7 @@ mod tests {
     fn test_path_normalization_windows() {
         // Test that forward slashes work correctly (frontend sends forward slashes)
         let download_dir = get_download_dir();
+        std::fs::create_dir_all(&download_dir).expect("download dir should be creatable for test");
         let download_str = download_dir.to_string_lossy().replace('\\', "/");
         let forward_slash_path = PathBuf::from(format!("{}/test-video.mp4", download_str));
 
@@ -251,13 +253,33 @@ mod tests {
         assert!(forward_slash_path.to_string_lossy().contains('/') || cfg!(not(windows)),
             "Test path should use forward slashes on Windows");
 
-        // On all platforms, verify the basic prefix logic works with normalized paths
-        let prefixes = get_allowed_prefixes();
-        let download_is_prefix = prefixes.iter().any(|p| {
-            let p_str = p.to_string_lossy().to_lowercase().replace('\\', "/");
-            let path_str = forward_slash_path.to_string_lossy().to_lowercase().replace('\\', "/");
-            path_str.starts_with(&*p_str)
-        });
-        assert!(download_is_prefix, "Forward-slash paths should match against allowed prefixes");
+        assert!(is_path_allowed(&forward_slash_path), "Forward-slash paths should match allowed prefixes");
+    }
+
+    #[test]
+    fn test_rejected_sibling_prefix_path() {
+        let allowed_temp = std::env::temp_dir();
+        let parent = allowed_temp.parent().expect("temp dir should have a parent");
+        let base_name = allowed_temp
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("tmp");
+        let sibling_dir = parent.join(format!(
+            "{}-masterselects-security-test-{}",
+            base_name,
+            std::process::id()
+        ));
+        let sibling_path = sibling_dir.join("escape.txt");
+
+        std::fs::create_dir_all(&sibling_dir).expect("sibling dir should be creatable for test");
+        std::fs::write(&sibling_path, b"test").expect("sibling test file should be writable");
+
+        assert!(
+            !is_path_allowed(&sibling_path),
+            "Sibling paths that only share a string prefix must be rejected"
+        );
+
+        let _ = std::fs::remove_file(&sibling_path);
+        let _ = std::fs::remove_dir_all(&sibling_dir);
     }
 }

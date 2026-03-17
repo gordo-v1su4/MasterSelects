@@ -73,10 +73,11 @@ Example Native Helper bridge call:
 ```bash
 curl -X POST http://127.0.0.1:9877/api/ai-tools \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <startup-token>" \
   -d '{"tool":"_list","args":{}}'
 ```
 
-This requires the Native Helper to be running and a MasterSelects editor tab to be connected. The Vite `/api/ai-tools` bridge still exists in development.
+This requires the Native Helper to be running, a MasterSelects editor tab to be connected, and the helper startup token. The Vite `/api/ai-tools` bridge still exists in development, but it is now gated by a per-session token as well.
 
 ---
 
@@ -148,6 +149,20 @@ cargo run --release    # WebSocket :9876, HTTP :9877
 
 ---
 
+## Security Model
+
+MasterSelects is local-first: editing, rendering, caching, and most analysis stay in the browser unless you explicitly invoke an external provider or the Native Helper.
+
+- **API keys:** stored in IndexedDB with per-browser Web Crypto encryption. This protects against casual inspection, not against same-origin script execution.
+- **Dev bridge:** sensitive Vite routes require a per-session Bearer token and only accept localhost browser origins.
+- **Native Helper:** binds to `127.0.0.1` and requires a random startup token for HTTP and WebSocket bridge operations.
+- **Local file access:** limited to explicit roots such as the project root, temp, Desktop, Documents, Downloads, and Videos, plus optional `MASTERSELECTS_ALLOWED_FILE_ROOTS`.
+- **Key export:** `.keys.enc` export/import is disabled until passphrase-based encryption is implemented.
+
+See [Security docs](docs/Features/Security.md) for the trust model and known limitations, and [Native Helper docs](tools/native-helper/README.md) for auth examples.
+
+---
+
 ## Known Issues
 
 This is alpha software. Features get added fast, things break.
@@ -210,6 +225,7 @@ npm run build:deploy     # Production build (vite only, skip tsc)
 npm run lint             # ESLint
 npm run preview          # Preview production build
 npm run test             # Run tests (vitest)
+npm run test:security    # Security-focused test suite
 npm run test:watch       # Run tests in watch mode
 npm run test:ui          # Run tests with UI
 npm run test:coverage    # Run tests with coverage
