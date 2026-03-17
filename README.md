@@ -144,7 +144,7 @@ cargo run --release    # WebSocket :9876, HTTP :9877
 
 **Export codecs:** H.264, H.265, VP9, AV1 via WebCodecs (production). ProRes, DNxHR, FFV1, UTVideo, MJPEG via experimental FFmpeg WASM path (single-threaded, requires custom build).
 
-**Platforms:** Windows, Linux, macOS. Requires Rust + FFmpeg. Downloads also require `yt-dlp`. See [Native Helper docs](tools/native-helper/README.md) for platform-specific setup.
+**Platforms:** Windows, Linux, macOS. Building the Native Helper requires Rust. Downloads also require `yt-dlp`. See [Native Helper docs](tools/native-helper/README.md) for platform-specific setup.
 
 ---
 
@@ -160,7 +160,7 @@ This is alpha software. Features get added fast, things break.
 - Audio waveforms may not display for some video formats
 - Very long videos (>2 hours) may cause performance issues
 
-If something breaks, refresh. If it's still broken, [open an issue](https://github.com/Sportinger/MASterSelects/issues).
+If something breaks, refresh. If it's still broken, [open an issue](https://github.com/Sportinger/MasterSelects/issues).
 
 ---
 

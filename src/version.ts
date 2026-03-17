@@ -40,8 +40,8 @@ export const FEATURED_VIDEO: {
 // Build/Platform notice shown at top of changelog (set to null to hide)
 export const BUILD_NOTICE: ChangelogNotice | null = {
   type: 'success',
-  title: 'Native Helper v0.3.9 available',
-  message: 'Includes the updated helper release flow, MatAnyone2 setup work, and the refreshed local helper workflow.',
+  title: 'Native Helper v0.3.10 available',
+  message: 'Includes the helper auth hardening, safer local bridge defaults, and the refreshed local helper workflow.',
   animated: true,
 };
 
