@@ -4,15 +4,8 @@
 
 ### Browser-based Video Compositor
 
-[![Version](https://img.shields.io/badge/version-1.3.5-blue.svg)](https://github.com/Sportinger/MASterSelects/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2b61097%2fmasterselects.svg?type=shield)](https://app.fossa.com/projects/custom%2b61097%2fmasterselects)
-
-[![WebGPU](https://img.shields.io/badge/WebGPU-Powered-990000?style=flat-square&logo=webgpu&logoColor=white)](#)
-[![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](#)
-[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](#)
-[![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)](#)
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white)](#native-helper)
+[![Version](https://img.shields.io/badge/version-1.3.5-blue.svg)](https://github.com/Sportinger/MASterSelects/releases) [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![FOSSA Status](https://app.fossa.com/api/projects/custom%2b61097%2fmasterselects.svg?type=shield)](https://app.fossa.com/projects/custom%2b61097%2fmasterselects)
+[![WebGPU](https://img.shields.io/badge/WebGPU-Powered-990000?style=flat-square&logo=webgpu&logoColor=white)](#) [![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](#) [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](#) [![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)](#) [![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white)](#native-helper)
 
 <table>
 <tr>
@@ -277,7 +270,7 @@ tools/
 ---
 
 <details>
-<summary><b>FOSSA License & Security Review</b></summary>
+<summary><b>License Scan (FOSSA)</b></summary>
 
 [![FOSSA Status](https://app.fossa.com/api/projects/custom%2b61097%2fmasterselects.svg?type=large)](https://app.fossa.com/projects/custom%2b61097%2fmasterselects)
 
