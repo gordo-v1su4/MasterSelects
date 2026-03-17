@@ -6,6 +6,7 @@
 
 [![Version](https://img.shields.io/badge/version-1.3.5-blue.svg)](https://github.com/Sportinger/MASterSelects/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![FOSSA Status](https://app.fossa.com/api/projects/custom%2b61097%2fmasterselects.svg?type=shield)](https://app.fossa.com/projects/custom%2b61097%2fmasterselects)
 
 [![WebGPU](https://img.shields.io/badge/WebGPU-Powered-990000?style=flat-square&logo=webgpu&logoColor=white)](#)
 [![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](#)
@@ -270,6 +271,37 @@ tools/
 ├── ffmpeg-wasm-build/   # FFmpeg WASM build configuration
 └── qwen3vl-server/      # Qwen3 VL server for scene description
 ```
+
+</details>
+
+---
+
+<details>
+<summary><b>FOSSA License & Security Review</b></summary>
+
+[![FOSSA Status](https://app.fossa.com/api/projects/custom%2b61097%2fmasterselects.svg?type=large)](https://app.fossa.com/projects/custom%2b61097%2fmasterselects)
+
+**477 total dependencies** (12 direct, rest transitive) scanned across npm, Cargo, and pip.
+
+| Category | Count | Status |
+|----------|-------|--------|
+| License Issues | 35 flagged | All reviewed — no violations |
+| Vulnerabilities | 6 | All in dev-dependencies, fixable via `npm audit fix` |
+| Outdated Deps | 4 | Non-critical |
+
+**Flagged licenses (all compliant):**
+
+| Package | License | Why it's OK |
+|---------|---------|-------------|
+| `soundtouch-ts` | LGPL-2.1 | Used as unmodified npm dependency |
+| `sharp` / `libvips` (15 platform binaries) | LGPL-3.0 | Used as unmodified prebuilt binary |
+| `mediabunny` | MPL-2.0 | Used as unmodified npm dependency |
+| `torch`, `pillow` | BSD/PIL | Python tooling only (`tools/qwen3vl-server`), not shipped |
+| Cargo crates (`r-efi`, `ring`, `rustix`, `wit-bindgen`, ...) | Apache-2.0 / MIT | Standard Rust ecosystem, no copyleft issues |
+
+No source code of any dependency has been modified. No GPL/AGPL dependencies. All copyleft packages (LGPL, MPL) are used strictly as libraries via their published APIs.
+
+[View full FOSSA report](https://app.fossa.com/projects/custom%2b61097%2fmasterselects)
 
 </details>
 
