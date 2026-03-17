@@ -31,6 +31,24 @@
 
 ---
 
+## Security Model
+
+MasterSelects is a **local-first editor**. Your timeline, media processing, rendering, and most AI-adjacent operations stay on your machine unless you explicitly call an external API. The project now has explicit trust boundaries instead of relying on "it's just localhost".
+
+**Current protections:**
+- **Native Helper bridge:** Binds to `127.0.0.1` only and requires a random startup Bearer token for HTTP and WebSocket bridge operations
+- **Dev bridge hardening:** Vite `/api/ai-tools` and local file routes require a per-session token and reject non-loopback browser origins
+- **Path restrictions:** Local file reads, listings, uploads, and locate/search operations are restricted to explicit allowed roots instead of arbitrary disk access
+- **AI tool policy:** External bridge calls run through caller restrictions and approval/confirmation gates instead of getting unrestricted editor control
+- **Secret handling:** API keys are stored in encrypted IndexedDB, `.keys.enc` import/export is disabled, and logs redact common secret/token patterns
+- **Security verification:** CI includes secret scanning plus JS and Rust security checks, and the repo has dedicated tests for bridge auth, file access, and tool policy behavior
+
+**Known boundary:** this is still not "perfect sandboxing". Same-user local processes, malicious browser extensions, and compromised same-origin code can still be dangerous. The goal here is **clear, test-covered local trust boundaries**, not pretending a browser app is magically zero-risk.
+
+See [Security.md](docs/Features/Security.md) for the full trust model, secret handling, bridge details, and current limitations.
+
+---
+
 ## What Makes This Different
 
 Most browser-based video editors share a pattern: Canvas 2D compositing, heavyweight dependency trees, and CPU-bound rendering that falls apart at scale. This project takes a fundamentally different approach.

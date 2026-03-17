@@ -1,6 +1,6 @@
 # Security
 
-[← Back to Index](./README.md)
+[← Back to Index](../../README.md)
 
 Security model, secret handling, and trust boundaries for MasterSelects.
 
