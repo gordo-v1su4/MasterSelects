@@ -7,6 +7,11 @@ export interface ApiErrorResponse {
   [key: string]: unknown;
 }
 
+interface ApiErrorShape {
+  code?: string;
+  message?: string;
+}
+
 export interface CloudSessionUser {
   email: string;
   id: string;
@@ -242,6 +247,23 @@ function getLocalHostedApiError(path: string): Error {
   );
 }
 
+function getApiErrorMessage(error: ApiErrorResponse, status: number): string {
+  if (typeof error.message === 'string' && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  if (typeof error.error === 'string' && error.error.trim().length > 0) {
+    return error.error;
+  }
+
+  const nestedError = error.error as ApiErrorShape | undefined;
+  if (nestedError && typeof nestedError.message === 'string' && nestedError.message.trim().length > 0) {
+    return nestedError.message;
+  }
+
+  return `Request failed with status ${status}`;
+}
+
 async function requestResponse(path: string, init: RequestInit = {}): Promise<Response> {
   let response: Response;
 
@@ -355,7 +377,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 
   if (!response.ok) {
     const error = data as T & ApiErrorResponse;
-    throw new Error(error.message || error.error || `Request failed with status ${response.status}`);
+    throw new Error(getApiErrorMessage(error, response.status));
   }
 
   return data;

@@ -115,6 +115,143 @@ interface PendingApproval {
   resolve: (approved: boolean) => void;
 }
 
+const MAX_TOOL_RESULT_MESSAGE_CHARS = 12000;
+const MAX_TOOL_RESULT_ARRAY_ITEMS = 20;
+const MAX_TOOL_RESULT_OBJECT_KEYS = 30;
+const MAX_TOOL_RESULT_STRING_CHARS = 1200;
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength)}... [truncated]`;
+}
+
+function summarizeToolResultValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return truncateText(value, MAX_TOOL_RESULT_STRING_CHARS);
+  }
+
+  if (
+    value === null
+    || typeof value === 'number'
+    || typeof value === 'boolean'
+    || typeof value === 'undefined'
+  ) {
+    return value;
+  }
+
+  if (depth >= 3) {
+    return '[truncated nested value]';
+  }
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_TOOL_RESULT_ARRAY_ITEMS)
+      .map((item) => summarizeToolResultValue(item, depth + 1));
+
+    if (value.length > MAX_TOOL_RESULT_ARRAY_ITEMS) {
+      items.push(`[${value.length - MAX_TOOL_RESULT_ARRAY_ITEMS} more items truncated]`);
+    }
+
+    return items;
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    const summary: Record<string, unknown> = {};
+
+    for (const [key, nestedValue] of entries.slice(0, MAX_TOOL_RESULT_OBJECT_KEYS)) {
+      summary[key] = summarizeToolResultValue(nestedValue, depth + 1);
+    }
+
+    if (entries.length > MAX_TOOL_RESULT_OBJECT_KEYS) {
+      summary.__truncatedKeys = entries.length - MAX_TOOL_RESULT_OBJECT_KEYS;
+    }
+
+    return summary;
+  }
+
+  return String(value);
+}
+
+function formatToolResultForApi(result: { success: boolean; data?: unknown; error?: string }): string {
+  const serialized = JSON.stringify(result);
+
+  if (serialized.length <= MAX_TOOL_RESULT_MESSAGE_CHARS) {
+    return serialized;
+  }
+
+  const summarized = JSON.stringify({
+    data: summarizeToolResultValue(result.data),
+    error: result.error ?? null,
+    success: result.success,
+    truncated: true,
+  });
+
+  if (summarized.length <= MAX_TOOL_RESULT_MESSAGE_CHARS) {
+    return summarized;
+  }
+
+  return JSON.stringify({
+    error: result.error ?? null,
+    preview: truncateText(serialized, MAX_TOOL_RESULT_MESSAGE_CHARS - 128),
+    success: result.success,
+    truncated: true,
+  });
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error;
+  }
+
+  if (error && typeof error === 'object') {
+    const candidate = error as { error?: unknown; message?: unknown };
+
+    if (typeof candidate.message === 'string' && candidate.message.trim().length > 0) {
+      return candidate.message;
+    }
+
+    if (typeof candidate.error === 'string' && candidate.error.trim().length > 0) {
+      return candidate.error;
+    }
+  }
+
+  return 'Failed to send message';
+}
+
+function sanitizeConversationHistory(messages: Message[]): Message[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage.role === 'assistant' && lastMessage.toolCalls && lastMessage.toolCalls.length > 0) {
+    return messages.slice(0, -1);
+  }
+
+  let cursor = messages.length - 1;
+
+  while (cursor >= 0 && messages[cursor].role === 'tool') {
+    cursor -= 1;
+  }
+
+  if (cursor >= 0) {
+    const candidate = messages[cursor];
+    if (candidate.role === 'assistant' && candidate.toolCalls && candidate.toolCalls.length > 0) {
+      return messages.slice(0, cursor);
+    }
+  }
+
+  return messages;
+}
+
 function shouldRequireConfirmation(
   policy: ToolPolicyEntry | undefined,
   approvalMode: 'auto' | 'confirm-destructive' | 'confirm-all-mutating',
@@ -188,6 +325,7 @@ export function AIChatPanel() {
   // Build API messages from chat history
   const buildAPIMessages = useCallback((userContent: string): APIMessage[] => {
     const apiMessages: APIMessage[] = [];
+    const safeMessages = sanitizeConversationHistory(messages);
 
     // Add system prompt in editor mode
     if (editorMode) {
@@ -198,7 +336,7 @@ export function AIChatPanel() {
     }
 
     // Add conversation history
-    for (const msg of messages) {
+    for (const msg of safeMessages) {
       if (msg.role === 'user') {
         apiMessages.push({ role: 'user', content: msg.content });
       } else if (msg.role === 'assistant') {
@@ -278,6 +416,7 @@ export function AIChatPanel() {
     if (!input.trim() || !hasAccess || isLoading) return;
 
     const userContent = input.trim();
+    const transientMessageIds = new Set<string>();
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -322,6 +461,7 @@ export function AIChatPanel() {
           timestamp: new Date(),
           toolCalls,
         };
+        transientMessageIds.add(assistantMessage.id);
         setMessages(prev => [...prev, assistantMessage]);
 
         // Add assistant message to API messages
@@ -387,12 +527,13 @@ export function AIChatPanel() {
             toolName: toolCall.name,
             isToolResult: true,
           };
+          transientMessageIds.add(toolResultMessage.id);
           setMessages(prev => [...prev, toolResultMessage]);
 
           // Add tool result to API messages
           apiMessages.push({
             role: 'tool',
-            content: JSON.stringify(result),
+            content: formatToolResultForApi(result),
             tool_call_id: toolCall.id,
           });
         }
@@ -404,7 +545,10 @@ export function AIChatPanel() {
         setError('Too many tool iterations - stopping to prevent infinite loop');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      setMessages((prev) => sanitizeConversationHistory(
+        prev.filter((message) => !transientMessageIds.has(message.id)),
+      ));
+      setError(getErrorMessage(err));
     } finally {
       if (accessMode === 'hosted') {
         void loadAccountState();
