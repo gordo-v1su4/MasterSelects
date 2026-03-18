@@ -10,10 +10,13 @@ const SHOW_CHANGELOG = typeof __SHOW_CHANGELOG__ !== 'undefined' ? __SHOW_CHANGE
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Toolbar } from './components';
 import { DockContainer } from './components/dock';
+import { AccountDialog } from './components/common/AccountDialog';
+import { AuthDialog } from './components/common/AuthDialog';
 import { WelcomeOverlay } from './components/common/WelcomeOverlay';
 import { WhatsNewDialog } from './components/common/WhatsNewDialog';
 import { IndexedDBErrorDialog } from './components/common/IndexedDBErrorDialog';
 import { LinuxVulkanWarning } from './components/common/LinuxVulkanWarning';
+import { PricingDialog } from './components/common/PricingDialog';
 import { TutorialOverlay } from './components/common/TutorialOverlay';
 import { TutorialCampaignDialog } from './components/common/TutorialCampaignDialog';
 import { getCampaignById } from './components/common/tutorialCampaigns';
@@ -23,6 +26,7 @@ import { useTheme } from './hooks/useTheme';
 import { useGlobalHistory } from './hooks/useGlobalHistory';
 import { useClipPanelSync } from './hooks/useClipPanelSync';
 import { useIsMobile, useForceMobile } from './hooks/useIsMobile';
+import { useAccountStore } from './stores/accountStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { projectDB } from './services/projectDB';
 import { projectFileService } from './services/projectFileService';
@@ -87,6 +91,41 @@ function App() {
   useEffect(() => {
     loadApiKeys();
   }, [loadApiKeys]);
+
+  const accountDialog = useAccountStore((s) => s.dialog);
+  const closeAccountDialog = useAccountStore((s) => s.closeDialog);
+  const isAccountInitialized = useAccountStore((s) => s.isInitialized);
+  const loadAccountState = useAccountStore((s) => s.loadAccountState);
+  const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
+  useEffect(() => {
+    void loadAccountState();
+  }, [loadAccountState]);
+
+  useEffect(() => {
+    if (!isAccountInitialized) {
+      return;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    const authStatus = currentUrl.searchParams.get('auth');
+    const billingStatus = currentUrl.searchParams.get('billing');
+
+    if (authStatus !== 'success' && billingStatus !== 'success') {
+      return;
+    }
+
+    const finalize = async () => {
+      await loadAccountState();
+      openAccountDialog();
+
+      currentUrl.searchParams.delete('auth');
+      currentUrl.searchParams.delete('billing');
+      currentUrl.searchParams.delete('plan');
+      window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+    };
+
+    void finalize();
+  }, [isAccountInitialized, loadAccountState, openAccountDialog]);
 
   // Check for stored project on mount, then poll for changes
   // This handles the case where Toolbar's restore fails and clears handles
@@ -294,6 +333,9 @@ function App() {
           campaignTitle={activeCampaign.title}
         />
       )}
+      {accountDialog === 'auth' && <AuthDialog onClose={closeAccountDialog} />}
+      {accountDialog === 'pricing' && <PricingDialog onClose={closeAccountDialog} />}
+      {accountDialog === 'account' && <AccountDialog onClose={closeAccountDialog} />}
     </div>
   );
 }

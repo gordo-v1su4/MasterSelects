@@ -12,6 +12,7 @@ import { PANEL_CONFIGS, AI_PANEL_TYPES, SCOPE_PANEL_TYPES, WIP_PANEL_TYPES, type
 import { useSettingsStore, type AutosaveInterval } from '../../stores/settingsStore';
 import { useRenderTargetStore } from '../../stores/renderTargetStore';
 import { useMIDI } from '../../hooks/useMIDI';
+import { useAccountStore } from '../../stores/accountStore';
 import { SettingsDialog } from './SettingsDialog';
 import { SavedToast } from './SavedToast';
 import { InfoDialog } from './InfoDialog';
@@ -53,6 +54,10 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
     saveLayoutAsDefault: s.saveLayoutAsDefault,
   })));
   const { isSupported: midiSupported, isEnabled: midiEnabled, enableMIDI, disableMIDI, devices } = useMIDI();
+  const accountSession = useAccountStore((s) => s.session);
+  const accountUser = useAccountStore((s) => s.user);
+  const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
+  const openAuthDialog = useAccountStore((s) => s.openAuthDialog);
   const {
     isSettingsOpen, openSettings, closeSettings,
     autosaveEnabled, setAutosaveEnabled,
@@ -293,7 +298,11 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
   // Global keyboard shortcuts - must prevent default FIRST
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+
+      if (!key) {
+        return;
+      }
 
       // Ctrl+S / Ctrl+Shift+S: Always prevent browser save dialog
       if ((e.ctrlKey || e.metaKey) && key === 's') {
@@ -791,6 +800,13 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
 
       {/* Status */}
       <div className="toolbar-section toolbar-right">
+        <button
+          className="menu-trigger"
+          onClick={() => (accountSession?.authenticated ? openAccountDialog() : openAuthDialog())}
+          type="button"
+        >
+          {accountSession?.authenticated ? (accountUser?.email?.split('@')[0] || 'Account') : 'Sign in'}
+        </button>
         <NativeHelperStatus />
 
         <span className={`status ${isEngineReady ? 'ready' : 'loading'}`} title={gpuInfo?.description || ''}>

@@ -2,7 +2,9 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useAccountStore } from '../../stores/accountStore';
 import { AI_TOOLS, executeAITool, getQuickTimelineSummary, getToolPolicy } from '../../services/aiTools';
+import { cloudAiService } from '../../services/cloudAiService';
 import type { ToolPolicyEntry } from '../../services/aiTools';
 import './AIChatPanel.css';
 
@@ -127,8 +129,40 @@ function shouldRequireConfirmation(
   return !policy.readOnly;
 }
 
+function parseChatCompletionPayload(data: unknown): {
+  content: string | null;
+  toolCalls: ToolCall[];
+} {
+  const payload = data as {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: Array<{
+          id: string;
+          function: { name: string; arguments: string };
+        }>;
+      };
+    }>;
+  };
+  const choice = payload.choices?.[0];
+
+  return {
+    content: choice?.message?.content || null,
+    toolCalls: (choice?.message?.tool_calls || []).map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: tc.function.arguments,
+    })),
+  };
+}
+
 export function AIChatPanel() {
   const { apiKeys, openSettings, aiApprovalMode } = useSettingsStore();
+  const hostedAIEnabled = useAccountStore((s) => s.hostedAIEnabled);
+  const accountSession = useAccountStore((s) => s.session);
+  const openAuthDialog = useAccountStore((s) => s.openAuthDialog);
+  const openPricingDialog = useAccountStore((s) => s.openPricingDialog);
+  const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -145,8 +179,10 @@ export function AIChatPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentToolAction]);
 
-  // Check if API key is available
+  const hasHostedAccess = Boolean(accountSession?.authenticated && hostedAIEnabled);
   const hasApiKey = !!apiKeys.openai;
+  const accessMode: 'hosted' | 'byo' | 'none' = hasHostedAccess ? 'hosted' : hasApiKey ? 'byo' : 'none';
+  const hasAccess = accessMode !== 'none';
 
   // Build API messages from chat history
   const buildAPIMessages = useCallback((userContent: string): APIMessage[] => {
@@ -215,6 +251,10 @@ export function AIChatPanel() {
       requestBody.tool_choice = 'auto';
     }
 
+    if (accessMode === 'hosted') {
+      return parseChatCompletionPayload(await cloudAiService.createChatCompletion(requestBody));
+    }
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -229,27 +269,12 @@ export function AIChatPanel() {
       throw new Error(errorData.error?.message || `API error: ${response.status}`);
     }
 
-    const data = await response.json();
-    const choice = data.choices?.[0];
-
-    const toolCalls: ToolCall[] = (choice?.message?.tool_calls || []).map((tc: {
-      id: string;
-      function: { name: string; arguments: string };
-    }) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments,
-    }));
-
-    return {
-      content: choice?.message?.content || null,
-      toolCalls,
-    };
-  }, [model, editorMode, apiKeys.openai]);
+    return parseChatCompletionPayload(await response.json());
+  }, [accessMode, model, editorMode, apiKeys.openai]);
 
   // Send message to OpenAI (with tool calling loop)
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || !hasApiKey || isLoading) return;
+    if (!input.trim() || !hasAccess || isLoading) return;
 
     const userContent = input.trim();
     const userMessage: Message = {
@@ -383,7 +408,7 @@ export function AIChatPanel() {
       setIsLoading(false);
       setCurrentToolAction(null);
     }
-  }, [input, hasApiKey, isLoading, buildAPIMessages, callOpenAI, aiApprovalMode]);
+  }, [input, hasAccess, isLoading, buildAPIMessages, callOpenAI, aiApprovalMode]);
 
   // Handle key press
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -400,22 +425,46 @@ export function AIChatPanel() {
   }, []);
 
   return (
-    <div className={`ai-chat-panel ${!hasApiKey ? 'no-api-key' : ''}`}>
+    <div className={`ai-chat-panel ${!hasAccess ? 'no-api-key' : ''}`}>
       {/* API Key Required Overlay */}
-      {!hasApiKey && (
+      {!hasAccess && (
         <div className="ai-panel-overlay">
           <div className="ai-panel-overlay-content">
             <span className="no-key-icon">🔑</span>
-            <p>OpenAI API key required</p>
-            <button className="btn-settings" onClick={openSettings}>
-              Open Settings
-            </button>
+            <p>{accountSession?.authenticated ? 'Hosted AI chat needs a plan' : 'Sign in for hosted AI chat'}</p>
+            <span className="ai-panel-overlay-subtext">
+              MasterSelects Cloud is the default path. Advanced users can still add their own OpenAI key.
+            </span>
+            <div className="ai-panel-overlay-actions">
+              {!accountSession?.authenticated ? (
+                <button className="btn-settings" onClick={openAuthDialog}>
+                  Sign in
+                </button>
+              ) : (
+                <button className="btn-settings" onClick={openPricingDialog}>
+                  View plans
+                </button>
+              )}
+              {accountSession?.authenticated && (
+                <button className="btn-clear" onClick={openAccountDialog}>
+                  Account
+                </button>
+              )}
+              <button className="btn-clear" onClick={openSettings}>
+                API Keys
+              </button>
+            </div>
           </div>
         </div>
       )}
       {/* Header */}
       <div className="ai-chat-header">
-        <h2>AI Editor</h2>
+        <div className="ai-chat-title-group">
+          <h2>AI Editor</h2>
+          <span className={`ai-access-chip ${accessMode}`}>
+            {accessMode === 'hosted' ? 'Cloud' : accessMode === 'byo' ? 'OpenAI key' : 'Locked'}
+          </span>
+        </div>
         <div className="ai-chat-controls">
           <label className="editor-mode-toggle" title="Enable timeline editing tools">
             <input
@@ -589,13 +638,13 @@ export function AIChatPanel() {
           placeholder={editorMode
             ? "e.g., 'Remove all silent parts' or 'Split clip at 5 seconds'"
             : "Type a message... (Enter to send)"}
-          disabled={isLoading}
+          disabled={isLoading || !hasAccess}
           rows={2}
         />
         <button
           className="btn-send"
           onClick={sendMessage}
-          disabled={!input.trim() || isLoading}
+          disabled={!input.trim() || isLoading || !hasAccess}
         >
           {isLoading ? '...' : 'Send'}
         </button>

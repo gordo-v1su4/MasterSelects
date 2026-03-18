@@ -1,0 +1,123 @@
+import { createOpenAIChatCompletion } from '../openai';
+import type { Env } from '../env';
+
+export type HostedChatRole = 'assistant' | 'developer' | 'system' | 'tool' | 'user';
+
+export interface HostedChatMessage {
+  content: unknown;
+  name?: string;
+  role: HostedChatRole;
+  tool_call_id?: string;
+}
+
+export interface HostedChatRequest {
+  max_completion_tokens?: number;
+  max_tokens?: number;
+  messages: HostedChatMessage[];
+  model: string;
+  response_format?: Record<string, unknown>;
+  stream?: boolean;
+  tool_choice?: unknown;
+  tools?: unknown;
+  temperature?: number;
+  top_p?: number;
+}
+
+export interface HostedChatCapabilities {
+  byoExplicit: true;
+  model: string;
+  provider: 'openai';
+  streamingSupported: false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeNumericValue(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return value;
+}
+
+export function normalizeHostedChatRequest(body: unknown): HostedChatRequest | null {
+  if (!isRecord(body) || !Array.isArray(body.messages)) {
+    return null;
+  }
+
+  const messages = body.messages
+    .filter(isRecord)
+    .map((message) => {
+      const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+      const content = message.content;
+
+      if (!role || content === undefined) {
+        return null;
+      }
+
+      if (!['assistant', 'developer', 'system', 'tool', 'user'].includes(role)) {
+        return null;
+      }
+
+      const normalized: HostedChatMessage = {
+        content,
+        role: role as HostedChatRole,
+      };
+
+      if (typeof message.name === 'string' && message.name.trim()) {
+        normalized.name = message.name.trim();
+      }
+
+      if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim()) {
+        normalized.tool_call_id = message.tool_call_id.trim();
+      }
+
+      return normalized;
+    })
+    .filter((message): message is HostedChatMessage => message !== null);
+
+  if (messages.length === 0) {
+    return null;
+  }
+
+  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : 'gpt-4.1-mini';
+
+  return {
+    max_completion_tokens: normalizeNumericValue(body.max_completion_tokens),
+    max_tokens: normalizeNumericValue(body.max_tokens),
+    messages,
+    model,
+    response_format: isRecord(body.response_format) ? body.response_format : undefined,
+    stream: body.stream === true,
+    tool_choice: body.tool_choice,
+    tools: body.tools,
+    temperature: normalizeNumericValue(body.temperature),
+    top_p: normalizeNumericValue(body.top_p),
+  };
+}
+
+export async function runHostedChatCompletion(env: Env, request: HostedChatRequest): Promise<unknown> {
+  return createOpenAIChatCompletion(env, {
+    max_completion_tokens: request.max_completion_tokens,
+    max_tokens: request.max_tokens,
+    messages: request.messages,
+    model: request.model,
+    response_format: request.response_format,
+    stream: false,
+    tool_choice: request.tool_choice,
+    tools: request.tools,
+    temperature: request.temperature,
+    top_p: request.top_p,
+  });
+}
+
+export function buildHostedChatCapabilities(): HostedChatCapabilities {
+  return {
+    byoExplicit: true,
+    model: 'gpt-4.1-mini',
+    provider: 'openai',
+    streamingSupported: false,
+  };
+}

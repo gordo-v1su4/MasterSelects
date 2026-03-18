@@ -1,0 +1,285 @@
+.auth-billing-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 8, 16, 0.7);
+  backdrop-filter: blur(14px);
+}
+
+.auth-billing-dialog {
+  width: min(520px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.2), transparent 38%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(11, 18, 32, 0.98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  color: var(--text-primary, #f2f5ff);
+  overflow: hidden;
+}
+
+.auth-billing-dialog-wide {
+  width: min(880px, 100%);
+}
+
+.auth-billing-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.auth-billing-kicker {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: rgba(148, 163, 184, 0.9);
+  margin-bottom: 6px;
+}
+
+.auth-billing-header h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.auth-billing-close {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary, #f2f5ff);
+  cursor: pointer;
+}
+
+.auth-billing-body,
+.account-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.auth-billing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: rgba(226, 232, 240, 0.88);
+  font-size: 13px;
+}
+
+.auth-billing-field input {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  padding: 12px 14px;
+  color: inherit;
+  outline: none;
+}
+
+.auth-billing-provider-row {
+  display: flex;
+  gap: 10px;
+}
+
+.auth-billing-provider,
+.auth-billing-primary,
+.auth-billing-secondary,
+.auth-billing-ghost {
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.auth-billing-provider:hover,
+.auth-billing-primary:hover,
+.auth-billing-secondary:hover,
+.auth-billing-ghost:hover {
+  transform: translateY(-1px);
+}
+
+.auth-billing-provider {
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  padding: 10px 14px;
+}
+
+.auth-billing-provider.active {
+  border-color: rgba(99, 102, 241, 0.7);
+  background: rgba(99, 102, 241, 0.18);
+}
+
+.auth-billing-primary {
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  color: white;
+  padding: 12px 16px;
+  font-weight: 600;
+}
+
+.auth-billing-secondary,
+.auth-billing-ghost {
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 12px 16px;
+}
+
+.auth-billing-ghost {
+  opacity: 0.86;
+}
+
+.auth-billing-primary:disabled,
+.auth-billing-secondary:disabled,
+.auth-billing-ghost:disabled,
+.auth-billing-provider:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.auth-billing-note,
+.account-empty {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.92);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.auth-billing-error {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(220, 38, 38, 0.15);
+  color: #fecaca;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.auth-billing-success {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #bbf7d0;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px;
+}
+
+.pricing-card {
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.pricing-card.featured {
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.15);
+}
+
+.pricing-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.pricing-card h3,
+.pricing-card p {
+  margin: 0;
+}
+
+.pricing-card p {
+  margin-top: 6px;
+  color: rgba(148, 163, 184, 0.92);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.pricing-price {
+  font-weight: 700;
+  color: #c7d2fe;
+}
+
+.pricing-credits {
+  margin: 14px 0;
+  font-size: 14px;
+}
+
+.pricing-cta {
+  width: 100%;
+}
+
+.account-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.account-metric,
+.account-section {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 14px;
+}
+
+.account-metric span,
+.account-section-title {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgba(148, 163, 184, 0.9);
+  margin-bottom: 8px;
+}
+
+.account-metric strong {
+  font-size: 18px;
+}
+
+.account-usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.account-usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(226, 232, 240, 0.92);
+  font-size: 13px;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .pricing-grid,
+  .account-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-billing-dialog-wide {
+    width: min(520px, 100%);
+  }
+
+  .auth-billing-provider-row {
+    flex-direction: column;
+  }
+}

@@ -5,9 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:cf": "wrangler pages dev . --port 8788 --persist-to .wrangler/state",
+    "dev:api": "npm run dev:cf",
+    "dev:full": "node scripts/dev-full.mjs",
     "dev:changelog": "vite --mode changelog",
     "build": "tsc -b && vite build",
     "build:deploy": "vite build",
+    "cf:migrate:local": "wrangler d1 migrations apply DB --local",
+    "cf:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf:types": "wrangler types",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
@@ -50,6 +56,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "wrangler": "^4.75.0"
   }
 }
