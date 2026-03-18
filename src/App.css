@@ -736,6 +736,42 @@ input, textarea {
   margin-left: 0;
 }
 
+.toolbar-credit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(120, 138, 255, 0.35);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(73, 86, 198, 0.3), rgba(39, 47, 108, 0.24));
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.toolbar-credit-pill:hover {
+  border-color: rgba(132, 149, 255, 0.58);
+  background: linear-gradient(180deg, rgba(84, 98, 225, 0.36), rgba(49, 58, 134, 0.3));
+  transform: translateY(-1px);
+}
+
+.toolbar-credit-pill-label {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.toolbar-credit-pill-value {
+  color: #f4f7ff;
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 .toolbar-right .version {
   color: var(--text-secondary);
   font-size: var(--font-sm);

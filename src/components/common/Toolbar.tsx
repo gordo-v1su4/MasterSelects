@@ -54,6 +54,7 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
     saveLayoutAsDefault: s.saveLayoutAsDefault,
   })));
   const { isSupported: midiSupported, isEnabled: midiEnabled, enableMIDI, disableMIDI, devices } = useMIDI();
+  const accountCredits = useAccountStore((s) => s.creditBalance);
   const accountSession = useAccountStore((s) => s.session);
   const accountUser = useAccountStore((s) => s.user);
   const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
@@ -800,6 +801,17 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
 
       {/* Status */}
       <div className="toolbar-section toolbar-right">
+        {accountSession?.authenticated && (
+          <button
+            className="toolbar-credit-pill"
+            onClick={openAccountDialog}
+            title={`${accountCredits} credits available`}
+            type="button"
+          >
+            <span className="toolbar-credit-pill-label">Credits</span>
+            <strong className="toolbar-credit-pill-value">{accountCredits}</strong>
+          </button>
+        )}
         <button
           className="menu-trigger"
           onClick={() => (accountSession?.authenticated ? openAccountDialog() : openAuthDialog())}

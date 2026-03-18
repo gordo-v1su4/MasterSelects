@@ -162,6 +162,7 @@ export function AIVideoPanel() {
   const { apiKeys, openSettings } = useSettingsStore();
   const accountSession = useAccountStore((s) => s.session);
   const entitlements = useAccountStore((s) => s.entitlements);
+  const loadAccountState = useAccountStore((s) => s.loadAccountState);
   const openAuthDialog = useAccountStore((s) => s.openAuthDialog);
   const openPricingDialog = useAccountStore((s) => s.openPricingDialog);
   const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
@@ -528,6 +529,10 @@ export function AIVideoPanel() {
         taskId = await service.createImageToVideo(params);
       }
 
+      if (selectedService === 'kieai' && !apiKeys.kieai && hasHostedKlingAccess) {
+        void loadAccountState();
+      }
+
       // Add job to list
       const job: GenerationJob = {
         id: taskId,
@@ -587,7 +592,7 @@ export function AIVideoPanel() {
   }, [
     prompt, negativePrompt, selectedProvider, selectedVersion, duration, aspectRatio, mode, cfgScale, generateAudio,
     generationType, startImagePreview, startCropData, endImagePreview, endCropData, isGenerating,
-    importVideoToProject, getCroppedImageUrl, getActiveService,
+    importVideoToProject, getCroppedImageUrl, getActiveService, selectedService, apiKeys.kieai, hasHostedKlingAccess, loadAccountState,
   ]);
 
   // Remove job from list

@@ -160,6 +160,7 @@ export function AIChatPanel() {
   const { apiKeys, openSettings, aiApprovalMode } = useSettingsStore();
   const hostedAIEnabled = useAccountStore((s) => s.hostedAIEnabled);
   const accountSession = useAccountStore((s) => s.session);
+  const loadAccountState = useAccountStore((s) => s.loadAccountState);
   const openAuthDialog = useAccountStore((s) => s.openAuthDialog);
   const openPricingDialog = useAccountStore((s) => s.openPricingDialog);
   const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
@@ -405,10 +406,13 @@ export function AIChatPanel() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
+      if (accessMode === 'hosted') {
+        void loadAccountState();
+      }
       setIsLoading(false);
       setCurrentToolAction(null);
     }
-  }, [input, hasAccess, isLoading, buildAPIMessages, callOpenAI, aiApprovalMode]);
+  }, [input, hasAccess, isLoading, buildAPIMessages, callOpenAI, aiApprovalMode, accessMode, loadAccountState]);
 
   // Handle key press
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
