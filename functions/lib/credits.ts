@@ -30,6 +30,10 @@ export interface CreditBalanceSummary {
   recentEntries: CreditLedgerRow[];
 }
 
+export const FREE_PLAN_WELCOME_CREDITS = 25;
+export const FREE_PLAN_WELCOME_SOURCE = 'system:free_plan_bootstrap';
+export const FREE_PLAN_WELCOME_SOURCE_ID = 'free-plan-bootstrap:v1';
+
 function toJson(value: Record<string, unknown> | null | undefined): string | null {
   if (!value) {
     return null;
@@ -106,11 +110,11 @@ export async function appendCreditLedgerEntry(
           `
             SELECT id
             FROM credit_ledger
-            WHERE user_id = ? AND source_id = ?
+            WHERE user_id = ? AND source = ? AND source_id = ?
             LIMIT 1
         `,
       )
-      .bind(input.userId, input.sourceId)
+      .bind(input.userId, input.source, input.sourceId)
         .first<{ id: string }>()
     : null;
 
@@ -133,37 +137,45 @@ export async function appendCreditLedgerEntry(
     user_id: input.userId,
   };
 
-  await db
-    .prepare(
-      `
-        INSERT INTO credit_ledger (
-          id,
-          user_id,
-          entry_type,
-          amount,
-          balance_after,
-          source,
-          source_id,
-          description,
-          metadata_json,
-          created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-    )
-    .bind(
-      row.id,
-      row.user_id,
-      row.entry_type,
-      row.amount,
-      row.balance_after,
-      row.source,
-      row.source_id,
-      row.description,
-      row.metadata_json,
-      row.created_at,
-    )
-    .run();
+  try {
+    await db
+      .prepare(
+        `
+          INSERT INTO credit_ledger (
+            id,
+            user_id,
+            entry_type,
+            amount,
+            balance_after,
+            source,
+            source_id,
+            description,
+            metadata_json,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .bind(
+        row.id,
+        row.user_id,
+        row.entry_type,
+        row.amount,
+        row.balance_after,
+        row.source,
+        row.source_id,
+        row.description,
+        row.metadata_json,
+        row.created_at,
+      )
+      .run();
+  } catch {
+    if (!input.sourceId) {
+      throw new Error('Failed to append credit ledger entry');
+    }
+
+    return null;
+  }
 
   return row;
 }
@@ -234,4 +246,22 @@ export async function spendCredits(
     entry,
     insufficient: false,
   };
+}
+
+export async function ensureFreePlanCredits(
+  db: AppD1Database,
+  userId: string,
+): Promise<CreditLedgerRow | null> {
+  return appendCreditLedgerEntry(db, {
+    amount: FREE_PLAN_WELCOME_CREDITS,
+    description: 'Free plan welcome credits',
+    entryType: 'grant',
+    metadata: {
+      grant_type: 'welcome',
+      plan_id: 'free',
+    },
+    source: FREE_PLAN_WELCOME_SOURCE,
+    sourceId: FREE_PLAN_WELCOME_SOURCE_ID,
+    userId,
+  });
 }

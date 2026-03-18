@@ -1,4 +1,4 @@
-import { getCreditBalance } from './credits';
+import { ensureFreePlanCredits, getCreditBalance } from './credits';
 import {
   getEntitlementSnapshot,
   listEntitlements,
@@ -55,11 +55,16 @@ export async function getUserBillingSnapshot(
   db: AppD1Database,
   userId: string,
 ): Promise<UserBillingSnapshot> {
-  const [planId, entitlementRows, balance] = await Promise.all([
+  const [planId, entitlementRows] = await Promise.all([
     getCurrentPlanId(db, userId),
     listEntitlements(db, userId),
-    getCreditBalance(db, userId),
   ]);
+
+  if (planId === 'free') {
+    await ensureFreePlanCredits(db, userId);
+  }
+
+  const balance = await getCreditBalance(db, userId);
   const snapshot = getEntitlementSnapshot(planId, entitlementRows);
 
   return {
