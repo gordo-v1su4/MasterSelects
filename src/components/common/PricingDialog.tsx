@@ -74,7 +74,7 @@ export function PricingDialog({ onClose }: PricingDialogProps) {
               <article key={plan.id} className={`pricing-plan-card ${plan.featured ? 'pricing-plan-featured' : ''}`}>
                 <div className="pricing-plan-top">
                   <div>
-                    <h3 className="pricing-plan-name">{plan.id.toUpperCase()}</h3>
+                    <h3 className="pricing-plan-name">{plan.id.charAt(0).toUpperCase() + plan.id.slice(1)}</h3>
                     <p className="pricing-plan-description">{plan.description}</p>
                   </div>
                   <div className="pricing-plan-price">{plan.price}</div>

@@ -171,7 +171,7 @@
   border: 1px solid rgba(52, 211, 153, 0.25);
 }
 
-/* ─── New Auth Dialog (Changelog-style) ─── */
+/* ─── Auth Dialog (Changelog-style floating) ─── */
 
 .auth-dialog {
   width: 480px;
@@ -183,14 +183,26 @@
   flex-direction: column;
   align-items: stretch;
   color: var(--text-primary, #f2f5ff);
+  /* Strip .welcome-overlay card — match .changelog-dialog */
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .auth-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px 28px 20px;
+  padding: 20px 24px 24px;
   flex-shrink: 0;
+  border-radius: 20px 20px 0 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(22, 22, 22, 0.97) 0%,
+    rgba(22, 22, 22, 0.92) 40%,
+    rgba(22, 22, 22, 0.6) 70%,
+    transparent 100%
+  );
 }
 
 .auth-dialog-header-left {
@@ -209,7 +221,9 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  padding: 0 28px 28px;
+  padding: 16px 24px 24px;
+  background: rgba(22, 22, 22, 0.95);
+  border-radius: 0 0 20px 20px;
 }
 
 .auth-dialog-intro {
@@ -220,7 +234,7 @@
 
 .auth-dialog-subtitle {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text-primary, #f2f5ff);
 }
@@ -229,7 +243,7 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.50);
 }
 
 .auth-dialog-form {
@@ -241,21 +255,22 @@
 .auth-dialog-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .auth-dialog-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
+  text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.12em;
 }
 
 .auth-dialog-input {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
-  padding: 12px 14px;
+  padding: 10px 14px;
   color: var(--text-primary, #f2f5ff);
   font-size: 14px;
   outline: none;
@@ -278,7 +293,7 @@
 
 .auth-dialog-provider {
   padding: 10px 16px;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.6);
@@ -305,13 +320,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 44px;
+  height: 38px;
   padding: 0 20px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.88);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -330,7 +345,7 @@
 
 .auth-dialog-notice {
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -359,10 +374,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 44px;
+  height: 38px;
   padding: 0 20px;
   border-radius: 999px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
@@ -402,14 +417,14 @@
 .account-metrics-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .account-metric-card {
-  padding: 16px;
-  border-radius: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .account-metric-label {
@@ -419,20 +434,20 @@
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: rgba(255, 255, 255, 0.35);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .account-metric-value {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary, #f2f5ff);
 }
 
 .account-usage-card {
-  padding: 16px;
-  border-radius: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .account-usage-entry {
@@ -464,50 +479,50 @@
 .pricing-plans-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 
 .pricing-plan-card {
-  padding: 18px;
-  border-radius: 14px;
+  padding: 14px 16px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .pricing-plan-featured {
   border-color: rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .pricing-plan-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .pricing-plan-name {
   margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--text-primary, #f2f5ff);
 }
 
 .pricing-plan-description {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: rgba(255, 255, 255, 0.38);
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.50);
 }
 
 .pricing-plan-price {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
   white-space: nowrap;
   font-style: italic;
 }
@@ -516,13 +531,13 @@
   font-size: 14px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.65);
-  margin: 8px 0 4px;
+  margin: 6px 0 8px;
 }
 
 .pricing-plan-cta {
   width: 100%;
   margin-top: auto;
-  padding: 10px 16px;
+  padding: 8px 16px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.06);
