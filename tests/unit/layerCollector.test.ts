@@ -30,6 +30,7 @@ vi.mock('../../src/services/wcPipelineMonitor', () => ({
 
 import { LayerCollector } from '../../src/engine/render/LayerCollector';
 import { flags } from '../../src/engine/featureFlags';
+import { scrubSettleState } from '../../src/services/scrubSettleState';
 import { useTimelineStore } from '../../src/stores/timeline';
 
 const defaultUserAgent = navigator.userAgent;
@@ -40,7 +41,9 @@ describe('LayerCollector', () => {
     hoisted.getRuntimeFrameProvider.mockReset();
     hoisted.readRuntimeFrameForSource.mockReset();
     hoisted.wcRecord.mockReset();
+    scrubSettleState.clear();
     flags.useFullWebCodecsPlayback = true;
+    flags.disableHtmlPreviewFallback = true;
     useTimelineStore.setState({ isDraggingPlayhead: false });
     Object.defineProperty(globalThis.navigator, 'userAgent', {
       configurable: true,
@@ -123,6 +126,9 @@ describe('LayerCollector', () => {
     expect(textureManager.importVideoTexture).toHaveBeenCalledWith(clipFrame);
     expect(clipProvider.getCurrentFrame).toHaveBeenCalledTimes(1);
     expect(hoisted.readRuntimeFrameForSource).not.toHaveBeenCalled();
+    expect(result[0]?.displayedMediaTime).toBe(2);
+    expect(result[0]?.targetMediaTime).toBe(2);
+    expect(result[0]?.previewPath).toBe('webcodecs');
     expect(collector.getDecoder()).toBe('WebCodecs');
     expect(collector.hasActiveVideo()).toBe(true);
   });
@@ -423,6 +429,88 @@ describe('LayerCollector', () => {
     expect(clipProvider.getCurrentFrame).not.toHaveBeenCalled();
   });
 
+  it('reads the runtime session frame during scrub-settle even when the layer still points at the clip provider', () => {
+    const clipProvider = {
+      currentTime: 22.5,
+      isPlaying: false,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: vi.fn(() => ({
+        timestamp: 22_500_000,
+        displayWidth: 1920,
+        displayHeight: 1080,
+      })),
+      getPendingSeekTime: vi.fn(() => null),
+      getDebugInfo: vi.fn(() => null),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+    const runtimeProvider = {
+      currentTime: 8.7,
+      isPlaying: false,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => false,
+      getCurrentFrame: vi.fn(() => null),
+      getPendingSeekTime: vi.fn(() => 8.7),
+      getDebugInfo: vi.fn(() => null),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+    const runtimeFrame = {
+      timestamp: 8_700_000,
+      displayWidth: 1920,
+      displayHeight: 1080,
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(runtimeProvider);
+    hoisted.readRuntimeFrameForSource.mockReturnValue({
+      binding: { session: { currentTime: 8.7 } },
+      frameHandle: {
+        frame: runtimeFrame,
+        timestamp: 8_700_000,
+      },
+    });
+    scrubSettleState.begin('clip-1', 8.7, 500, 'scrub-stop');
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const result = collector.collect([{
+      id: 'layer-1',
+      sourceClipId: 'clip-1',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        mediaTime: 8.7,
+        webCodecsPlayer: clipProvider,
+        runtimeSourceId: 'media:test',
+        runtimeSessionKey: 'interactive-track:track-1:media:test',
+      },
+    } as any], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: false,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(hoisted.readRuntimeFrameForSource).toHaveBeenCalledTimes(1);
+    expect(clipProvider.getCurrentFrame).not.toHaveBeenCalled();
+  });
+
   it('renders an available pending WebCodecs frame during drag scrubbing instead of dropping to black', () => {
     useTimelineStore.setState({ isDraggingPlayhead: true });
 
@@ -478,6 +566,367 @@ describe('LayerCollector', () => {
 
     expect(result).toHaveLength(1);
     expect(provider.getCurrentFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a wildly stale WebCodecs provider frame after playback starts', () => {
+    const staleFrame = {
+      timestamp: 72_506_000,
+      displayWidth: 1920,
+      displayHeight: 1080,
+    };
+
+    const provider = {
+      currentTime: 7.623,
+      isPlaying: true,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: vi.fn(() => staleFrame),
+      getPendingSeekTime: vi.fn(() => null),
+      getDebugInfo: vi.fn(() => null),
+      getFrameRate: vi.fn(() => 30),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(null);
+    hoisted.readRuntimeFrameForSource.mockReturnValue(null);
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const result = collector.collect([{
+      id: 'layer-stale-play',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        mediaTime: 7.623,
+        webCodecsPlayer: provider,
+      },
+    } as any], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(result).toHaveLength(0);
+    expect(textureManager.importVideoTexture).not.toHaveBeenCalled();
+    expect(provider.getCurrentFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a moderately stale WebCodecs provider frame during playback startup warmup', () => {
+    const startupFrame = {
+      timestamp: 8_380_000,
+      displayWidth: 1920,
+      displayHeight: 1080,
+    };
+
+    const provider = {
+      currentTime: 8.02,
+      isPlaying: true,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: vi.fn(() => startupFrame),
+      getPendingSeekTime: vi.fn(() => 8.02),
+      getDebugInfo: vi.fn(() => null),
+      getFrameRate: vi.fn(() => 30),
+      isPlaybackStartupWarmupActive: vi.fn(() => true),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(null);
+    hoisted.readRuntimeFrameForSource.mockReturnValue(null);
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const result = collector.collect([{
+      id: 'layer-startup-warmup',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        mediaTime: 8.02,
+        webCodecsPlayer: provider,
+      },
+    } as any], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(textureManager.importVideoTexture).toHaveBeenCalledTimes(1);
+    expect(provider.getCurrentFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hold a wildly stale reused WebCodecs frame during playback startup warmup', () => {
+    const staleFrame = {
+      timestamp: 17_818_000,
+      displayWidth: 1920,
+      displayHeight: 1080,
+    };
+
+    const provider = {
+      currentTime: 17.818,
+      isPlaying: true,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: vi.fn(() => staleFrame),
+      getPendingSeekTime: vi.fn(() => null),
+      getDebugInfo: vi.fn(() => null),
+      getFrameRate: vi.fn(() => 30),
+      isPlaybackStartupWarmupActive: vi.fn(() => false),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(null);
+    hoisted.readRuntimeFrameForSource.mockReturnValue(null);
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const baseLayer = {
+      id: 'layer-startup-stale-hold',
+      sourceClipId: 'clip-startup-stale',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        mediaTime: 17.818,
+        webCodecsPlayer: provider,
+      },
+    } as any;
+
+    const initialResult = collector.collect([baseLayer], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(initialResult).toHaveLength(1);
+
+    provider.getPendingSeekTime.mockReturnValue(8.02);
+    provider.isPlaybackStartupWarmupActive.mockReturnValue(true);
+
+    const startupResult = collector.collect([{
+      ...baseLayer,
+      source: {
+        ...baseLayer.source,
+        mediaTime: 8.02,
+      },
+    }], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(startupResult).toHaveLength(0);
+    expect(textureManager.importVideoTexture).toHaveBeenCalledTimes(1);
+    expect(provider.getCurrentFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hold a severely stale reused WebCodecs frame during playback even before warmup is marked active', () => {
+    const staleFrame = {
+      timestamp: 17_818_000,
+      displayWidth: 1920,
+      displayHeight: 1080,
+    };
+
+    const provider = {
+      currentTime: 17.818,
+      isPlaying: true,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: vi.fn(() => staleFrame),
+      getPendingSeekTime: vi.fn(() => null),
+      getDebugInfo: vi.fn(() => null),
+      getFrameRate: vi.fn(() => 30),
+      isPlaybackStartupWarmupActive: vi.fn(() => false),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(null);
+    hoisted.readRuntimeFrameForSource.mockReturnValue(null);
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const baseLayer = {
+      id: 'layer-severe-stale-hold',
+      sourceClipId: 'clip-severe-stale',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        mediaTime: 17.818,
+        webCodecsPlayer: provider,
+      },
+    } as any;
+
+    const initialResult = collector.collect([baseLayer], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(initialResult).toHaveLength(1);
+
+    provider.getPendingSeekTime.mockReturnValue(8.02);
+
+    const playbackResult = collector.collect([{
+      ...baseLayer,
+      source: {
+        ...baseLayer.source,
+        mediaTime: 8.02,
+      },
+    }], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: true,
+    });
+
+    expect(playbackResult).toHaveLength(0);
+    expect(textureManager.importVideoTexture).toHaveBeenCalledTimes(1);
+    expect(provider.getCurrentFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hold a severely stale reused WebCodecs frame during a paused teleport settle', () => {
+    const staleFrame = {
+      timestamp: 17_818_000,
+      displayWidth: 1920,
+      displayHeight: 1080,
+    };
+
+    const provider = {
+      currentTime: 17.818,
+      isPlaying: false,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: vi.fn(() => staleFrame),
+      getPendingSeekTime: vi.fn(() => null),
+      getDebugInfo: vi.fn(() => null),
+      getFrameRate: vi.fn(() => 30),
+      isPlaybackStartupWarmupActive: vi.fn(() => false),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(null);
+    hoisted.readRuntimeFrameForSource.mockReturnValue(null);
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const baseLayer = {
+      id: 'layer-paused-severe-stale-hold',
+      sourceClipId: 'clip-paused-severe-stale',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        mediaTime: 17.818,
+        webCodecsPlayer: provider,
+      },
+    } as any;
+
+    const initialResult = collector.collect([baseLayer], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: false,
+    });
+
+    expect(initialResult).toHaveLength(1);
+
+    provider.getPendingSeekTime.mockReturnValue(8.02);
+
+    const pausedResult = collector.collect([{
+      ...baseLayer,
+      source: {
+        ...baseLayer.source,
+        mediaTime: 8.02,
+      },
+    }], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: false,
+    });
+
+    expect(pausedResult).toHaveLength(0);
+    expect(textureManager.importVideoTexture).toHaveBeenCalledTimes(1);
+    expect(provider.getCurrentFrame).toHaveBeenCalledTimes(2);
   });
 
   it('prefers HTML video preview when full WebCodecs playback is disabled', () => {
@@ -538,6 +987,68 @@ describe('LayerCollector', () => {
     expect(textureManager.importVideoTexture).toHaveBeenCalledWith(video);
     expect(webCodecsPlayer.getCurrentFrame).not.toHaveBeenCalled();
     expect(collector.getDecoder()).toBe('HTMLVideo');
+  });
+
+  it('does not fall back to HTML preview when HTML preview fallback is disabled', () => {
+    const video = {
+      src: 'blob:test-video',
+      currentTime: 1.25,
+      readyState: 4,
+      seeking: false,
+      paused: true,
+      videoWidth: 1920,
+      videoHeight: 1080,
+    } as any;
+
+    const webCodecsPlayer = {
+      currentTime: 1.25,
+      isPlaying: false,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => false,
+      getCurrentFrame: vi.fn(() => null),
+      getPendingSeekTime: vi.fn(() => null),
+      getDebugInfo: vi.fn(() => null),
+      pause: vi.fn(),
+      seek: vi.fn(),
+    };
+
+    hoisted.getRuntimeFrameProvider.mockReturnValue(null);
+    hoisted.readRuntimeFrameForSource.mockReturnValue(null);
+
+    const textureManager = {
+      importVideoTexture: vi.fn(() => ({ label: 'html-video-texture' })),
+    };
+
+    const collector = new LayerCollector();
+    const result = collector.collect([{
+      id: 'layer-html-disabled',
+      name: 'Video',
+      visible: true,
+      opacity: 1,
+      blendMode: 'normal',
+      effects: [],
+      position: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1 },
+      rotation: 0,
+      source: {
+        type: 'video',
+        videoElement: video,
+        webCodecsPlayer,
+      },
+    } as any], {
+      textureManager: textureManager as any,
+      scrubbingCache: null,
+      getLastVideoTime: () => undefined,
+      setLastVideoTime: () => {},
+      isExporting: false,
+      isPlaying: false,
+    });
+
+    expect(result).toHaveLength(0);
+    expect(textureManager.importVideoTexture).not.toHaveBeenCalled();
+    expect(webCodecsPlayer.getCurrentFrame).toHaveBeenCalledTimes(1);
+    expect(collector.getDecoder()).toBe('none');
   });
 
   it('tracks paused HTML preview time per video element instead of per shared src', () => {

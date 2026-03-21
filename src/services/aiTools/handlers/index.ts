@@ -87,6 +87,9 @@ import {
 import {
   handlePlay,
   handlePause,
+  handleSimulateScrub,
+  handleSimulatePlayback,
+  handleSimulatePlaybackPath,
   handleSetClipSpeed,
   handleUndo,
   handleRedo,
@@ -162,6 +165,9 @@ const timelineHandlers: Record<string, (args: Record<string, unknown>, store: Re
   // Playback & Control
   play: handlePlay,
   pause: handlePause,
+  simulateScrub: handleSimulateScrub,
+  simulatePlayback: handleSimulatePlayback,
+  simulatePlaybackPath: handleSimulatePlaybackPath,
   setClipSpeed: handleSetClipSpeed,
   // Markers
   addMarker: handleAddMarker,
@@ -316,6 +322,9 @@ export {
   // Playback & Control
   handlePlay,
   handlePause,
+  handleSimulateScrub,
+  handleSimulatePlayback,
+  handleSimulatePlaybackPath,
   handleSetClipSpeed,
   handleUndo,
   handleRedo,

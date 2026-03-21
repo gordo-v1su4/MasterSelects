@@ -14,6 +14,7 @@ import { AccountDialog } from './components/common/AccountDialog';
 import { AuthDialog } from './components/common/AuthDialog';
 import { WelcomeOverlay } from './components/common/WelcomeOverlay';
 import { WhatsNewDialog } from './components/common/WhatsNewDialog';
+import { SplashScreen } from './components/common/SplashScreen';
 import { IndexedDBErrorDialog } from './components/common/IndexedDBErrorDialog';
 import { LinuxVulkanWarning } from './components/common/LinuxVulkanWarning';
 import { PricingDialog } from './components/common/PricingDialog';
@@ -65,8 +66,10 @@ function App() {
   const [hasStoredProject, setHasStoredProject] = useState(false);
   const [manuallyDismissed, setManuallyDismissed] = useState(false);
 
-  // What's New dialog state - show on every refresh or once per update after welcome
-  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  // Splash screen state - shown on startup with video + notices
+  const [showSplash, setShowSplash] = useState(false);
+  // Changelog dialog state - full changelog with calendar + all changes
+  const [showChangelog, setShowChangelog] = useState(false);
   const showChangelogOnStartup = useSettingsStore((s) => s.showChangelogOnStartup);
   const lastSeenChangelogVersion = useSettingsStore((s) => s.lastSeenChangelogVersion);
 
@@ -183,34 +186,46 @@ function App() {
   const shouldShowChangelogOnStartup = SHOW_CHANGELOG
     && shouldAutoShowChangelog(showChangelogOnStartup, lastSeenChangelogVersion, APP_VERSION);
 
-  // Show What's New dialog after initial check (when no welcome overlay)
+  // Show Splash screen after initial check (when no welcome overlay)
   // This effect intentionally sets state based on derived conditions
   useEffect(() => {
     if (!shouldShowChangelogOnStartup) return;
     if (isChecking) return;
 
-    // If welcome is showing, don't show What's New yet
+    // If welcome is showing, don't show splash yet
     if (showWelcome) return;
 
-    // Show What's New dialog - this is intentional state sync, not a cascading render
+    // Show splash screen - this is intentional state sync, not a cascading render
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setShowWhatsNew(true);
+    setShowSplash(true);
   }, [isChecking, showWelcome, shouldShowChangelogOnStartup]);
 
   const handleWelcomeComplete = useCallback(() => {
     setManuallyDismissed(true);
     setHasStoredProject(true); // Project was just created
-    // After welcome, show What's New with small delay for animation
+    // After welcome, show splash screen with small delay for animation
     if (shouldShowChangelogOnStartup) {
-      setTimeout(() => setShowWhatsNew(true), 300);
+      setTimeout(() => setShowSplash(true), 300);
     } else if (!hasSeenTutorial) {
-      // No changelog → start tutorial directly
+      // No splash → start tutorial directly
       setTimeout(() => setShowTutorial(true), 200);
     }
   }, [hasSeenTutorial, shouldShowChangelogOnStartup]);
 
-  const handleWhatsNewClose = useCallback(() => {
-    setShowWhatsNew(false);
+  const handleSplashClose = useCallback(() => {
+    setShowSplash(false);
+    if (!hasSeenTutorial) {
+      setTimeout(() => setShowTutorial(true), 200);
+    }
+  }, [hasSeenTutorial]);
+
+  const handleSplashOpenChangelog = useCallback(() => {
+    setShowSplash(false);
+    setShowChangelog(true);
+  }, []);
+
+  const handleChangelogClose = useCallback(() => {
+    setShowChangelog(false);
     if (!hasSeenTutorial) {
       setTimeout(() => setShowTutorial(true), 200);
     }
@@ -304,13 +319,16 @@ function App() {
   return (
     <div className="app">
       <LinuxVulkanWarning />
-      <Toolbar onOpenChangelog={() => setShowWhatsNew(true)} />
+      <Toolbar onOpenChangelog={() => setShowChangelog(true)} onOpenSplash={() => setShowSplash(true)} />
       <DockContainer />
       {showWelcome && (
         <WelcomeOverlay onComplete={handleWelcomeComplete} noFadeOnClose />
       )}
-      {showWhatsNew && (
-        <WhatsNewDialog onClose={handleWhatsNewClose} />
+      {showSplash && (
+        <SplashScreen onClose={handleSplashClose} onOpenChangelog={handleSplashOpenChangelog} />
+      )}
+      {showChangelog && (
+        <WhatsNewDialog onClose={handleChangelogClose} />
       )}
       {showIndexedDBError && (
         <IndexedDBErrorDialog onClose={handleIndexedDBErrorClose} />

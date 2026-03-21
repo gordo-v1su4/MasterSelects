@@ -263,11 +263,18 @@ class BasicMediaSourceRuntime implements MediaSourceRuntime {
   }
 
   private getCachedFrame(
-    request: Pick<FrameRequest, 'sourceTime' | 'frameNumber'>
+    request: FrameRequest,
+    session: BasicDecodeSession
   ): FrameHandle | null {
     const key = getFrameCacheKey(request);
     const cachedHandle = this.frameCache.get(key);
     if (!cachedHandle) {
+      return null;
+    }
+
+    if (!this.isFrameTimestampNearRequest(session, request, cachedHandle.timestamp)) {
+      cachedHandle.release();
+      this.frameCache.delete(key);
       return null;
     }
 
@@ -284,8 +291,79 @@ class BasicMediaSourceRuntime implements MediaSourceRuntime {
   }
 
   private getSharedSessionTolerance(session: BasicDecodeSession): number {
-    const frameRate = session.frameProvider?.getFrameRate?.() ?? 30;
+    const frameRate =
+      session.frameProvider?.getFrameRate?.() ??
+      this.metadata.fps ??
+      30;
     return Math.max(0.004, Math.min(0.03, 0.5 / Math.max(frameRate, 1)));
+  }
+
+  private getFrameTimestampMicros(
+    session: BasicDecodeSession,
+    request: FrameRequest,
+    frame: RuntimeFrame
+  ): number {
+    if (frame && typeof (frame as { timestamp?: unknown }).timestamp === 'number') {
+      const frameTimestamp = (frame as { timestamp: number }).timestamp;
+      if (Number.isFinite(frameTimestamp)) {
+        return frameTimestamp;
+      }
+    }
+
+    if (
+      typeof session.currentFrameTimestamp === 'number' &&
+      Number.isFinite(session.currentFrameTimestamp)
+    ) {
+      return session.currentFrameTimestamp;
+    }
+
+    const providerTime = session.frameProvider?.currentTime;
+    if (typeof providerTime === 'number' && Number.isFinite(providerTime)) {
+      return providerTime * 1_000_000;
+    }
+
+    return request.sourceTime * 1_000_000;
+  }
+
+  private getFrameTimestampToleranceSeconds(
+    session: BasicDecodeSession,
+    request: FrameRequest
+  ): number {
+    if (request.tolerateStaleFrame) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const frameRate =
+      session.frameProvider?.getFrameRate?.() ??
+      this.metadata.fps ??
+      30;
+    const isPlaying = session.frameProvider?.isPlaying ?? false;
+    const frameWindow = isPlaying ? 8 : 4;
+    const minTolerance = isPlaying ? 0.12 : 0.06;
+    const maxTolerance = isPlaying ? 0.35 : 0.18;
+
+    return Math.max(
+      minTolerance,
+      Math.min(maxTolerance, frameWindow / Math.max(frameRate, 1))
+    );
+  }
+
+  private isFrameTimestampNearRequest(
+    session: BasicDecodeSession,
+    request: FrameRequest,
+    timestampMicros: number
+  ): boolean {
+    if (!Number.isFinite(timestampMicros)) {
+      return true;
+    }
+
+    const toleranceSeconds = this.getFrameTimestampToleranceSeconds(session, request);
+    if (!Number.isFinite(toleranceSeconds)) {
+      return true;
+    }
+
+    const timestampSeconds = timestampMicros / 1_000_000;
+    return Math.abs(timestampSeconds - request.sourceTime) <= toleranceSeconds;
   }
 
   private getFrameFromSiblingSession(
@@ -306,8 +384,11 @@ class BasicMediaSourceRuntime implements MediaSourceRuntime {
         continue;
       }
 
-      const timestamp = currentFrame.timestamp ?? session.currentTime * 1_000_000;
+      const timestamp = this.getFrameTimestampMicros(session, request, currentFrame);
       session.currentFrameTimestamp = timestamp;
+      if (!this.isFrameTimestampNearRequest(session, request, timestamp)) {
+        continue;
+      }
 
       return (
         this.cacheFrame(request, currentFrame, { timestamp }) ??
@@ -326,21 +407,23 @@ class BasicMediaSourceRuntime implements MediaSourceRuntime {
   getFrameSync(request: FrameRequest): FrameHandle | null {
     const session = this.getSession(request.sessionKey, {
       policy: request.playbackMode,
-    });
+    }) as BasicDecodeSession;
     session.touch(request.sourceTime);
 
     const frameProvider = session.frameProvider;
     const currentFrame = frameProvider?.getCurrentFrame();
     if (currentFrame) {
-      const timestamp = currentFrame.timestamp ?? request.sourceTime * 1_000_000;
+      const timestamp = this.getFrameTimestampMicros(session, request, currentFrame);
       session.currentFrameTimestamp = timestamp;
-      this.cacheFrame(request, currentFrame, { timestamp });
-      return createFrameHandle({
-        sourceId: this.sourceId,
-        timestamp,
-        frameNumber: request.frameNumber,
-        frame: currentFrame,
-      });
+      if (this.isFrameTimestampNearRequest(session, request, timestamp)) {
+        this.cacheFrame(request, currentFrame, { timestamp });
+        return createFrameHandle({
+          sourceId: this.sourceId,
+          timestamp,
+          frameNumber: request.frameNumber,
+          frame: currentFrame,
+        });
+      }
     }
 
     const siblingFrame = this.getFrameFromSiblingSession(request);
@@ -352,7 +435,7 @@ class BasicMediaSourceRuntime implements MediaSourceRuntime {
       return null;
     }
 
-    return this.getCachedFrame(request);
+    return this.getCachedFrame(request, session);
   }
 
   releaseSession(key: string): void {

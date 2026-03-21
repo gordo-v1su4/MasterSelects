@@ -34,9 +34,10 @@ type MenuId = 'file' | 'edit' | 'view' | 'output' | 'window' | 'info' | null;
 
 interface ToolbarProps {
   onOpenChangelog?: () => void;
+  onOpenSplash?: () => void;
 }
 
-export function Toolbar({ onOpenChangelog }: ToolbarProps) {
+export function Toolbar({ onOpenChangelog, onOpenSplash }: ToolbarProps) {
   const { isEngineReady, createOutputWindow } = useEngine();
   const gpuInfo = useEngineStore(s => s.gpuInfo);
   const targets = useRenderTargetStore((s) => s.targets);
@@ -777,7 +778,7 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
                 <span>Changelog</span>
               </button>
               <div className="menu-separator" />
-              <button className="menu-option" onClick={() => { setShowInfoDialog(true); closeMenu(); }}>
+              <button className="menu-option" onClick={() => { onOpenSplash?.(); closeMenu(); }}>
                 <span>About</span>
               </button>
             </div>

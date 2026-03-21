@@ -21,6 +21,8 @@ export {
   getPlayheadPosition,
   setMasterAudio,
   clearMasterAudio,
+  holdInternalPlaybackPosition,
+  clearInternalPlaybackHold,
   startInternalPosition,
   stopInternalPosition,
   updateInternalPosition,

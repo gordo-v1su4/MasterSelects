@@ -74,6 +74,12 @@ export class NestedCompRenderer {
     return layer.source?.mediaTime ?? video.currentTime;
   }
 
+  private getFrameTimestampSeconds(timestamp: unknown, fallback?: number): number | undefined {
+    return typeof timestamp === 'number' && Number.isFinite(timestamp)
+      ? timestamp / 1_000_000
+      : fallback;
+  }
+
   private getDragHoldFrame(layer: Layer, video: HTMLVideoElement) {
     if (!layer.sourceClipId) {
       return null;
@@ -584,12 +590,25 @@ export class NestedCompRenderer {
         }
       }
 
+      const runtimeProvider = getRuntimeFrameProvider(layer.source, 'background');
+      const clipProvider = layer.source.webCodecsPlayer?.isFullMode()
+        ? layer.source.webCodecsPlayer
+        : null;
+      const htmlPreviewDebugDisabled =
+        flags.useFullWebCodecsPlayback &&
+        flags.disableHtmlPreviewFallback;
+      const hasFullWebCodecsPreview =
+        flags.useFullWebCodecsPlayback &&
+        (!!clipProvider || !!runtimeProvider?.isFullMode());
       const allowHtmlScrubPreview =
+        !htmlPreviewDebugDisabled &&
+        !hasFullWebCodecsPreview &&
         (useTimelineStore.getState().isDraggingPlayhead || scrubSettleState.isPending(layer.sourceClipId)) &&
         !!layer.source.videoElement;
       const allowHtmlVideoPreview =
         !!layer.source.videoElement &&
-        (!flags.useFullWebCodecsPlayback ||
+        !htmlPreviewDebugDisabled &&
+        (!hasFullWebCodecsPreview ||
           ENABLE_VISUAL_HTML_VIDEO_FALLBACK ||
           allowHtmlScrubPreview);
 
@@ -834,10 +853,6 @@ export class NestedCompRenderer {
         }
       }
 
-      const runtimeProvider = getRuntimeFrameProvider(layer.source, 'background');
-      const clipProvider = layer.source.webCodecsPlayer?.isFullMode()
-        ? layer.source.webCodecsPlayer
-        : null;
       const runtimeProviderStable = this.isPendingWebCodecsFrameStable(runtimeProvider ?? undefined);
       const runtimeHasFrame =
         (runtimeProvider?.hasFrame?.() ?? false) ||
@@ -855,16 +870,28 @@ export class NestedCompRenderer {
             ? runtimeProvider
             : null);
       const providerKey = this.getVideoProviderKey(layer, frameProvider, runtimeProvider);
+      const runtimeProviderKey = runtimeProvider
+        ? this.getVideoProviderKey(layer, runtimeProvider, runtimeProvider)
+        : providerKey;
       const layerReuseKey = this.getLayerReuseKey(layer);
       const canReuseLastFrame = this.canReuseLastSuccessfulVideoFrame(layerReuseKey, providerKey);
       const frameProviderStable = this.isPendingWebCodecsFrameStable(frameProvider ?? undefined);
       const holdingFrame = !frameProviderStable && canReuseLastFrame;
+      const allowRuntimeFrameReadDuringSettle =
+        scrubSettleState.isPending(layer.sourceClipId) &&
+        !!runtimeProvider?.isFullMode() &&
+        runtimeProvider !== clipProvider;
       const canReadRuntimeFrame =
         !!layer.source.runtimeSourceId &&
         !!layer.source.runtimeSessionKey &&
         !!runtimeProvider?.isFullMode() &&
-        (!frameProvider || frameProvider === runtimeProvider) &&
-        (runtimeProviderStable || canReuseLastFrame || allowPendingScrubFrame);
+        (!frameProvider || frameProvider === runtimeProvider || allowRuntimeFrameReadDuringSettle) &&
+        (
+          runtimeProviderStable ||
+          canReuseLastFrame ||
+          allowPendingScrubFrame ||
+          allowRuntimeFrameReadDuringSettle
+        );
       const runtimeFrameRead = canReadRuntimeFrame
         ? readRuntimeFrameForSource(layer.source, 'background')
         : null;
@@ -874,10 +901,19 @@ export class NestedCompRenderer {
         'displayWidth' in runtimeFrame &&
         'displayHeight' in runtimeFrame
       ) {
+        const targetMediaTime =
+          layer.source?.mediaTime ??
+          runtimeFrameRead?.binding.session.currentTime ??
+          runtimeProvider?.getPendingSeekTime?.() ??
+          runtimeProvider?.currentTime;
+        const displayedMediaTime = this.getFrameTimestampSeconds(
+          runtimeFrameRead?.frameHandle?.timestamp,
+          targetMediaTime
+        );
         const extTex = this.textureManager.importVideoTexture(runtimeFrame);
         if (extTex) {
-          if (providerKey) {
-            this.lastSuccessfulVideoProviderKey.set(layerReuseKey, providerKey);
+          if (runtimeProviderKey) {
+            this.lastSuccessfulVideoProviderKey.set(layerReuseKey, runtimeProviderKey);
           }
           this.setCollectorState(layerReuseKey, holdingFrame ? 'hold' : 'render', {
             reason: holdingFrame ? 'same_provider_pending' : 'runtime_frame',
@@ -885,6 +921,7 @@ export class NestedCompRenderer {
           result.push({
             layer, isVideo: true, externalTexture: extTex, textureView: null,
             sourceWidth: runtimeFrame.displayWidth, sourceHeight: runtimeFrame.displayHeight,
+            displayedMediaTime, targetMediaTime, previewPath: 'webcodecs',
           });
           continue;
         }
@@ -900,6 +937,14 @@ export class NestedCompRenderer {
         }
         const frame = frameProvider.getCurrentFrame();
         if (frame) {
+          const targetMediaTime =
+            layer.source?.mediaTime ??
+            frameProvider.getPendingSeekTime?.() ??
+            frameProvider.currentTime;
+          const displayedMediaTime = this.getFrameTimestampSeconds(
+            frame.timestamp,
+            targetMediaTime
+          );
           const extTex = this.textureManager.importVideoTexture(frame);
           if (extTex) {
             if (providerKey) {
@@ -911,6 +956,7 @@ export class NestedCompRenderer {
             result.push({
               layer, isVideo: true, externalTexture: extTex, textureView: null,
               sourceWidth: frame.displayWidth, sourceHeight: frame.displayHeight,
+              displayedMediaTime, targetMediaTime, previewPath: 'webcodecs',
             });
             continue;
           }

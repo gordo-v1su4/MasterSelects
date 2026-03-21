@@ -17,6 +17,7 @@ import {
   getRuntimeFrameProvider,
   getScrubRuntimeSource,
 } from '../mediaRuntime/runtimePlayback';
+import { scrubSettleState } from '../scrubSettleState';
 import { Logger } from '../logger';
 import { flags } from '../../engine/featureFlags';
 import { getInterpolatedClipTransform } from '../../utils/keyframeInterpolation';
@@ -488,7 +489,9 @@ export class LayerBuilderService {
       timeInfo.clipTime
     );
     const allowSharedPreviewSession = canUseSharedPreviewRuntimeSession(clip, ctx.clipsAtTime);
-    const useScrubRuntime = !ctx.isPlaying && ctx.isDraggingPlayhead;
+    const keepScrubRuntimeActive =
+      ctx.isDraggingPlayhead || scrubSettleState.isPending(clip.id);
+    const useScrubRuntime = keepScrubRuntimeActive;
     const previewRuntimeSource = useScrubRuntime
       ? getScrubRuntimeSource(
           clip.source,
@@ -501,16 +504,22 @@ export class LayerBuilderService {
           allowSharedPreviewSession
         );
     const runtimeProvider = getRuntimeFrameProvider(previewRuntimeSource);
+    const preferFreshPausedRuntime = useScrubRuntime;
     const preferHtmlScrubPreview =
+      !flags.disableHtmlPreviewFallback &&
       ctx.isDraggingPlayhead &&
       !!clip.source?.videoElement &&
       (!flags.useFullWebCodecsPlayback || !clip.source?.webCodecsPlayer?.isFullMode?.());
+    const playingVisualProvider =
+      runtimeProvider?.isFullMode()
+        ? runtimeProvider
+        : previewRuntimeSource?.webCodecsPlayer ?? clip.source?.webCodecsPlayer;
     const visualProvider = ctx.isPlaying
-      ? previewRuntimeSource?.webCodecsPlayer ?? clip.source?.webCodecsPlayer
+      ? playingVisualProvider
       : preferHtmlScrubPreview
         ? undefined
         : this.getPausedVisualProvider(clip.source, runtimeProvider, timeInfo.clipTime, {
-            preferFreshRuntime: useScrubRuntime,
+            preferFreshRuntime: preferFreshPausedRuntime,
           });
 
     const layer: Layer = {
@@ -895,7 +904,9 @@ export class LayerBuilderService {
     }
 
     if (this.hasRenderableVideoSource(nestedClip.source)) {
-      const useScrubRuntime = !ctx.isPlaying && ctx.isDraggingPlayhead;
+      const keepScrubRuntimeActive =
+        ctx.isDraggingPlayhead || scrubSettleState.isPending(nestedClip.id);
+      const useScrubRuntime = keepScrubRuntimeActive;
       const previewRuntimeSource = useScrubRuntime
         ? getScrubRuntimeSource(
             nestedClip.source,
@@ -908,10 +919,16 @@ export class LayerBuilderService {
             true
           );
       const runtimeProvider = getRuntimeFrameProvider(previewRuntimeSource);
+      const preferFreshPausedRuntime = useScrubRuntime;
       const preferHtmlScrubPreview =
+        !flags.disableHtmlPreviewFallback &&
         ctx.isDraggingPlayhead &&
         !!nestedClip.source?.videoElement &&
         (!flags.useFullWebCodecsPlayback || !nestedClip.source?.webCodecsPlayer?.isFullMode?.());
+      const playingVisualProvider =
+        runtimeProvider?.isFullMode()
+          ? runtimeProvider
+          : previewRuntimeSource?.webCodecsPlayer ?? nestedClip.source!.webCodecsPlayer;
       const nestedClipTime = nestedClip.reversed
         ? nestedClip.outPoint - nestedClipLocalTime
         : nestedClipLocalTime + nestedClip.inPoint;
@@ -922,11 +939,11 @@ export class LayerBuilderService {
           videoElement: nestedClip.source!.videoElement,
           mediaTime: nestedClipTime,
           webCodecsPlayer: ctx.isPlaying
-            ? previewRuntimeSource?.webCodecsPlayer ?? nestedClip.source!.webCodecsPlayer
+            ? playingVisualProvider
             : preferHtmlScrubPreview
               ? undefined
               : this.getPausedVisualProvider(nestedClip.source, runtimeProvider, nestedClipTime, {
-                  preferFreshRuntime: useScrubRuntime,
+                  preferFreshRuntime: preferFreshPausedRuntime,
                 }),
           runtimeSourceId: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSourceId,
           runtimeSessionKey: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSessionKey,

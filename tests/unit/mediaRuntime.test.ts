@@ -972,4 +972,102 @@ describe('media runtime bindings', () => {
     expect(runtime?.frameCache.size).toBeLessThanOrEqual(12);
     expect(cachedCloneCloseSpies[0]).toHaveBeenCalled();
   });
+
+  it('does not return or cache a stale provider frame for a new requested time', () => {
+    const file = new File(['video'], 'stale-provider.mp4', { type: 'video/mp4', lastModified: 12 });
+    setMediaFiles([
+      {
+        id: 'media-stale-provider',
+        file,
+        name: 'stale-provider.mp4',
+        duration: 120,
+        fps: 30,
+      },
+    ]);
+
+    const staleFrame = makeCloneableVideoFrame(72_506_000);
+    const player = {
+      currentTime: 7.623,
+      isPlaying: true,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      getCurrentFrame: () => staleFrame,
+      seek: vi.fn(),
+      pause: vi.fn(),
+      getDebugInfo: vi.fn().mockReturnValue(null),
+      getFrameRate: () => 30,
+    };
+
+    const source = bindSourceRuntimeToClip({
+      clipId: 'clip-stale-provider',
+      source: {
+        type: 'video',
+        naturalDuration: 120,
+        mediaFileId: 'media-stale-provider',
+        webCodecsPlayer: player as any,
+      },
+      file,
+      mediaFileId: 'media-stale-provider',
+    });
+
+    const previewSource = getPreviewRuntimeSource(source, 'track-1', true);
+    updateRuntimePlaybackTime(previewSource, 7.623);
+
+    const runtimeFrame = readRuntimeFrameForSource(previewSource);
+
+    expect(runtimeFrame?.frameHandle).toBeNull();
+    expect(mediaRuntimeRegistry.getRuntime('media:media-stale-provider')?.frameCache.size).toBe(0);
+  });
+
+  it('ignores a stale cached frame that was previously bound to the wrong requested time', () => {
+    const file = new File(['video'], 'stale-cache.mp4', { type: 'video/mp4', lastModified: 13 });
+    setMediaFiles([
+      {
+        id: 'media-stale-cache',
+        file,
+        name: 'stale-cache.mp4',
+        duration: 120,
+        fps: 30,
+      },
+    ]);
+
+    const player = {
+      currentTime: 7.623,
+      isPlaying: true,
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      getCurrentFrame: () => null,
+      seek: vi.fn(),
+      pause: vi.fn(),
+      getDebugInfo: vi.fn().mockReturnValue(null),
+      getFrameRate: () => 30,
+    };
+
+    const source = bindSourceRuntimeToClip({
+      clipId: 'clip-stale-cache',
+      source: {
+        type: 'video',
+        naturalDuration: 120,
+        mediaFileId: 'media-stale-cache',
+        webCodecsPlayer: player as any,
+      },
+      file,
+      mediaFileId: 'media-stale-cache',
+    });
+
+    const previewSource = getPreviewRuntimeSource(source, 'track-1', true);
+    updateRuntimePlaybackTime(previewSource, 7.623);
+
+    const runtime = mediaRuntimeRegistry.getRuntime('media:media-stale-cache');
+    runtime?.cacheFrame(
+      { sourceTime: 7.623, frameNumber: undefined },
+      makeCloneableVideoFrame(72_506_000),
+      { timestamp: 72_506_000 }
+    );
+
+    const runtimeFrame = readRuntimeFrameForSource(previewSource);
+
+    expect(runtimeFrame?.frameHandle).toBeNull();
+    expect(runtime?.frameCache.size).toBe(0);
+  });
 });

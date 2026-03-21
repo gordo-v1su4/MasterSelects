@@ -3,6 +3,7 @@
 import type { PlaybackActions, SliceCreator } from './types';
 import { MIN_ZOOM, MAX_ZOOM } from './constants';
 import { useMediaStore } from '../mediaStore';
+import { engine } from '../../engine/WebGPUEngine';
 import { getRuntimeFrameProvider } from '../../services/mediaRuntime/runtimePlayback';
 import { playheadState, sanitizePlayheadPosition } from '../../services/layerBuilder/PlayheadState';
 
@@ -20,6 +21,10 @@ export const createPlaybackSlice: SliceCreator<PlaybackActions> = (set, get) => 
     // stale internal positions if playback stopped mid-frame.
     if (!get().isPlaying || !playheadState.isUsingInternalPosition) {
       playheadState.position = clampedPosition;
+    }
+
+    if (!get().isPlaying && !get().isDraggingPlayhead) {
+      engine.requestNewFrameRender();
     }
   },
 

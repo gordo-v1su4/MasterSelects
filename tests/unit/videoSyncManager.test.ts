@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { engine } from '../../src/engine/WebGPUEngine';
 import { flags } from '../../src/engine/featureFlags';
 import { VideoSyncManager } from '../../src/services/layerBuilder/VideoSyncManager';
+import { scrubSettleState } from '../../src/services/scrubSettleState';
 
 describe('VideoSyncManager paused WebCodecs provider selection', () => {
   beforeEach(() => {
     vi.useRealTimers();
     flags.useFullWebCodecsPlayback = true;
+    scrubSettleState.clear();
     (engine as any).ensureVideoFrameCached = vi.fn();
     (engine as any).getLastPresentedVideoTime = vi.fn(() => undefined);
     (engine as any).requestNewFrameRender = vi.fn();
@@ -118,7 +120,20 @@ describe('VideoSyncManager paused WebCodecs provider selection', () => {
     expect(manager.shouldSeekPausedWebCodecsProvider(provider, 1)).toBe(false);
   });
 
-  it('does not re-seek while the same paused seek target is already pending', () => {
+  it('does seek on a single-frame paused step instead of waiting for a larger drift window', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 1,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_000_000 }),
+      getPendingSeekTime: () => null,
+      isDecodePending: () => false,
+    };
+
+    expect(manager.shouldSeekPausedWebCodecsProvider(provider, 1 + 1 / 30)).toBe(true);
+  });
+
+  it('re-seeks when a paused pending target went stale without producing a frame', () => {
     const manager = new VideoSyncManager() as any;
     const provider = {
       currentTime: 1,
@@ -128,7 +143,35 @@ describe('VideoSyncManager paused WebCodecs provider selection', () => {
       isDecodePending: () => false,
     };
 
+    expect(manager.shouldSeekPausedWebCodecsProvider(provider, 1)).toBe(true);
+  });
+
+  it('does not re-seek while the same paused seek target is still actively decoding', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 1,
+      hasFrame: () => false,
+      getCurrentFrame: () => null,
+      getPendingSeekTime: () => 1,
+      isDecodePending: () => true,
+    };
+
     expect(manager.shouldSeekPausedWebCodecsProvider(provider, 1)).toBe(false);
+  });
+
+  it('does not immediately re-seek a fresh paused precise seek that is still settling', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 1,
+      hasFrame: () => false,
+      getCurrentFrame: () => null,
+      getPendingSeekTime: () => 1,
+      isDecodePending: () => false,
+    };
+
+    manager.lastWcPreciseSeekAt['clip:fallback'] = performance.now();
+
+    expect(manager.shouldSeekPausedWebCodecsProvider(provider, 1, 'clip:fallback')).toBe(false);
   });
 
   it('blocks audio start until the playback provider has a frame at the target', () => {
@@ -169,6 +212,28 @@ describe('VideoSyncManager paused WebCodecs provider selection', () => {
     expect(manager.isPlaybackProviderReadyForAudioStart(provider, 1.01)).toBe(false);
   });
 
+  it('does not correct playback audio drift until the audio element has actually started', () => {
+    const manager = new VideoSyncManager() as any;
+    const audioElement = {
+      paused: false,
+      readyState: 4,
+      played: { length: 0 },
+    };
+
+    expect(manager.shouldCorrectPlaybackAudioDrift(audioElement, true, false)).toBe(false);
+  });
+
+  it('corrects playback audio drift once the audio element has an active played range', () => {
+    const manager = new VideoSyncManager() as any;
+    const audioElement = {
+      paused: false,
+      readyState: 4,
+      played: { length: 1 },
+    };
+
+    expect(manager.shouldCorrectPlaybackAudioDrift(audioElement, true, false)).toBe(true);
+  });
+
   it('allows a new fast seek when a busy scrub provider is stale and the target moved', () => {
     const manager = new VideoSyncManager() as any;
     const provider = {
@@ -180,7 +245,7 @@ describe('VideoSyncManager paused WebCodecs provider selection', () => {
     };
 
     manager.lastWcFastSeekTarget['clip:scrub'] = 1;
-    manager.lastWcFastSeekAt['clip:scrub'] = performance.now() - 120;
+    manager.lastWcFastSeekAt['clip:scrub'] = performance.now() - 220;
 
     expect(manager.shouldFastSeekPausedWebCodecsProvider(provider, 'clip:scrub', 1.4)).toBe(true);
   });
@@ -240,6 +305,164 @@ describe('VideoSyncManager paused WebCodecs provider selection', () => {
 
     expect(provider.seek).toHaveBeenCalledWith(1.18);
     expect(provider.fastSeek).not.toHaveBeenCalled();
+  });
+
+  it('uses scrubSeek during drag when the provider exposes an interactive scrub path', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 1,
+      seek: vi.fn(),
+      scrubSeek: vi.fn(),
+      fastSeek: vi.fn(),
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_000_000 }),
+      getPendingSeekTime: () => null,
+      isDecodePending: () => false,
+    };
+
+    manager.syncPausedWebCodecsProvider(provider, 'clip:scrub', 0.76, true, true);
+
+    expect(provider.scrubSeek).toHaveBeenCalledWith(0.76);
+    expect(provider.seek).not.toHaveBeenCalled();
+    expect(provider.fastSeek).not.toHaveBeenCalled();
+  });
+
+  it('keeps dedicated scrub providers on scrubSeek even for larger drag jumps', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 30,
+      seek: vi.fn(),
+      scrubSeek: vi.fn(),
+      fastSeek: vi.fn(),
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 30_000_000 }),
+      getPendingSeekTime: () => null,
+      isDecodePending: () => false,
+    };
+
+    manager.syncPausedWebCodecsProvider(provider, 'clip:scrub', 34.4, true, true);
+
+    expect(provider.scrubSeek).toHaveBeenCalledWith(34.4);
+    expect(provider.seek).not.toHaveBeenCalled();
+    expect(provider.fastSeek).not.toHaveBeenCalled();
+  });
+
+  it('retargets a busy interactive scrub when the drag has moved far enough and the throttle window passed', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 30,
+      seek: vi.fn(),
+      scrubSeek: vi.fn(),
+      fastSeek: vi.fn(),
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 30_000_000 }),
+      getPendingSeekTime: () => 30,
+      isDecodePending: () => true,
+    };
+
+    manager.lastWcPreciseSeekAt['clip:scrub'] = performance.now() - 120;
+
+    manager.syncPausedWebCodecsProvider(provider, 'clip:scrub', 34.4, true, false);
+
+    expect(provider.scrubSeek).toHaveBeenCalledWith(34.4);
+    expect(provider.fastSeek).not.toHaveBeenCalled();
+    expect(provider.seek).not.toHaveBeenCalled();
+  });
+
+  it('does not spam busy interactive scrub retargets before the throttle window elapses', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 30,
+      seek: vi.fn(),
+      scrubSeek: vi.fn(),
+      fastSeek: vi.fn(),
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 30_000_000 }),
+      getPendingSeekTime: () => 30,
+      isDecodePending: () => true,
+    };
+
+    manager.lastWcPreciseSeekAt['clip:scrub'] = performance.now() - 20;
+
+    manager.syncPausedWebCodecsProvider(provider, 'clip:scrub', 34.4, true, false);
+
+    expect(provider.scrubSeek).not.toHaveBeenCalled();
+    expect(provider.fastSeek).not.toHaveBeenCalled();
+    expect(provider.seek).not.toHaveBeenCalled();
+  });
+
+  it('primes large paused teleports with a fast seek before the exact seek settles', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 1,
+      seek: vi.fn(),
+      scrubSeek: vi.fn(),
+      fastSeek: vi.fn(),
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_000_000 }),
+      getPendingSeekTime: () => null,
+      isDecodePending: () => false,
+    };
+
+    manager.syncPausedWebCodecsProvider(provider, 'clip:manual', 5, false, false);
+
+    expect(provider.fastSeek).toHaveBeenCalledWith(5);
+    expect(provider.seek).not.toHaveBeenCalled();
+    expect(provider.scrubSeek).not.toHaveBeenCalled();
+  });
+
+  it('holds playback handoff while the scrub-stop frame is still pending', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 29.2,
+      getPendingSeekTime: () => 30,
+      isDecodePending: () => true,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 29_200_000 }),
+    };
+
+    scrubSettleState.begin('clip-1', 30, 500, 'scrub-stop');
+
+    expect(
+      manager.shouldHoldScrubReleaseIntoPlayback('clip-1', provider, 30)
+    ).toBe(true);
+    expect(scrubSettleState.isPending('clip-1')).toBe(true);
+  });
+
+  it('also holds playback handoff while a manual seek frame is still pending', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 119.2,
+      getPendingSeekTime: () => 120,
+      isDecodePending: () => true,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 119_200_000 }),
+    };
+
+    scrubSettleState.begin('clip-1', 120, 500, 'manual-seek');
+
+    expect(
+      manager.shouldHoldScrubReleaseIntoPlayback('clip-1', provider, 120)
+    ).toBe(true);
+    expect(scrubSettleState.isPending('clip-1')).toBe(true);
+  });
+
+  it('releases playback handoff once the exact scrub-stop frame is visible and decoded', () => {
+    const manager = new VideoSyncManager() as any;
+    const provider = {
+      currentTime: 30,
+      getPendingSeekTime: () => 30,
+      isDecodePending: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 30_000_000 }),
+    };
+
+    scrubSettleState.begin('clip-1', 30, 500, 'scrub-stop');
+
+    expect(
+      manager.shouldHoldScrubReleaseIntoPlayback('clip-1', provider, 30)
+    ).toBe(false);
+    expect(scrubSettleState.isPending('clip-1')).toBe(false);
   });
 
   it('keeps the fallback provider on fast seek only while a dedicated scrub provider warms up', () => {

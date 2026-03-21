@@ -32,6 +32,12 @@ export interface PlayheadStateData {
 
   /** True if we have an active audio master */
   hasMasterAudio: boolean;
+
+  /** Optional held playback position during scrub-release settle */
+  heldPlaybackPosition: number | null;
+
+  /** Clip that currently owns the held playback position */
+  heldPlaybackClipId: string | null;
 }
 
 /**
@@ -47,6 +53,8 @@ export const playheadState: PlayheadStateData = {
   masterClipInPoint: 0,
   masterClipSpeed: 1,
   hasMasterAudio: false,
+  heldPlaybackPosition: null,
+  heldPlaybackClipId: null,
 };
 
 export function sanitizePlayheadPosition(value: unknown, fallback = 0): number {
@@ -96,6 +104,26 @@ export function clearMasterAudio(): void {
   playheadState.masterAudioElement = null;
 }
 
+export function holdInternalPlaybackPosition(position: number, clipId?: string): void {
+  playheadState.heldPlaybackPosition = sanitizePlayheadPosition(
+    position,
+    playheadState.position
+  );
+  playheadState.heldPlaybackClipId = clipId ?? null;
+}
+
+export function clearInternalPlaybackHold(clipId?: string): void {
+  if (
+    clipId !== undefined &&
+    playheadState.heldPlaybackClipId !== null &&
+    playheadState.heldPlaybackClipId !== clipId
+  ) {
+    return;
+  }
+  playheadState.heldPlaybackPosition = null;
+  playheadState.heldPlaybackClipId = null;
+}
+
 /**
  * Start using internal position (called when playback starts)
  */
@@ -103,6 +131,7 @@ export function startInternalPosition(position: number): void {
   playheadState.position = position;
   playheadState.isUsingInternalPosition = true;
   playheadState.playbackJustStarted = true;
+  clearInternalPlaybackHold();
 }
 
 /**
@@ -111,6 +140,7 @@ export function startInternalPosition(position: number): void {
 export function stopInternalPosition(): void {
   playheadState.isUsingInternalPosition = false;
   playheadState.playbackJustStarted = false;
+  clearInternalPlaybackHold();
   clearMasterAudio();
 }
 

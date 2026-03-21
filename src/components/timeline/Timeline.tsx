@@ -1011,6 +1011,7 @@ export function Timeline() {
               (trackLanesRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
             }}
             className={`timeline-tracks ${clipDrag ? 'dragging-clip' : ''} ${marquee ? 'marquee-selecting' : ''}`}
+            data-ai-id="timeline-tracks"
             onMouseDown={handleMarqueeMouseDown}
             onDragOver={(e) => e.preventDefault()}
             onDragLeave={handleContainerDragLeave}
@@ -1242,6 +1243,7 @@ export function Timeline() {
           {/* Playhead - spans from ruler through all tracks */}
           <div
             className="playhead"
+            data-ai-id="timeline-playhead"
             style={{ left: timeToPixel(playheadPosition) - scrollX + 150 }}
             onMouseDown={handlePlayheadMouseDown}
           >

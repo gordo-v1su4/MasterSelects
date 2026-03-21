@@ -23,10 +23,9 @@ describe('AI Tool Policy Registry', () => {
     }
   });
 
-  it('checkToolAccess returns allowed=false for deleteClip from devBridge', () => {
+  it('checkToolAccess returns allowed=true for deleteClip from devBridge', () => {
     const result = checkToolAccess('deleteClip', 'devBridge');
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toBeDefined();
+    expect(result.allowed).toBe(true);
   });
 
   it('checkToolAccess returns allowed=true for getTimelineState from devBridge', () => {
@@ -56,7 +55,7 @@ describe('AI Tool Policy Registry', () => {
     const readOnlyTools = [
       'getTimelineState', 'getClipDetails', 'getClipsInTimeRange',
       'getMediaItems', 'play', 'pause', 'undo', 'redo',
-      'captureFrame', 'getKeyframes', 'getMarkers', 'getMasks',
+      'simulateScrub', 'simulatePlayback', 'simulatePlaybackPath', 'captureFrame', 'getKeyframes', 'getMarkers', 'getMasks',
     ];
     for (const name of readOnlyTools) {
       const policy = getToolPolicy(name);
@@ -83,20 +82,27 @@ describe('AI Tool Policy Registry', () => {
     }
   });
 
-  it('high-risk mutating tools exclude devBridge from allowedCallers', () => {
+  it('high-risk mutating tools allow devBridge but still require confirmation', () => {
     const highRiskTools = [
       'deleteClip', 'deleteClips', 'deleteTrack', 'deleteMediaItem',
       'cutRangesFromClip', 'executeBatch', 'downloadAndImportVideo',
-      'importLocalFiles',
     ];
     for (const name of highRiskTools) {
       const policy = getToolPolicy(name);
       expect(policy, `Missing policy for ${name}`).toBeDefined();
       expect(
         policy!.allowedCallers.includes('devBridge'),
-        `${name} should not allow devBridge`
-      ).toBe(false);
+        `${name} should allow devBridge`
+      ).toBe(true);
+      expect(policy!.requiresConfirmation, `${name} should require confirmation`).toBe(true);
     }
+  });
+
+  it('importLocalFiles excludes devBridge even though it is high risk', () => {
+    const policy = getToolPolicy('importLocalFiles');
+    expect(policy).toBeDefined();
+    expect(policy!.requiresConfirmation).toBe(true);
+    expect(policy!.allowedCallers.includes('devBridge')).toBe(false);
   });
 
   it('mutating editor tools allow nativeHelper', () => {
@@ -118,8 +124,28 @@ describe('AI Tool Policy Registry', () => {
     }
   });
 
+  it('devBridge can access live telemetry tools', () => {
+    const bridgeTelemetryTools = ['getStats', 'getStatsHistory', 'getPlaybackTrace'];
+    for (const name of bridgeTelemetryTools) {
+      const result = checkToolAccess(name, 'devBridge');
+      expect(result.allowed, `devBridge should be able to access ${name}`).toBe(true);
+    }
+  });
+
+  it('devBridge can access playback simulation tools', () => {
+    for (const tool of ['simulateScrub', 'simulatePlayback', 'simulatePlaybackPath']) {
+      const result = checkToolAccess(tool, 'devBridge');
+      expect(result.allowed, `${tool} should be allowed for devBridge`).toBe(true);
+    }
+  });
+
+  it('devBridge can access getLogs', () => {
+    const result = checkToolAccess('getLogs', 'devBridge');
+    expect(result.allowed).toBe(true);
+  });
+
   it('sensitive and local file tools still exclude nativeHelper', () => {
-    const helperBlockedTools = ['getLogs', 'getPlaybackTrace', 'importLocalFiles'];
+    const helperBlockedTools = ['getLogs', 'getStats', 'getStatsHistory', 'getPlaybackTrace', 'importLocalFiles'];
     for (const name of helperBlockedTools) {
       const policy = getToolPolicy(name);
       expect(policy, `Missing policy for ${name}`).toBeDefined();
