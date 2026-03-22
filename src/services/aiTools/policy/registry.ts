@@ -112,6 +112,7 @@ const TOOL_POLICY_MAP = new Map<string, ToolPolicyEntry>([
   ['getStatsHistory', bridgeTelemetry()],
   ['getLogs', bridgeTelemetry()],
   ['getPlaybackTrace', bridgeTelemetry()],
+  ['reloadApp', bridgeTelemetry()],
 
   // ── LOCAL FILE ACCESS ─────────────────────────────────────────────────
   ['listLocalFiles', { ...localFileAccess(), readOnly: true }],

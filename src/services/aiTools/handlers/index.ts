@@ -207,6 +207,19 @@ const selfContainedHandlers: Record<string, (args: Record<string, unknown>) => P
   removeKeyframe: handleRemoveKeyframe,
   undo: handleUndo,
   redo: handleRedo,
+  // App control
+  reloadApp: async (args: Record<string, unknown>) => {
+    const mode = (args.mode as string) || 'hard';
+    const delayMs = typeof args.delayMs === 'number' ? args.delayMs : 100;
+    setTimeout(() => {
+      if (mode === 'hard') {
+        window.location.reload();
+      } else {
+        window.location.href = window.location.href;
+      }
+    }, delayMs);
+    return { success: true, data: { mode, delayMs, reloading: true } };
+  },
   // Stats
   getStats: handleGetStats,
   getStatsHistory: handleGetStatsHistory,

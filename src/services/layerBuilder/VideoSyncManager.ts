@@ -7,7 +7,6 @@ import { LAYER_BUILDER_CONSTANTS } from './types';
 import { createFrameContext, getClipTimeInfo, getMediaFileForClip } from './FrameContext';
 import {
   clearInternalPlaybackHold,
-  holdInternalPlaybackPosition,
   playheadState,
 } from './PlayheadState';
 import { layerPlaybackManager } from '../layerPlaybackManager';
@@ -2829,12 +2828,18 @@ export class VideoSyncManager {
 
     if (ctx.isPlaying) {
       const settle = scrubSettleState.get(clip.id);
-      const holdPlaybackTarget =
+      const settleActive =
         settle &&
         (settle.reason === 'scrub-stop' || settle.reason === 'manual-seek') &&
-        scrubSettleState.isPending(clip.id)
+        scrubSettleState.isPending(clip.id) &&
+        !scrubSettleState.isDue(clip.id);
+      const holdPlaybackTarget = settleActive
           ? settle.targetTime
           : null;
+      // Clean up expired settle entries
+      if (settle && scrubSettleState.isDue(clip.id)) {
+        scrubSettleState.resolve(clip.id);
+      }
       const useScrubRuntimeForHold =
         holdPlaybackTarget !== null && settle?.reason === 'scrub-stop';
       const preferredRuntimeSource =
@@ -2863,19 +2868,19 @@ export class VideoSyncManager {
           actualPlaybackProvider,
           holdPlaybackTarget
         );
-      const playbackTargetTime = holdScrubRelease
-        ? holdPlaybackTarget
-        : timeInfo.clipTime;
+      // Don't hold the playhead — let transport advance normally.
+      // The scrub provider's frame stays visible as a bridge until
+      // the playback provider produces its first frame.
+      const playbackTargetTime = timeInfo.clipTime;
 
-      if (holdScrubRelease) {
-        holdInternalPlaybackPosition(playbackTargetTime, clip.id);
-        // Start warming up the playback provider in the background while
-        // the scrub provider's frame is still being displayed. This way the
-        // playback decoder can work through the GOP so it's ready faster.
-        if (useScrubRuntimeForHold) {
-          updateRuntimePlaybackTime(playbackRuntimeSource, timeInfo.clipTime);
-        }
-      } else if (playheadState.heldPlaybackPosition !== null) {
+      if (holdScrubRelease && useScrubRuntimeForHold) {
+        // Warm up the playback provider in the background while the
+        // scrub provider's frame is still being displayed as preview.
+        updateRuntimePlaybackTime(playbackRuntimeSource, timeInfo.clipTime);
+        void ensureRuntimeFrameProvider(playbackRuntimeSource, 'interactive', timeInfo.clipTime);
+      }
+
+      if (playheadState.heldPlaybackPosition !== null) {
         clearInternalPlaybackHold(clip.id);
       }
 
@@ -2950,6 +2955,15 @@ export class VideoSyncManager {
         delete this.wcPreciseSeekTimers[`${clip.id}:scrub`];
         clearTimeout(this.wcPreciseSeekTimers[`${clip.id}:fallback`]);
         delete this.wcPreciseSeekTimers[`${clip.id}:fallback`];
+        // Begin settle state so the playing path can hold the scrub provider's
+        // frame while the playback decoder catches up (prevents black gap).
+        // Use a longer timeout than normal settle (800ms) to bridge the GOP decode gap.
+        scrubSettleState.begin(
+          clip.id,
+          timeInfo.clipTime,
+          800,
+          'scrub-stop'
+        );
       }
 
       const useDedicatedScrubProvider = ctx.isDraggingPlayhead;

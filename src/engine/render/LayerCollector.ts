@@ -514,6 +514,37 @@ export class LayerCollector {
           this.setCollectorState(layerReuseKey, 'drop', {
             reason: 'import_failed',
           });
+        } else if (
+          // Scrub-to-play bridge: if the main provider has no frame yet but the
+          // clip's own WebCodecs player still holds a frame from the scrub session,
+          // show that as a visual placeholder to avoid black frames.
+          clipProvider &&
+          clipProvider !== frameProvider &&
+          deps.isPlaying &&
+          scrubSettleState.isPending(layer.sourceClipId)
+        ) {
+          const bridgeFrame = clipProvider.getCurrentFrame?.();
+          if (bridgeFrame) {
+            const extTex = deps.textureManager.importVideoTexture(bridgeFrame);
+            if (extTex) {
+              this.setCollectorState(layerReuseKey, 'hold', {
+                reason: 'scrub_bridge_frame',
+              });
+              this.currentDecoder = 'WebCodecs';
+              this.hasVideo = true;
+              return {
+                layer,
+                isVideo: true,
+                externalTexture: extTex,
+                textureView: null,
+                sourceWidth: bridgeFrame.displayWidth,
+                sourceHeight: bridgeFrame.displayHeight,
+                displayedMediaTime: this.getFrameTimestampSeconds(bridgeFrame.timestamp, layer.source?.mediaTime),
+                targetMediaTime: layer.source?.mediaTime,
+                previewPath: 'webcodecs',
+              };
+            }
+          }
         } else {
           this.setCollectorState(layerReuseKey, 'drop', {
             reason: 'no_frame',
