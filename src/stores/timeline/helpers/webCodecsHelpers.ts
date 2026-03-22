@@ -5,6 +5,7 @@ import { WebCodecsPlayer } from '../../../engine/WebCodecsPlayer';
 import { engine } from '../../../engine/WebGPUEngine';
 import { flags } from '../../../engine/featureFlags';
 import { Logger } from '../../../services/logger';
+import { layerBuilder } from '../../../services/layerBuilder';
 
 const log = Logger.create('WebCodecsHelpers');
 
@@ -78,6 +79,9 @@ export async function initWebCodecsPlayer(
       useSimpleMode: !useFullMode,
       onFrame: () => {
         engine.requestNewFrameRender();
+        // Invalidate layer cache so the next render cycle picks up
+        // the newly decoded frame (critical for cold start after reload).
+        layerBuilder.invalidateCache();
       },
       onError: (error) => {
         log.warn('WebCodecs error', { error: error.message });
