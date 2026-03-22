@@ -1,4 +1,5 @@
 import { getUserBillingSnapshot } from '../../lib/billing';
+import { insertChatLog } from '../../lib/chatLog';
 import { getCreditLedgerEntryBySource, spendCredits } from '../../lib/credits';
 import { getCurrentUser, json, methodNotAllowed, parseJson } from '../../lib/db';
 import {
@@ -272,8 +273,11 @@ export const onRequest: AppRouteHandler = async (context: AppContext): Promise<R
     userId: hostedContext.user.id,
   });
 
+  const startTime = Date.now();
+
   try {
     const payload = await runHostedChatCompletion(context.env, providerBody);
+    const durationMs = Date.now() - startTime;
     const charge = await spendCredits(
       context.env.DB,
       hostedContext.user.id,
@@ -314,6 +318,23 @@ export const onRequest: AppRouteHandler = async (context: AppContext): Promise<R
       status: 'completed',
     });
 
+    // Log chat conversation (non-blocking)
+    context.waitUntil(
+      insertChatLog(context.env.DB, {
+        userId: hostedContext.user.id,
+        requestId,
+        idempotencyKey,
+        model: request.model,
+        messages: request.messages,
+        response: payload,
+        creditCost: charge.charged ? HOSTED_CHAT_CREDIT_COST : 0,
+        durationMs,
+        status: 'completed',
+      }).catch(() => {
+        // Chat logging is best-effort — never block the response
+      }),
+    );
+
     return json(
       buildRouteEnvelope({
         creditBalance: charge.balance,
@@ -330,7 +351,26 @@ export const onRequest: AppRouteHandler = async (context: AppContext): Promise<R
       }),
     );
   } catch (error) {
+    const durationMs = Date.now() - startTime;
     await completeUsageEvent(context.env.DB, idempotencyKey, { status: 'failed' });
+
+    // Log failed chat attempt (non-blocking)
+    context.waitUntil(
+      insertChatLog(context.env.DB, {
+        userId: hostedContext.user.id,
+        requestId,
+        idempotencyKey,
+        model: request.model,
+        messages: request.messages,
+        response: null,
+        creditCost: 0,
+        durationMs,
+        status: 'failed',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      }).catch(() => {
+        // Chat logging is best-effort
+      }),
+    );
 
     return json(
       buildRouteEnvelope({
