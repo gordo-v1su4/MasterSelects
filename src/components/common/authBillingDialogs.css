@@ -173,7 +173,7 @@
 
 /* ─── Auth Dialog (Changelog-style floating) ─── */
 
-.auth-dialog {
+.welcome-overlay.auth-dialog {
   width: 640px;
   max-width: 90vw;
   max-height: 85vh;
@@ -183,7 +183,6 @@
   flex-direction: column;
   align-items: stretch;
   color: var(--text-primary, #f2f5ff);
-  /* Strip .welcome-overlay card — match .changelog-dialog */
   background: transparent;
   border: none;
   box-shadow: none;
@@ -407,7 +406,7 @@
 }
 
 /* Wide variant for Account + Pricing */
-.auth-dialog-wide {
+.welcome-overlay.auth-dialog-wide {
   width: 680px;
 }
 
