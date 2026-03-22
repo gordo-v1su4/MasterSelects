@@ -6,6 +6,18 @@ interface PortalRequestBody {
   returnUrl?: string;
 }
 
+/** Only allow redirect URLs that point back to our own origin. */
+function safeReturnUrl(candidate: string | undefined, origin: string): string {
+  const trimmed = candidate?.trim();
+  if (!trimmed) return origin;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.origin === origin ? trimmed : origin;
+  } catch {
+    return origin;
+  }
+}
+
 async function getStripeCustomerId(db: AppContext['env']['DB'], userId: string): Promise<string | null> {
   try {
     return (
@@ -65,7 +77,8 @@ export const onRequest: AppRouteHandler = async (context: AppContext): Promise<R
     );
   }
 
-  const returnUrl = body.returnUrl?.trim() || new URL(context.request.url).origin;
+  const origin = new URL(context.request.url).origin;
+  const returnUrl = safeReturnUrl(body.returnUrl, origin);
 
   try {
     const session = await createStripePortalSession(stripeConfig, {

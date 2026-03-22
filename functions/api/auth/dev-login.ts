@@ -28,6 +28,13 @@ export const onRequest: AppRouteHandler = async (context: AppContext): Promise<R
     return new Response(null, { status: 404 });
   }
 
+  // ── Gate: localhost origin only ───────────────────────────────────
+  const origin = context.request.headers.get('Origin') ?? context.request.headers.get('Referer') ?? '';
+  const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(origin);
+  if (!isLocalhost) {
+    return new Response(null, { status: 404 });
+  }
+
   if (context.request.method !== 'POST') {
     return methodNotAllowed(['POST']);
   }

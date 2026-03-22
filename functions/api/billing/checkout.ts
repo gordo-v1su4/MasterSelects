@@ -13,6 +13,18 @@ interface CheckoutRequestBody {
   successUrl?: string;
 }
 
+/** Only allow redirect URLs that point back to our own origin. */
+function safeUrl(candidate: string | undefined, origin: string, fallback: string): string {
+  const trimmed = candidate?.trim();
+  if (!trimmed) return fallback;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.origin === origin ? trimmed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function getStripeCustomerId(db: AppContext['env']['DB'], userId: string): Promise<string | null> {
   try {
     return (
@@ -75,8 +87,8 @@ export const onRequest: AppRouteHandler = async (context: AppContext): Promise<R
   }
 
   const origin = new URL(context.request.url).origin;
-  const successUrl = body.successUrl?.trim() || `${origin}/?billing=success&plan=${encodeURIComponent(planId)}`;
-  const cancelUrl = body.cancelUrl?.trim() || `${origin}/?billing=cancel`;
+  const successUrl = safeUrl(body.successUrl, origin, `${origin}/?billing=success&plan=${encodeURIComponent(planId)}`);
+  const cancelUrl = safeUrl(body.cancelUrl, origin, `${origin}/?billing=cancel`);
   const customerId = await getStripeCustomerId(context.env.DB, user.id);
   const quantity = Number.isFinite(body.quantity) ? Math.max(1, Math.floor(body.quantity ?? 1)) : 1;
 
