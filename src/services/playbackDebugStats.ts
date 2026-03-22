@@ -5,6 +5,23 @@ import type { VFPipelineEvent } from './vfPipelineMonitor';
 export type PlaybackDebugStats = NonNullable<EngineStats['playback']>;
 export type PlaybackPipeline = PlaybackDebugStats['pipeline'];
 
+export interface PlaybackRunStartupStats {
+  firstDecodeOutputMs?: number;
+  firstPreviewFrameMs?: number;
+  firstPreviewUpdateMs?: number;
+  startupCatchUpMs?: number;
+  initialTargetMovedStaleFrames: number;
+  initialTargetMovedStaleMs: number;
+}
+
+export interface PlaybackRunDiagnostics {
+  windowMs: number;
+  playback: PlaybackDebugStats;
+  startup: PlaybackRunStartupStats;
+  wcEventCount: number;
+  vfEventCount: number;
+}
+
 export interface PlaybackHealthVideoState {
   clipId: string;
   src: string;
@@ -139,6 +156,80 @@ function getNumericDetail(
 function incrementCount(counts: Record<string, number>, key: string | undefined): void {
   const safeKey = key && key.trim().length > 0 ? key : 'unknown';
   counts[safeKey] = (counts[safeKey] ?? 0) + 1;
+}
+
+function filterEventsInRange<T extends { t: number }>(
+  events: T[],
+  startMs: number,
+  endMs: number
+): T[] {
+  return events.filter((event) => event.t >= startMs && event.t <= endMs);
+}
+
+function summarizeRunStartup(
+  startMs: number,
+  endMs: number,
+  wcEvents: PipelineEvent[],
+  vfEvents: VFPipelineEvent[]
+): PlaybackRunStartupStats {
+  const firstDecodeOutput = wcEvents.find((event) => event.type === 'decode_output');
+  const previewEvents = vfEvents.filter((event) => event.type === 'vf_preview_frame');
+  const firstPreviewFrame = previewEvents[0];
+  const firstPreviewUpdate = previewEvents.find(
+    (event) => event.detail?.changed === 'true'
+  );
+
+  let initialTargetMovedStaleFrames = 0;
+  let initialTargetMovedStaleStartMs: number | null = null;
+
+  for (const event of previewEvents) {
+    const changed = event.detail?.changed === 'true';
+    if (changed) {
+      break;
+    }
+    if (event.detail?.targetMoved === 'true') {
+      initialTargetMovedStaleFrames++;
+      if (initialTargetMovedStaleStartMs === null) {
+        initialTargetMovedStaleStartMs = event.t;
+      }
+    }
+  }
+
+  const firstPreviewUpdateMs =
+    firstPreviewUpdate ? round(Math.max(0, firstPreviewUpdate.t - startMs), 1) : undefined;
+  const startupCatchUpMs =
+    initialTargetMovedStaleFrames > 0
+      ? round(
+        Math.max(
+          0,
+          (firstPreviewUpdate?.t ?? endMs) - startMs
+        ),
+        1
+      )
+      : undefined;
+  const initialTargetMovedStaleMs =
+    initialTargetMovedStaleFrames > 0 && initialTargetMovedStaleStartMs !== null
+      ? round(
+        Math.max(
+          0,
+          (firstPreviewUpdate?.t ?? endMs) - initialTargetMovedStaleStartMs
+        ),
+        1
+      )
+      : 0;
+
+  return {
+    firstDecodeOutputMs: firstDecodeOutput
+      ? round(Math.max(0, firstDecodeOutput.t - startMs), 1)
+      : undefined,
+    firstPreviewFrameMs: firstPreviewFrame
+      ? round(Math.max(0, firstPreviewFrame.t - startMs), 1)
+      : undefined,
+    firstPreviewUpdateMs,
+    startupCatchUpMs,
+    initialTargetMovedStaleFrames,
+    initialTargetMovedStaleMs,
+  };
 }
 
 export function summarizeFrameCadence(timestamps: number[]): FrameCadenceSummary {
@@ -568,6 +659,35 @@ export function buildPlaybackDebugStats(params: {
     scrubPathCounts: {},
   };
 
+  const previewTelemetry = {
+    previewFrames: vfSummary.previewFrames,
+    previewUpdates: vfSummary.previewUpdates,
+    previewRenderFps: vfSummary.previewRenderCadence.cadenceFps,
+    previewUpdateFps: vfSummary.previewUpdateCadence.cadenceFps,
+    avgPreviewRenderGapMs: vfSummary.previewRenderCadence.avgFrameGapMs,
+    p95PreviewRenderGapMs: vfSummary.previewRenderCadence.p95FrameGapMs,
+    maxPreviewRenderGapMs: vfSummary.previewRenderCadence.maxFrameGapMs,
+    avgPreviewUpdateGapMs: vfSummary.previewUpdateCadence.avgFrameGapMs,
+    p95PreviewUpdateGapMs: vfSummary.previewUpdateCadence.p95FrameGapMs,
+    maxPreviewUpdateGapMs: vfSummary.previewUpdateCadence.maxFrameGapMs,
+    stalePreviewFrames: vfSummary.stalePreviewFrames,
+    stalePreviewWhileTargetMoved: vfSummary.stalePreviewWhileTargetMoved,
+    previewFreezeEvents: vfSummary.previewFreezeEvents,
+    previewFreezeFrames: vfSummary.previewFreezeFrames,
+    longestPreviewFreezeFrames: vfSummary.longestPreviewFreezeFrames,
+    longestPreviewFreezeMs: vfSummary.longestPreviewFreezeMs,
+    avgPreviewDriftMs: vfSummary.avgPreviewDriftMs,
+    maxPreviewDriftMs: vfSummary.maxPreviewDriftMs,
+    avgAudioDriftMs: vfSummary.avgAudioDriftMs,
+    lastPreviewFreezePath: vfSummary.lastPreviewFreezePath,
+    lastPreviewFreezeClipId: vfSummary.lastPreviewFreezeClipId,
+    lastPreviewFreezeDurationMs: vfSummary.lastPreviewFreezeDurationMs,
+    previewPathCounts: vfSummary.previewPathCounts,
+    scrubPathCounts: vfSummary.scrubPathCounts,
+  };
+
+  Object.assign(base, previewTelemetry);
+
   if (pipeline === 'webcodecs') {
     Object.assign(base, wcSummary.cadence, {
       stalls: wcSummary.stalls,
@@ -588,41 +708,55 @@ export function buildPlaybackDebugStats(params: {
     });
   } else if (pipeline === 'vf' || pipeline === 'html') {
     Object.assign(base, vfSummary.cadence, {
-      previewFrames: vfSummary.previewFrames,
-      previewUpdates: vfSummary.previewUpdates,
-      previewRenderFps: vfSummary.previewRenderCadence.cadenceFps,
-      previewUpdateFps: vfSummary.previewUpdateCadence.cadenceFps,
-      avgPreviewRenderGapMs: vfSummary.previewRenderCadence.avgFrameGapMs,
-      p95PreviewRenderGapMs: vfSummary.previewRenderCadence.p95FrameGapMs,
-      maxPreviewRenderGapMs: vfSummary.previewRenderCadence.maxFrameGapMs,
-      avgPreviewUpdateGapMs: vfSummary.previewUpdateCadence.avgFrameGapMs,
-      p95PreviewUpdateGapMs: vfSummary.previewUpdateCadence.p95FrameGapMs,
-      maxPreviewUpdateGapMs: vfSummary.previewUpdateCadence.maxFrameGapMs,
-      stalePreviewFrames: vfSummary.stalePreviewFrames,
-      stalePreviewWhileTargetMoved: vfSummary.stalePreviewWhileTargetMoved,
-      previewFreezeEvents: vfSummary.previewFreezeEvents,
-      previewFreezeFrames: vfSummary.previewFreezeFrames,
-      longestPreviewFreezeFrames: vfSummary.longestPreviewFreezeFrames,
-      longestPreviewFreezeMs: vfSummary.longestPreviewFreezeMs,
-      avgPreviewDriftMs: vfSummary.avgPreviewDriftMs,
-      maxPreviewDriftMs: vfSummary.maxPreviewDriftMs,
       stalls: vfSummary.stalls,
       seeks: vfSummary.seeks,
       advanceSeeks: vfSummary.advanceSeeks,
       driftCorrections: vfSummary.driftCorrections,
       readyStateDrops: vfSummary.readyStateDrops,
       avgSeekLatencyMs: vfSummary.avgSeekLatencyMs,
-      avgAudioDriftMs: vfSummary.avgAudioDriftMs,
-      lastPreviewFreezePath: vfSummary.lastPreviewFreezePath,
-      lastPreviewFreezeClipId: vfSummary.lastPreviewFreezeClipId,
-      lastPreviewFreezeDurationMs: vfSummary.lastPreviewFreezeDurationMs,
-      previewPathCounts: vfSummary.previewPathCounts,
-      scrubPathCounts: vfSummary.scrubPathCounts,
     });
   }
 
   return {
     ...base,
     status: derivePlaybackStatus(base),
+  };
+}
+
+export function buildPlaybackRunDiagnostics(params: {
+  decoder: EngineStats['decoder'];
+  startMs: number;
+  endMs: number;
+  wcEvents?: PipelineEvent[];
+  vfEvents?: VFPipelineEvent[];
+  healthVideos?: PlaybackHealthVideoState[];
+  healthAnomalies?: PlaybackHealthAnomaly[];
+}): PlaybackRunDiagnostics {
+  const windowMs = Math.max(1, params.endMs - params.startMs);
+  const wcEvents = filterEventsInRange(
+    params.wcEvents ?? [],
+    params.startMs,
+    params.endMs
+  );
+  const vfEvents = filterEventsInRange(
+    params.vfEvents ?? [],
+    params.startMs,
+    params.endMs
+  );
+
+  return {
+    windowMs: round(windowMs, 1),
+    playback: buildPlaybackDebugStats({
+      decoder: params.decoder,
+      now: params.endMs,
+      windowMs,
+      wcTimeline: wcEvents,
+      vfTimeline: vfEvents,
+      healthVideos: params.healthVideos,
+      healthAnomalies: params.healthAnomalies,
+    }),
+    startup: summarizeRunStartup(params.startMs, params.endMs, wcEvents, vfEvents),
+    wcEventCount: wcEvents.length,
+    vfEventCount: vfEvents.length,
   };
 }

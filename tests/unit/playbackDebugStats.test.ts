@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildPlaybackRunDiagnostics,
   buildPlaybackDebugStats,
   summarizeFrameCadence,
 } from '../../src/services/playbackDebugStats';
@@ -113,6 +114,67 @@ describe('playback debug stats', () => {
     expect(stats.status).toBe('ok');
   });
 
+  it('includes preview telemetry in the top-level snapshot for webcodecs playback', () => {
+    const wcTimeline: PipelineEvent[] = [
+      { type: 'decode_feed', t: 0 },
+      { type: 'decode_output', t: 8, detail: { queueSize: 1 } },
+      { type: 'queue_pressure', t: 12, detail: { queueSize: 3 } },
+    ];
+    const vfTimeline: VFPipelineEvent[] = [
+      { type: 'vf_preview_frame', t: 0, detail: { changed: 'false', targetMoved: 'true', driftMs: 45, previewPath: 'video', clipId: 'clip-1' } },
+      { type: 'vf_preview_frame', t: 16, detail: { changed: 'false', targetMoved: 'true', driftMs: 55, previewPath: 'video', clipId: 'clip-1' } },
+      { type: 'vf_preview_frame', t: 33, detail: { changed: 'true', targetMoved: 'true', driftMs: 8, previewPath: 'live-import', clipId: 'clip-1' } },
+      { type: 'vf_scrub_path', t: 40, detail: { path: 'video' } },
+      { type: 'audio_drift', t: 44, detail: { driftMs: 72 } },
+    ];
+
+    const stats = buildPlaybackDebugStats({
+      decoder: 'WebCodecs',
+      now: 60,
+      windowMs: 500,
+      wcTimeline,
+      vfTimeline,
+      healthVideos: [
+        {
+          clipId: 'clip-1',
+          src: 'demo.mp4',
+          currentTime: 1,
+          readyState: 4,
+          seeking: false,
+          paused: false,
+          played: 1,
+          warmingUp: false,
+          gpuReady: true,
+        },
+      ],
+    });
+
+    expect(stats.pipeline).toBe('webcodecs');
+    expect(stats.frameEvents).toBe(1);
+    expect(stats.queuePressureEvents).toBe(1);
+    expect(stats.previewFrames).toBe(3);
+    expect(stats.previewUpdates).toBe(1);
+    expect(stats.stalePreviewFrames).toBe(2);
+    expect(stats.stalePreviewWhileTargetMoved).toBe(2);
+    expect(stats.previewFreezeEvents).toBe(1);
+    expect(stats.previewFreezeFrames).toBe(2);
+    expect(stats.longestPreviewFreezeFrames).toBe(2);
+    expect(stats.longestPreviewFreezeMs).toBe(16);
+    expect(stats.lastPreviewFreezePath).toBe('video');
+    expect(stats.lastPreviewFreezeClipId).toBe('clip-1');
+    expect(stats.lastPreviewFreezeDurationMs).toBe(16);
+    expect(stats.previewPathCounts).toEqual({
+      video: 2,
+      'live-import': 1,
+    });
+    expect(stats.scrubPathCounts).toEqual({
+      video: 1,
+    });
+    expect(stats.avgPreviewDriftMs).toBe(36);
+    expect(stats.maxPreviewDriftMs).toBe(55);
+    expect(stats.avgAudioDriftMs).toBe(72);
+  });
+
   it('marks VF playback unhealthy when readyState drops and audio drift show up', () => {
     const vfTimeline: VFPipelineEvent[] = [
       { type: 'vf_capture', t: 0 },
@@ -215,5 +277,69 @@ describe('playback debug stats', () => {
     });
     expect(stats.avgPreviewDriftMs).toBeCloseTo(154.6, 1);
     expect(stats.maxPreviewDriftMs).toBe(220);
+  });
+
+  it('builds run-scoped startup diagnostics so an initial preview catch-up is visible', () => {
+    const wcTimeline: PipelineEvent[] = [
+      { type: 'decode_feed', t: 1000 },
+      { type: 'decode_output', t: 1030, detail: { queueSize: 1 } },
+      { type: 'decode_feed', t: 1066 },
+      { type: 'decode_output', t: 1098, detail: { queueSize: 1 } },
+    ];
+    const vfTimeline: VFPipelineEvent[] = [
+      {
+        type: 'vf_preview_frame',
+        t: 1012,
+        detail: { changed: 'false', targetMoved: 'true', driftMs: 240, previewPath: 'webcodecs', clipId: 'clip-1' },
+      },
+      {
+        type: 'vf_preview_frame',
+        t: 1045,
+        detail: { changed: 'false', targetMoved: 'true', driftMs: 180, previewPath: 'webcodecs', clipId: 'clip-1' },
+      },
+      {
+        type: 'vf_preview_frame',
+        t: 1084,
+        detail: { changed: 'true', targetMoved: 'true', driftMs: 12, previewPath: 'webcodecs', clipId: 'clip-1' },
+      },
+      {
+        type: 'vf_preview_frame',
+        t: 1120,
+        detail: { changed: 'true', targetMoved: 'true', driftMs: 8, previewPath: 'webcodecs', clipId: 'clip-1' },
+      },
+    ];
+
+    const diagnostics = buildPlaybackRunDiagnostics({
+      decoder: 'WebCodecs',
+      startMs: 1000,
+      endMs: 1200,
+      wcEvents: wcTimeline,
+      vfEvents: vfTimeline,
+      healthVideos: [
+        {
+          clipId: 'clip-1',
+          src: 'demo.mp4',
+          currentTime: 1.2,
+          readyState: 4,
+          seeking: false,
+          paused: false,
+          played: 1,
+          warmingUp: false,
+          gpuReady: true,
+        },
+      ],
+    });
+
+    expect(diagnostics.windowMs).toBe(200);
+    expect(diagnostics.wcEventCount).toBe(4);
+    expect(diagnostics.vfEventCount).toBe(4);
+    expect(diagnostics.playback.previewFrames).toBe(4);
+    expect(diagnostics.playback.previewFreezeEvents).toBe(1);
+    expect(diagnostics.startup.firstDecodeOutputMs).toBe(30);
+    expect(diagnostics.startup.firstPreviewFrameMs).toBe(12);
+    expect(diagnostics.startup.firstPreviewUpdateMs).toBe(84);
+    expect(diagnostics.startup.startupCatchUpMs).toBe(84);
+    expect(diagnostics.startup.initialTargetMovedStaleFrames).toBe(2);
+    expect(diagnostics.startup.initialTargetMovedStaleMs).toBe(72);
   });
 });

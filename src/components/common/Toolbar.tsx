@@ -6,15 +6,16 @@ import { Logger } from '../../services/logger';
 
 const log = Logger.create('Toolbar');
 import { useEngine } from '../../hooks/useEngine';
-import { useEngineStore } from '../../stores/engineStore';
 import { useDockStore } from '../../stores/dockStore';
 import { PANEL_CONFIGS, AI_PANEL_TYPES, SCOPE_PANEL_TYPES, WIP_PANEL_TYPES, type PanelType } from '../../types/dock';
 import { useSettingsStore, type AutosaveInterval } from '../../stores/settingsStore';
 import { useRenderTargetStore } from '../../stores/renderTargetStore';
-import { useMIDI } from '../../hooks/useMIDI';
+import { useAccountStore } from '../../stores/accountStore';
 import { SettingsDialog } from './SettingsDialog';
 import { SavedToast } from './SavedToast';
 import { InfoDialog } from './InfoDialog';
+import { LegalDialog } from './LegalDialog';
+import type { LegalPage } from './LegalDialog';
 import { NativeHelperStatus } from './NativeHelperStatus';
 import { projectFileService } from '../../services/projectFileService';
 import { useMediaStore } from '../../stores/mediaStore';
@@ -26,18 +27,17 @@ import {
   setupAutoSync,
   syncStoresToProject,
 } from '../../services/projectSync';
-import { APP_VERSION } from '../../version';
 import { openOutputManager } from '../outputManager/OutputManagerBoot';
 
-type MenuId = 'file' | 'edit' | 'view' | 'output' | 'window' | 'info' | null;
+type MenuId = 'file' | 'edit' | 'view' | 'output' | 'info' | null;
 
 interface ToolbarProps {
   onOpenChangelog?: () => void;
+  onOpenSplash?: () => void;
 }
 
-export function Toolbar({ onOpenChangelog }: ToolbarProps) {
+export function Toolbar({ onOpenChangelog, onOpenSplash }: ToolbarProps) {
   const { isEngineReady, createOutputWindow } = useEngine();
-  const gpuInfo = useEngineStore(s => s.gpuInfo);
   const targets = useRenderTargetStore((s) => s.targets);
   const outputTargets = useMemo(() => {
     const result: { id: string; name: string }[] = [];
@@ -52,7 +52,11 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
     togglePanelType: s.togglePanelType,
     saveLayoutAsDefault: s.saveLayoutAsDefault,
   })));
-  const { isSupported: midiSupported, isEnabled: midiEnabled, enableMIDI, disableMIDI, devices } = useMIDI();
+  const accountCredits = useAccountStore((s) => s.creditBalance);
+  const accountSession = useAccountStore((s) => s.session);
+  const accountUser = useAccountStore((s) => s.user);
+  const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
+  const openAuthDialog = useAccountStore((s) => s.openAuthDialog);
   const {
     isSettingsOpen, openSettings, closeSettings,
     autosaveEnabled, setAutosaveEnabled,
@@ -77,6 +81,7 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
   const [pendingProjectName, setPendingProjectName] = useState<string | null>(null);
   const [showSavedToast, setShowSavedToast] = useState(false);
   const [showInfoDialog, setShowInfoDialog] = useState(false);
+  const [showLegalDialog, setShowLegalDialog] = useState<LegalPage | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
   const menuBarRef = useRef<HTMLDivElement>(null);
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -141,70 +146,6 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openMenu]);
-
-  // Keyboard shortcut handler
-  // Global keyboard shortcuts - must prevent default FIRST
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-
-      // Ctrl+S / Ctrl+Shift+S: Always prevent browser save dialog
-      if ((e.ctrlKey || e.metaKey) && key === 's') {
-        e.preventDefault();
-        e.stopPropagation();
-
-        // Skip if in input field
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-        if (e.shiftKey) {
-          // Save As
-          const name = prompt('Save project as:', projectName || 'New Project');
-          if (name) {
-            createNewProject(name).then(success => {
-              if (success) {
-                setProjectName(name);
-                setIsProjectOpen(true);
-                setShowSavedToast(true);
-              }
-            });
-          }
-        } else {
-          // Save
-          if (!projectFileService.isProjectOpen()) {
-            const name = prompt('Enter project name:', 'New Project');
-            if (name) {
-              createNewProject(name).then(success => {
-                if (success) {
-                  setProjectName(name);
-                  setIsProjectOpen(true);
-                  setShowSavedToast(true);
-                }
-              });
-            }
-          } else {
-            saveCurrentProject().then(() => setShowSavedToast(true));
-          }
-        }
-        return;
-      }
-
-      // Skip other shortcuts if in input field
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      // Ctrl+N: New
-      if ((e.ctrlKey || e.metaKey) && key === 'n') {
-        e.preventDefault();
-        handleNew();
-      }
-      // Ctrl+O: Open
-      if ((e.ctrlKey || e.metaKey) && key === 'o') {
-        e.preventDefault();
-        handleOpen();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown, true); // Use capture phase
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [projectName]);
 
   const handleSave = useCallback(async (showToast = true) => {
     if (!projectFileService.isProjectOpen()) {
@@ -352,6 +293,74 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
     setIsLoading(false);
     setOpenMenu(null);
   }, []);
+
+  // Keyboard shortcut handler
+  // Global keyboard shortcuts - must prevent default FIRST
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+
+      if (!key) {
+        return;
+      }
+
+      // Ctrl+S / Ctrl+Shift+S: Always prevent browser save dialog
+      if ((e.ctrlKey || e.metaKey) && key === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Skip if in input field
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+        if (e.shiftKey) {
+          // Save As
+          const name = prompt('Save project as:', projectName || 'New Project');
+          if (name) {
+            createNewProject(name).then(success => {
+              if (success) {
+                setProjectName(name);
+                setIsProjectOpen(true);
+                setShowSavedToast(true);
+              }
+            });
+          }
+        } else {
+          // Save
+          if (!projectFileService.isProjectOpen()) {
+            const name = prompt('Enter project name:', 'New Project');
+            if (name) {
+              createNewProject(name).then(success => {
+                if (success) {
+                  setProjectName(name);
+                  setIsProjectOpen(true);
+                  setShowSavedToast(true);
+                }
+              });
+            }
+          } else {
+            saveCurrentProject().then(() => setShowSavedToast(true));
+          }
+        }
+        return;
+      }
+
+      // Skip other shortcuts if in input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.ctrlKey || e.metaKey) && key === 'n') {
+        e.preventDefault();
+        handleNew();
+      }
+
+      if ((e.ctrlKey || e.metaKey) && key === 'o') {
+        e.preventDefault();
+        handleOpen();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [handleNew, handleOpen, projectName]);
 
   // Handle restoring permission for pending project
   const handleRestorePermission = useCallback(async () => {
@@ -716,31 +725,6 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
           )}
         </div>
 
-        {/* Window Menu */}
-        <div className="menu-item">
-          <button
-            className={`menu-trigger ${openMenu === 'window' ? 'active' : ''}`}
-            onClick={() => handleMenuClick('window')}
-            onMouseEnter={() => handleMenuHover('window')}
-          >
-            Window
-          </button>
-          {openMenu === 'window' && (
-            <div className="menu-dropdown">
-              {midiSupported ? (
-                <button
-                  className={`menu-option ${midiEnabled ? 'checked' : ''}`}
-                  onClick={() => { if (midiEnabled) { disableMIDI(); } else { enableMIDI(); } closeMenu(); }}
-                >
-                  <span>{midiEnabled ? '✓ ' : '   '}MIDI Control {midiEnabled && devices.length > 0 ? `(${devices.length} devices)` : ''}</span>
-                </button>
-              ) : (
-                <span className="menu-option disabled">MIDI not supported</span>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* Info Menu */}
         <div className="menu-item">
           <button
@@ -767,8 +751,18 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
                 <span>Changelog</span>
               </button>
               <div className="menu-separator" />
-              <button className="menu-option" onClick={() => { setShowInfoDialog(true); closeMenu(); }}>
+              <button className="menu-option" onClick={() => { onOpenSplash?.(); closeMenu(); }}>
                 <span>About</span>
+              </button>
+              <div className="menu-separator" />
+              <button className="menu-option" onClick={() => { setShowLegalDialog('imprint'); closeMenu(); }}>
+                <span>Imprint</span>
+              </button>
+              <button className="menu-option" onClick={() => { setShowLegalDialog('privacy'); closeMenu(); }}>
+                <span>Privacy Policy</span>
+              </button>
+              <button className="menu-option" onClick={() => { setShowLegalDialog('contact'); closeMenu(); }}>
+                <span>Contact</span>
               </button>
             </div>
           )}
@@ -778,24 +772,37 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
       {/* Spacer */}
       <div className="toolbar-spacer" />
 
-      {/* Center - Version Info */}
-      <div className="toolbar-center">
-        <span style={{ color: '#ff6b6b', fontSize: '11px' }}>
-          Work in Progress - Expect Bugs!
-        </span>
-        <span className="version">v{APP_VERSION}</span>
-      </div>
+      {/* Center */}
+      <div className="toolbar-center" />
 
       {/* Spacer */}
       <div className="toolbar-spacer" />
 
       {/* Status */}
       <div className="toolbar-section toolbar-right">
+        {accountSession?.authenticated && (
+          <button
+            className="toolbar-credit-pill"
+            onClick={openAccountDialog}
+            title={`${accountCredits} credits available`}
+            type="button"
+          >
+            <span className="toolbar-credit-pill-label">Credits</span>
+            <strong className="toolbar-credit-pill-value">{accountCredits}</strong>
+          </button>
+        )}
+        <button
+          className="menu-trigger"
+          onClick={() => (accountSession?.authenticated ? openAccountDialog() : openAuthDialog())}
+          type="button"
+        >
+          {accountSession?.authenticated ? (accountUser?.email?.split('@')[0] || 'Account') : 'Sign in'}
+        </button>
         <NativeHelperStatus />
 
-        <span className={`status ${isEngineReady ? 'ready' : 'loading'}`} title={gpuInfo?.description || ''}>
-          {isEngineReady ? `● WebGPU ${gpuInfo ? `(${gpuInfo.vendor})` : ''}` : '○ Loading...'}
-        </span>
+        {!isEngineReady && (
+          <span className="status loading">○ Loading...</span>
+        )}
       </div>
 
       {/* Settings Dialog */}
@@ -825,6 +832,9 @@ export function Toolbar({ onOpenChangelog }: ToolbarProps) {
 
       {/* Info Dialog */}
       {showInfoDialog && <InfoDialog onClose={() => setShowInfoDialog(false)} />}
+
+      {/* Legal Dialog */}
+      {showLegalDialog && <LegalDialog initialPage={showLegalDialog} onClose={() => setShowLegalDialog(null)} />}
     </div>
   );
 }

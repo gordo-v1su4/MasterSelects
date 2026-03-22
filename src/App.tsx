@@ -10,10 +10,14 @@ const SHOW_CHANGELOG = typeof __SHOW_CHANGELOG__ !== 'undefined' ? __SHOW_CHANGE
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Toolbar } from './components';
 import { DockContainer } from './components/dock';
+import { AccountDialog } from './components/common/AccountDialog';
+import { AuthDialog } from './components/common/AuthDialog';
 import { WelcomeOverlay } from './components/common/WelcomeOverlay';
 import { WhatsNewDialog } from './components/common/WhatsNewDialog';
+import { SplashScreen } from './components/common/SplashScreen';
 import { IndexedDBErrorDialog } from './components/common/IndexedDBErrorDialog';
 import { LinuxVulkanWarning } from './components/common/LinuxVulkanWarning';
+import { PricingDialog } from './components/common/PricingDialog';
 import { TutorialOverlay } from './components/common/TutorialOverlay';
 import { TutorialCampaignDialog } from './components/common/TutorialCampaignDialog';
 import { getCampaignById } from './components/common/tutorialCampaigns';
@@ -23,6 +27,7 @@ import { useTheme } from './hooks/useTheme';
 import { useGlobalHistory } from './hooks/useGlobalHistory';
 import { useClipPanelSync } from './hooks/useClipPanelSync';
 import { useIsMobile, useForceMobile } from './hooks/useIsMobile';
+import { useAccountStore } from './stores/accountStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { projectDB } from './services/projectDB';
 import { projectFileService } from './services/projectFileService';
@@ -61,8 +66,10 @@ function App() {
   const [hasStoredProject, setHasStoredProject] = useState(false);
   const [manuallyDismissed, setManuallyDismissed] = useState(false);
 
-  // What's New dialog state - show on every refresh or once per update after welcome
-  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  // Splash screen state - shown on startup with video + notices
+  const [showSplash, setShowSplash] = useState(false);
+  // Changelog dialog state - full changelog with calendar + all changes
+  const [showChangelog, setShowChangelog] = useState(false);
   const showChangelogOnStartup = useSettingsStore((s) => s.showChangelogOnStartup);
   const lastSeenChangelogVersion = useSettingsStore((s) => s.lastSeenChangelogVersion);
 
@@ -87,6 +94,41 @@ function App() {
   useEffect(() => {
     loadApiKeys();
   }, [loadApiKeys]);
+
+  const accountDialog = useAccountStore((s) => s.dialog);
+  const closeAccountDialog = useAccountStore((s) => s.closeDialog);
+  const isAccountInitialized = useAccountStore((s) => s.isInitialized);
+  const loadAccountState = useAccountStore((s) => s.loadAccountState);
+  const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
+  useEffect(() => {
+    void loadAccountState();
+  }, [loadAccountState]);
+
+  useEffect(() => {
+    if (!isAccountInitialized) {
+      return;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    const authStatus = currentUrl.searchParams.get('auth');
+    const billingStatus = currentUrl.searchParams.get('billing');
+
+    if (authStatus !== 'success' && billingStatus !== 'success') {
+      return;
+    }
+
+    const finalize = async () => {
+      await loadAccountState();
+      openAccountDialog();
+
+      currentUrl.searchParams.delete('auth');
+      currentUrl.searchParams.delete('billing');
+      currentUrl.searchParams.delete('plan');
+      window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+    };
+
+    void finalize();
+  }, [isAccountInitialized, loadAccountState, openAccountDialog]);
 
   // Check for stored project on mount, then poll for changes
   // This handles the case where Toolbar's restore fails and clears handles
@@ -144,34 +186,46 @@ function App() {
   const shouldShowChangelogOnStartup = SHOW_CHANGELOG
     && shouldAutoShowChangelog(showChangelogOnStartup, lastSeenChangelogVersion, APP_VERSION);
 
-  // Show What's New dialog after initial check (when no welcome overlay)
+  // Show Splash screen after initial check (when no welcome overlay)
   // This effect intentionally sets state based on derived conditions
   useEffect(() => {
     if (!shouldShowChangelogOnStartup) return;
     if (isChecking) return;
 
-    // If welcome is showing, don't show What's New yet
+    // If welcome is showing, don't show splash yet
     if (showWelcome) return;
 
-    // Show What's New dialog - this is intentional state sync, not a cascading render
+    // Show splash screen - this is intentional state sync, not a cascading render
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setShowWhatsNew(true);
+    setShowSplash(true);
   }, [isChecking, showWelcome, shouldShowChangelogOnStartup]);
 
   const handleWelcomeComplete = useCallback(() => {
     setManuallyDismissed(true);
     setHasStoredProject(true); // Project was just created
-    // After welcome, show What's New with small delay for animation
+    // After welcome, show splash screen with small delay for animation
     if (shouldShowChangelogOnStartup) {
-      setTimeout(() => setShowWhatsNew(true), 300);
+      setTimeout(() => setShowSplash(true), 300);
     } else if (!hasSeenTutorial) {
-      // No changelog → start tutorial directly
+      // No splash → start tutorial directly
       setTimeout(() => setShowTutorial(true), 200);
     }
   }, [hasSeenTutorial, shouldShowChangelogOnStartup]);
 
-  const handleWhatsNewClose = useCallback(() => {
-    setShowWhatsNew(false);
+  const handleSplashClose = useCallback(() => {
+    setShowSplash(false);
+    if (!hasSeenTutorial) {
+      setTimeout(() => setShowTutorial(true), 200);
+    }
+  }, [hasSeenTutorial]);
+
+  const handleSplashOpenChangelog = useCallback(() => {
+    setShowSplash(false);
+    setShowChangelog(true);
+  }, []);
+
+  const handleChangelogClose = useCallback(() => {
+    setShowChangelog(false);
     if (!hasSeenTutorial) {
       setTimeout(() => setShowTutorial(true), 200);
     }
@@ -265,13 +319,16 @@ function App() {
   return (
     <div className="app">
       <LinuxVulkanWarning />
-      <Toolbar onOpenChangelog={() => setShowWhatsNew(true)} />
+      <Toolbar onOpenChangelog={() => setShowChangelog(true)} onOpenSplash={() => setShowSplash(true)} />
       <DockContainer />
       {showWelcome && (
         <WelcomeOverlay onComplete={handleWelcomeComplete} noFadeOnClose />
       )}
-      {showWhatsNew && (
-        <WhatsNewDialog onClose={handleWhatsNewClose} />
+      {showSplash && (
+        <SplashScreen onClose={handleSplashClose} onOpenChangelog={handleSplashOpenChangelog} />
+      )}
+      {showChangelog && (
+        <WhatsNewDialog onClose={handleChangelogClose} />
       )}
       {showIndexedDBError && (
         <IndexedDBErrorDialog onClose={handleIndexedDBErrorClose} />
@@ -294,6 +351,9 @@ function App() {
           campaignTitle={activeCampaign.title}
         />
       )}
+      {accountDialog === 'auth' && <AuthDialog onClose={closeAccountDialog} />}
+      {accountDialog === 'pricing' && <PricingDialog onClose={closeAccountDialog} />}
+      {accountDialog === 'account' && <AccountDialog onClose={closeAccountDialog} />}
     </div>
   );
 }

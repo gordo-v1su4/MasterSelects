@@ -23,6 +23,7 @@ import { Logger } from '../../services/logger';
 import { scrubSettleState } from '../../services/scrubSettleState';
 import { vfPipelineMonitor } from '../../services/vfPipelineMonitor';
 import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
+import { flags } from '../featureFlags';
 
 const log = Logger.create('RenderDispatcher');
 
@@ -103,6 +104,35 @@ export class RenderDispatcher {
       return undefined;
     }
     return Math.round(time * 1000);
+  }
+
+  private getPreviewFallbackFromLayers(
+    layers: Layer[]
+  ): { clipId?: string; targetTimeMs?: number } {
+    const primary =
+      layers.find((layer) => layer?.visible && layer.opacity !== 0 && layer.source?.type === 'video') ??
+      layers.find((layer) => layer?.visible && layer.opacity !== 0 && !!layer.source);
+
+    return {
+      clipId: primary?.sourceClipId ?? primary?.id,
+      targetTimeMs: this.toMediaTimeMs(primary?.source?.mediaTime),
+    };
+  }
+
+  private shouldHoldLastFrameOnEmptyPlayback(targetTimeMs?: number): boolean {
+    if (!this.lastRenderHadContent) {
+      return false;
+    }
+
+    if (
+      typeof targetTimeMs === 'number' &&
+      typeof this.lastPreviewTargetTimeMs === 'number' &&
+      Math.abs(targetTimeMs - this.lastPreviewTargetTimeMs) >= 250
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   private recordMainPreviewFrame(
@@ -197,11 +227,12 @@ export class RenderDispatcher {
 
     // Handle empty layers
     if (layerData.length === 0) {
+      const previewFallback = this.getPreviewFallbackFromLayers(layers);
       // During playback, if we just had content, hold the last frame on screen
       // instead of flashing black. This handles transient decoder stalls on
       // Windows/Linux where readyState drops briefly.
       const isPlaying = d.renderLoop?.getIsPlaying() ?? false;
-      if (isPlaying && this.lastRenderHadContent) {
+      if (isPlaying && this.shouldHoldLastFrameOnEmptyPlayback(previewFallback.targetTimeMs)) {
         // Don't render anything — canvas retains previous frame automatically.
         // Log once so the stall is visible in telemetry.
         log.debug('Holding last frame during playback stall (empty layerData)');
@@ -210,6 +241,7 @@ export class RenderDispatcher {
       }
       this.lastRenderHadContent = false;
       this.renderEmptyFrame(device);
+      this.recordMainPreviewFrame('empty', undefined, previewFallback);
       d.performanceStats.setLayerCount(0);
       return;
     }
@@ -429,6 +461,12 @@ export class RenderDispatcher {
 
       if (layer.source.videoElement) {
         const video = layer.source.videoElement;
+        const htmlPreviewDebugDisabled =
+          flags.useFullWebCodecsPlayback &&
+          flags.disableHtmlPreviewFallback;
+        if (htmlPreviewDebugDisabled) {
+          continue;
+        }
         const scrubbingCache = d.cacheManager.getScrubbingCache();
         const targetTime = this.getTargetVideoTime(layer, video);
         const isDragging = useTimelineStore.getState().isDraggingPlayhead;

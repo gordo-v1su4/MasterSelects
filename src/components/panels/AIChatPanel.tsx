@@ -2,34 +2,36 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useAccountStore } from '../../stores/accountStore';
 import { AI_TOOLS, executeAITool, getQuickTimelineSummary, getToolPolicy } from '../../services/aiTools';
+import { cloudAiService } from '../../services/cloudAiService';
 import type { ToolPolicyEntry } from '../../services/aiTools';
 import './AIChatPanel.css';
 
-// Available OpenAI models
+// Available OpenAI models with credit cost per request
 const OPENAI_MODELS = [
   // GPT-5.2 series (newest - Dec 2025)
-  { id: 'gpt-5.2', name: 'GPT-5.2 (Thinking)' },
-  { id: 'gpt-5.2-pro', name: 'GPT-5.2 Pro' },
+  { id: 'gpt-5.2', name: 'GPT-5.2 (Thinking)', credits: 8 },
+  { id: 'gpt-5.2-pro', name: 'GPT-5.2 Pro', credits: 10 },
   // GPT-5.1 series
-  { id: 'gpt-5.1', name: 'GPT-5.1' },
-  { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
-  { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini' },
+  { id: 'gpt-5.1', name: 'GPT-5.1', credits: 5 },
+  { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', credits: 5 },
+  { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', credits: 1 },
   // GPT-5 series
-  { id: 'gpt-5', name: 'GPT-5' },
-  { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
-  { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+  { id: 'gpt-5', name: 'GPT-5', credits: 5 },
+  { id: 'gpt-5-mini', name: 'GPT-5 Mini', credits: 1 },
+  { id: 'gpt-5-nano', name: 'GPT-5 Nano', credits: 1 },
   // Reasoning models
-  { id: 'o3', name: 'o3 (Reasoning)' },
-  { id: 'o4-mini', name: 'o4-mini (Reasoning)' },
-  { id: 'o3-pro', name: 'o3-pro (Deep Reasoning)' },
+  { id: 'o3', name: 'o3 (Reasoning)', credits: 5 },
+  { id: 'o4-mini', name: 'o4-mini (Reasoning)', credits: 3 },
+  { id: 'o3-pro', name: 'o3-pro (Deep Reasoning)', credits: 50 },
   // GPT-4.1 series
-  { id: 'gpt-4.1', name: 'GPT-4.1' },
-  { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
-  { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano' },
+  { id: 'gpt-4.1', name: 'GPT-4.1', credits: 5 },
+  { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', credits: 1 },
+  { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', credits: 1 },
   // GPT-4o series (legacy)
-  { id: 'gpt-4o', name: 'GPT-4o' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+  { id: 'gpt-4o', name: 'GPT-4o', credits: 5 },
+  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', credits: 1 },
 ];
 
 // System prompt for editor mode
@@ -113,6 +115,147 @@ interface PendingApproval {
   resolve: (approved: boolean) => void;
 }
 
+const MAX_TOOL_RESULT_MESSAGE_CHARS = 12000;
+const MAX_TOOL_RESULT_ARRAY_ITEMS = 20;
+const MAX_TOOL_RESULT_OBJECT_KEYS = 30;
+const MAX_TOOL_RESULT_STRING_CHARS = 1200;
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength)}... [truncated]`;
+}
+
+function summarizeToolResultValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    return truncateText(value, MAX_TOOL_RESULT_STRING_CHARS);
+  }
+
+  if (
+    value === null
+    || typeof value === 'number'
+    || typeof value === 'boolean'
+    || typeof value === 'undefined'
+  ) {
+    return value;
+  }
+
+  if (depth >= 3) {
+    return '[truncated nested value]';
+  }
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_TOOL_RESULT_ARRAY_ITEMS)
+      .map((item) => summarizeToolResultValue(item, depth + 1));
+
+    if (value.length > MAX_TOOL_RESULT_ARRAY_ITEMS) {
+      items.push(`[${value.length - MAX_TOOL_RESULT_ARRAY_ITEMS} more items truncated]`);
+    }
+
+    return items;
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    const summary: Record<string, unknown> = {};
+
+    for (const [key, nestedValue] of entries.slice(0, MAX_TOOL_RESULT_OBJECT_KEYS)) {
+      summary[key] = summarizeToolResultValue(nestedValue, depth + 1);
+    }
+
+    if (entries.length > MAX_TOOL_RESULT_OBJECT_KEYS) {
+      summary.__truncatedKeys = entries.length - MAX_TOOL_RESULT_OBJECT_KEYS;
+    }
+
+    return summary;
+  }
+
+  return String(value);
+}
+
+function formatToolResultForApi(result: { success: boolean; data?: unknown; error?: string }): string {
+  const serialized = JSON.stringify(result);
+
+  if (serialized.length <= MAX_TOOL_RESULT_MESSAGE_CHARS) {
+    return serialized;
+  }
+
+  const summarized = JSON.stringify({
+    data: summarizeToolResultValue(result.data),
+    error: result.error ?? null,
+    success: result.success,
+    truncated: true,
+  });
+
+  if (summarized.length <= MAX_TOOL_RESULT_MESSAGE_CHARS) {
+    return summarized;
+  }
+
+  return JSON.stringify({
+    error: result.error ?? null,
+    preview: truncateText(serialized, MAX_TOOL_RESULT_MESSAGE_CHARS - 128),
+    success: result.success,
+    truncated: true,
+  });
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error;
+  }
+
+  if (error && typeof error === 'object') {
+    const candidate = error as { error?: unknown; message?: unknown };
+
+    if (typeof candidate.message === 'string' && candidate.message.trim().length > 0) {
+      return candidate.message;
+    }
+
+    if (typeof candidate.error === 'string' && candidate.error.trim().length > 0) {
+      return candidate.error;
+    }
+  }
+
+  return 'Failed to send message';
+}
+
+function createHostedPromptIdempotencyKey(): string {
+  return `hosted-chat:${Date.now()}:${crypto.randomUUID()}`;
+}
+
+function sanitizeConversationHistory(messages: Message[]): Message[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage.role === 'assistant' && lastMessage.toolCalls && lastMessage.toolCalls.length > 0) {
+    return messages.slice(0, -1);
+  }
+
+  let cursor = messages.length - 1;
+
+  while (cursor >= 0 && messages[cursor].role === 'tool') {
+    cursor -= 1;
+  }
+
+  if (cursor >= 0) {
+    const candidate = messages[cursor];
+    if (candidate.role === 'assistant' && candidate.toolCalls && candidate.toolCalls.length > 0) {
+      return messages.slice(0, cursor);
+    }
+  }
+
+  return messages;
+}
+
 function shouldRequireConfirmation(
   policy: ToolPolicyEntry | undefined,
   approvalMode: 'auto' | 'confirm-destructive' | 'confirm-all-mutating',
@@ -127,8 +270,41 @@ function shouldRequireConfirmation(
   return !policy.readOnly;
 }
 
+function parseChatCompletionPayload(data: unknown): {
+  content: string | null;
+  toolCalls: ToolCall[];
+} {
+  const payload = data as {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: Array<{
+          id: string;
+          function: { name: string; arguments: string };
+        }>;
+      };
+    }>;
+  };
+  const choice = payload.choices?.[0];
+
+  return {
+    content: choice?.message?.content || null,
+    toolCalls: (choice?.message?.tool_calls || []).map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: tc.function.arguments,
+    })),
+  };
+}
+
 export function AIChatPanel() {
   const { apiKeys, openSettings, aiApprovalMode } = useSettingsStore();
+  const hostedAIEnabled = useAccountStore((s) => s.hostedAIEnabled);
+  const accountSession = useAccountStore((s) => s.session);
+  const loadAccountState = useAccountStore((s) => s.loadAccountState);
+  const openAuthDialog = useAccountStore((s) => s.openAuthDialog);
+  const openPricingDialog = useAccountStore((s) => s.openPricingDialog);
+  const openAccountDialog = useAccountStore((s) => s.openAccountDialog);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -145,12 +321,15 @@ export function AIChatPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentToolAction]);
 
-  // Check if API key is available
+  const hasHostedAccess = Boolean(accountSession?.authenticated && hostedAIEnabled);
   const hasApiKey = !!apiKeys.openai;
+  const accessMode: 'hosted' | 'byo' | 'none' = hasHostedAccess ? 'hosted' : hasApiKey ? 'byo' : 'none';
+  const hasAccess = accessMode !== 'none';
 
   // Build API messages from chat history
   const buildAPIMessages = useCallback((userContent: string): APIMessage[] => {
     const apiMessages: APIMessage[] = [];
+    const safeMessages = sanitizeConversationHistory(messages);
 
     // Add system prompt in editor mode
     if (editorMode) {
@@ -161,7 +340,7 @@ export function AIChatPanel() {
     }
 
     // Add conversation history
-    for (const msg of messages) {
+    for (const msg of safeMessages) {
       if (msg.role === 'user') {
         apiMessages.push({ role: 'user', content: msg.content });
       } else if (msg.role === 'assistant') {
@@ -194,7 +373,10 @@ export function AIChatPanel() {
   }, [messages, editorMode]);
 
   // Call OpenAI API
-  const callOpenAI = useCallback(async (apiMessages: APIMessage[]): Promise<{
+  const callOpenAI = useCallback(async (
+    apiMessages: APIMessage[],
+    idempotencyKey?: string,
+  ): Promise<{
     content: string | null;
     toolCalls: ToolCall[];
   }> => {
@@ -215,6 +397,14 @@ export function AIChatPanel() {
       requestBody.tool_choice = 'auto';
     }
 
+    if (accessMode === 'hosted') {
+      if (idempotencyKey) {
+        requestBody.idempotencyKey = idempotencyKey;
+      }
+
+      return parseChatCompletionPayload(await cloudAiService.createChatCompletion(requestBody));
+    }
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -229,29 +419,15 @@ export function AIChatPanel() {
       throw new Error(errorData.error?.message || `API error: ${response.status}`);
     }
 
-    const data = await response.json();
-    const choice = data.choices?.[0];
-
-    const toolCalls: ToolCall[] = (choice?.message?.tool_calls || []).map((tc: {
-      id: string;
-      function: { name: string; arguments: string };
-    }) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments,
-    }));
-
-    return {
-      content: choice?.message?.content || null,
-      toolCalls,
-    };
-  }, [model, editorMode, apiKeys.openai]);
+    return parseChatCompletionPayload(await response.json());
+  }, [accessMode, model, editorMode, apiKeys.openai]);
 
   // Send message to OpenAI (with tool calling loop)
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || !hasApiKey || isLoading) return;
+    if (!input.trim() || !hasAccess || isLoading) return;
 
     const userContent = input.trim();
+    const transientMessageIds = new Set<string>();
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -266,13 +442,16 @@ export function AIChatPanel() {
 
     try {
       const apiMessages = buildAPIMessages(userContent);
+      const hostedPromptIdempotencyKey = accessMode === 'hosted'
+        ? createHostedPromptIdempotencyKey()
+        : undefined;
       let iterationCount = 0;
       const maxIterations = 50; // Safety limit for tool iterations
 
       while (iterationCount < maxIterations) {
         iterationCount++;
 
-        const { content, toolCalls } = await callOpenAI(apiMessages);
+        const { content, toolCalls } = await callOpenAI(apiMessages, hostedPromptIdempotencyKey);
 
         if (toolCalls.length === 0) {
           // No tool calls - add final assistant message
@@ -296,6 +475,7 @@ export function AIChatPanel() {
           timestamp: new Date(),
           toolCalls,
         };
+        transientMessageIds.add(assistantMessage.id);
         setMessages(prev => [...prev, assistantMessage]);
 
         // Add assistant message to API messages
@@ -361,12 +541,13 @@ export function AIChatPanel() {
             toolName: toolCall.name,
             isToolResult: true,
           };
+          transientMessageIds.add(toolResultMessage.id);
           setMessages(prev => [...prev, toolResultMessage]);
 
           // Add tool result to API messages
           apiMessages.push({
             role: 'tool',
-            content: JSON.stringify(result),
+            content: formatToolResultForApi(result),
             tool_call_id: toolCall.id,
           });
         }
@@ -378,12 +559,18 @@ export function AIChatPanel() {
         setError('Too many tool iterations - stopping to prevent infinite loop');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      setMessages((prev) => sanitizeConversationHistory(
+        prev.filter((message) => !transientMessageIds.has(message.id)),
+      ));
+      setError(getErrorMessage(err));
     } finally {
+      if (accessMode === 'hosted') {
+        void loadAccountState();
+      }
       setIsLoading(false);
       setCurrentToolAction(null);
     }
-  }, [input, hasApiKey, isLoading, buildAPIMessages, callOpenAI, aiApprovalMode]);
+  }, [input, hasAccess, isLoading, buildAPIMessages, callOpenAI, aiApprovalMode, accessMode, loadAccountState]);
 
   // Handle key press
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -400,22 +587,47 @@ export function AIChatPanel() {
   }, []);
 
   return (
-    <div className={`ai-chat-panel ${!hasApiKey ? 'no-api-key' : ''}`}>
+    <div className={`ai-chat-panel ${!hasAccess ? 'no-api-key' : ''}`}>
       {/* API Key Required Overlay */}
-      {!hasApiKey && (
+      {!hasAccess && (
         <div className="ai-panel-overlay">
           <div className="ai-panel-overlay-content">
             <span className="no-key-icon">🔑</span>
-            <p>OpenAI API key required</p>
-            <button className="btn-settings" onClick={openSettings}>
-              Open Settings
-            </button>
+            <p>{accountSession?.authenticated ? 'Hosted AI chat needs a plan' : 'Sign in for hosted AI chat'}</p>
+            <span className="ai-panel-overlay-subtext">
+              MasterSelects Cloud is the default path. Advanced users can still add their own OpenAI key.
+            </span>
+            <div className="ai-panel-overlay-actions">
+              {!accountSession?.authenticated ? (
+                <button className="btn-settings" onClick={openAuthDialog}>
+                  Sign in
+                </button>
+              ) : (
+                <button className="btn-settings" onClick={openPricingDialog}>
+                  View plans
+                </button>
+              )}
+              {accountSession?.authenticated && (
+                <button className="btn-settings" onClick={openAccountDialog}>
+                  Account
+                </button>
+              )}
+              <span className="ai-panel-overlay-or">or</span>
+              <button className="btn-settings" onClick={openSettings}>
+                API Keys
+              </button>
+            </div>
           </div>
         </div>
       )}
       {/* Header */}
       <div className="ai-chat-header">
-        <h2>AI Editor</h2>
+        <div className="ai-chat-title-group">
+          <h2>AI Editor</h2>
+          <span className={`ai-access-chip ${accessMode}`}>
+            {accessMode === 'hosted' ? 'Cloud' : accessMode === 'byo' ? 'OpenAI key' : 'Locked'}
+          </span>
+        </div>
         <div className="ai-chat-controls">
           <label className="editor-mode-toggle" title="Enable timeline editing tools">
             <input
@@ -433,7 +645,7 @@ export function AIChatPanel() {
             disabled={isLoading}
           >
             {OPENAI_MODELS.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <option key={m.id} value={m.id}>{m.name} ({m.credits === 1 ? '1 credit' : `${m.credits} credits`})</option>
             ))}
           </select>
           <button
@@ -589,13 +801,13 @@ export function AIChatPanel() {
           placeholder={editorMode
             ? "e.g., 'Remove all silent parts' or 'Split clip at 5 seconds'"
             : "Type a message... (Enter to send)"}
-          disabled={isLoading}
+          disabled={isLoading || !hasAccess}
           rows={2}
         />
         <button
           className="btn-send"
           onClick={sendMessage}
-          disabled={!input.trim() || isLoading}
+          disabled={!input.trim() || isLoading || !hasAccess}
         >
           {isLoading ? '...' : 'Send'}
         </button>

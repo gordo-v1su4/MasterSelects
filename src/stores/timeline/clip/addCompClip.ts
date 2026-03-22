@@ -370,7 +370,7 @@ async function loadSubNestedClips(
         clip.source = { type: 'video', videoElement: video, naturalDuration: video.duration };
         clip.isLoading = false;
         // Initialize WebCodecsPlayer
-        const wcp = await initWebCodecsPlayer(video, mediaFile.file!.name);
+        const wcp = await initWebCodecsPlayer(video, mediaFile.file!.name, mediaFile.file!);
         if (wcp) clip.source.webCodecsPlayer = wcp;
         log.debug('Sub-nested video loaded', { clipId, name: clip.name, depth });
       }, { once: true });
@@ -538,7 +538,7 @@ export async function loadNestedClips(params: LoadNestedClipsParams): Promise<Ti
     const fileUrl = blobUrlManager.create(nestedClip.id, mediaFile.file, urlType as 'video' | 'audio' | 'image');
 
     if (type === 'video') {
-      loadVideoNestedClip(compClipId, nestedClip.id, fileUrl, mediaFile.file.name, get, set);
+      loadVideoNestedClip(compClipId, nestedClip.id, fileUrl, mediaFile.file, get, set);
     } else if (type === 'audio') {
       loadAudioNestedClip(compClipId, nestedClip.id, fileUrl, get, set);
     } else if (type === 'image') {
@@ -568,7 +568,7 @@ function loadVideoNestedClip(
   compClipId: string,
   nestedClipId: string,
   fileUrl: string,
-  fileName: string,
+  file: File,
   get: CompClipStoreGet,
   set: CompClipStoreSet
 ): void {
@@ -628,7 +628,7 @@ function loadVideoNestedClip(
     };
 
     // Initialize WebCodecsPlayer
-    const webCodecsPlayer = await initWebCodecsPlayer(video, fileName);
+    const webCodecsPlayer = await initWebCodecsPlayer(video, file.name, file);
     if (webCodecsPlayer) {
       source.webCodecsPlayer = webCodecsPlayer;
     }
@@ -648,13 +648,13 @@ function loadVideoNestedClip(
     log.debug('Nested video loaded', {
       compClipId,
       nestedClipId,
-      fileName,
+      fileName: file.name,
       readyState: video.readyState
     });
   }, { once: true });
 
   video.addEventListener('error', (e) => {
-    log.error('Nested video load error', { compClipId, nestedClipId, fileName, error: e });
+    log.error('Nested video load error', { compClipId, nestedClipId, fileName: file.name, error: e });
   });
 }
 

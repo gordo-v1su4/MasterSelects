@@ -486,6 +486,24 @@ function aiToolsBridge(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(({ command }) => {
   const isDevServer = command === 'serve';
+  const hostedApiProxyTarget = 'http://127.0.0.1:8788';
+  const hostedApiProxyRoutes = [
+    '/api/me',
+    '/api/auth',
+    '/api/billing',
+    '/api/stripe',
+    '/api/ai/chat',
+    '/api/ai/video',
+  ];
+  const hostedApiProxy = Object.fromEntries(
+    hostedApiProxyRoutes.map((route) => [
+      route,
+      {
+        changeOrigin: true,
+        target: hostedApiProxyTarget,
+      },
+    ]),
+  );
 
   return {
     plugins: [
@@ -516,6 +534,7 @@ export default defineConfig(({ command }) => {
         'Cross-Origin-Opener-Policy': 'same-origin',
         'Cross-Origin-Embedder-Policy': 'credentialless',
       },
+      proxy: hostedApiProxy,
     },
     preview: {
       headers: {

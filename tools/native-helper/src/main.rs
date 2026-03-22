@@ -124,11 +124,15 @@ fn build_config(args: &Args) -> server::ServerConfig {
         .unwrap_or_else(|| {
             vec![
                 "https://masterselects.app".to_string(),
+                "https://masterselects.com".to_string(),
+                "https://www.masterselects.com".to_string(),
                 "https://app.masterselects.com".to_string(),
                 "http://localhost:5173".to_string(),
                 "http://localhost:3000".to_string(),
                 "http://127.0.0.1:5173".to_string(),
                 "http://127.0.0.1:3000".to_string(),
+                "https://masterselects.pages.dev".to_string(),
+                "https://staging.masterselects.pages.dev".to_string(),
             ]
         });
 
@@ -259,11 +263,21 @@ fn run_with_tray(config: server::ServerConfig, _args: &Args) {
     let port = config.port;
     let state = Arc::new(tray::TrayState::new());
     let state_for_server = state.clone();
+    let state_for_error = state.clone();
 
     // Spawn server on a worker thread (with its own tokio runtime)
     let server_thread = std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
         if let Err(e) = rt.block_on(server::run_with_shutdown(config, state_for_server)) {
+            if let Ok(mut slot) = state_for_error.server_error.lock() {
+                *slot = Some(e.to_string());
+            }
+            state_for_error
+                .running
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            state_for_error
+                .quit_requested
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             eprintln!("Server error: {}", e);
         }
     });

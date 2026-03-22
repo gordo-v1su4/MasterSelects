@@ -81,7 +81,7 @@ export function Timeline() {
     useTimelineStore(useShallow(selectUISettings));
 
   // Preview/export state
-  const { ramPreviewEnabled, ramPreviewProgress, ramPreviewRange, isRamPreviewing, isExporting, exportProgress, exportRange, isProxyCaching, proxyCacheProgress } =
+  const { ramPreviewEnabled, ramPreviewProgress, ramPreviewRange, isRamPreviewing, isExporting, exportProgress, exportRange } =
     useTimelineStore(useShallow(selectPreviewExportState));
 
   // Keyframe state
@@ -134,7 +134,6 @@ export function Timeline() {
   const {
     toggleLoopPlayback, toggleRamPreviewEnabled, startRamPreview,
     cancelRamPreview, getCachedRanges, getProxyCachedRanges,
-    startProxyCachePreload, cancelProxyCachePreload,
   } = store;
 
   // Tool actions
@@ -843,10 +842,6 @@ export function Timeline() {
           onClearInOut={clearInOut}
           onToggleRamPreview={toggleRamPreviewEnabled}
           onToggleProxy={toggleProxyEnabled}
-          isProxyCaching={isProxyCaching}
-          proxyCacheProgress={proxyCacheProgress}
-          onStartProxyCachePreload={startProxyCachePreload}
-          onCancelProxyCachePreload={cancelProxyCachePreload}
           onToggleTranscriptMarkers={toggleTranscriptMarkers}
           onToggleThumbnails={toggleThumbnailsEnabled}
           onToggleWaveforms={toggleWaveformsEnabled}
@@ -1011,6 +1006,7 @@ export function Timeline() {
               (trackLanesRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
             }}
             className={`timeline-tracks ${clipDrag ? 'dragging-clip' : ''} ${marquee ? 'marquee-selecting' : ''}`}
+            data-ai-id="timeline-tracks"
             onMouseDown={handleMarqueeMouseDown}
             onDragOver={(e) => e.preventDefault()}
             onDragLeave={handleContainerDragLeave}
@@ -1242,6 +1238,7 @@ export function Timeline() {
           {/* Playhead - spans from ruler through all tracks */}
           <div
             className="playhead"
+            data-ai-id="timeline-playhead"
             style={{ left: timeToPixel(playheadPosition) - scrollX + 150 }}
             onMouseDown={handlePlayheadMouseDown}
           >

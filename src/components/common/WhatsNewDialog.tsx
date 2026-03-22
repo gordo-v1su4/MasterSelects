@@ -1,11 +1,11 @@
 // WhatsNewDialog - Shows changelog grouped by time periods
+// Shared components (NoticeCard, ReleaseCalendar, ChangeItem, etc.) are also exported
+// for use by SplashScreen.
 
-import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
 import {
   APP_VERSION,
   BUILD_NOTICE,
-  FEATURED_VIDEO,
-  WIP_NOTICE,
   getChangelogCalendar,
   getGroupedChangelog,
   type ChangelogCalendarDay,
@@ -13,27 +13,25 @@ import {
   type ChangelogNotice as ChangelogNoticeConfig,
 } from '../../version';
 import {
-  fetchLatestPublishedNativeHelperRelease,
   NATIVE_HELPER_RELEASES_URL,
   type NativeHelperPublishedRelease,
 } from '../../services/nativeHelper/releases';
-import { useSettingsStore } from '../../stores/settingsStore';
 
 interface WhatsNewDialogProps {
   onClose: () => void;
 }
 
-type YouTubePlayerStateValue = -1 | 0 | 1 | 2 | 3 | 5;
+export type YouTubePlayerStateValue = -1 | 0 | 1 | 2 | 3 | 5;
 
-interface YouTubePlayerStateChangeEvent {
+export interface YouTubePlayerStateChangeEvent {
   data: YouTubePlayerStateValue;
 }
 
-interface YouTubePlayerInstance {
+export interface YouTubePlayerInstance {
   destroy: () => void;
 }
 
-interface YouTubePlayerNamespace {
+export interface YouTubePlayerNamespace {
   Player: new (
     element: HTMLIFrameElement,
     options?: {
@@ -60,7 +58,7 @@ declare global {
 
 let youtubeIframeApiPromise: Promise<YouTubePlayerNamespace> | null = null;
 
-function loadYouTubeIframeApi(): Promise<YouTubePlayerNamespace> {
+export function loadYouTubeIframeApi(): Promise<YouTubePlayerNamespace> {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('YouTube iframe API requires a browser environment.'));
   }
@@ -188,7 +186,7 @@ function NoticeIcon({ type }: { type: ChangelogNoticeConfig['type'] }) {
   );
 }
 
-function NoticeCard({
+export function NoticeCard({
   notice,
   className = '',
   staggerIndex = 0,
@@ -244,7 +242,7 @@ function NoticeCard({
   );
 }
 
-function getHelperBuildNotice(
+export function getHelperBuildNotice(
   publishedRelease: NativeHelperPublishedRelease | null,
 ): ChangelogNoticeConfig | null {
   if (!BUILD_NOTICE) {
@@ -274,7 +272,7 @@ function getHelperBuildNotice(
   };
 }
 
-function ReleaseCalendar({ weeks }: { weeks: ChangelogCalendarDay[][] }) {
+export function ReleaseCalendar({ weeks }: { weeks: ChangelogCalendarDay[][] }) {
   return (
     <div className="changelog-calendar" aria-label="Recent changelog activity">
       {weeks.map((week, weekIndex) => (
@@ -390,117 +388,17 @@ function ChangeItem({ change }: { change: ChangeEntry }) {
 export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
   const [isClosing, setIsClosing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'new' | 'fix' | 'improve' | 'refactor'>('all');
-  const [isFeaturedVideoExpanded, setIsFeaturedVideoExpanded] = useState(false);
-  const [publishedHelperRelease, setPublishedHelperRelease] = useState<NativeHelperPublishedRelease | null>(null);
-  const lastSeenChangelogVersion = useSettingsStore((s) => s.lastSeenChangelogVersion);
-  const setShowChangelogOnStartup = useSettingsStore((s) => s.setShowChangelogOnStartup);
-  const setLastSeenChangelogVersion = useSettingsStore((s) => s.setLastSeenChangelogVersion);
-  const isCurrentVersionSuppressed = lastSeenChangelogVersion === APP_VERSION;
-  const [dontShowAgain, setDontShowAgain] = useState(isCurrentVersionSuppressed);
-  const featuredVideoFrameRef = useRef<HTMLIFrameElement | null>(null);
-  const featuredVideoPlayerRef = useRef<YouTubePlayerInstance | null>(null);
 
   const groupedChangelog = useMemo(() => getGroupedChangelog(), []);
   const changelogCalendar = useMemo(() => getChangelogCalendar(), []);
-  const buildNotice = useMemo(() => getHelperBuildNotice(publishedHelperRelease), [publishedHelperRelease]);
-  const featuredNotices = useMemo(
-    () =>
-      [FEATURED_VIDEO?.banner, buildNotice, WIP_NOTICE].filter(
-        (notice): notice is ChangelogNoticeConfig => Boolean(notice)
-      ),
-    [buildNotice]
-  );
-  const featuredVideoEmbedUrl = useMemo(
-    () =>
-      FEATURED_VIDEO
-        ? `https://www.youtube.com/embed/${FEATURED_VIDEO.youtubeId}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1${typeof window !== 'undefined' ? `&origin=${encodeURIComponent(window.location.origin)}` : ''}`
-        : '',
-    []
-  );
-  const attachCredentiallessVideoFrame = useCallback((node: HTMLIFrameElement | null) => {
-    featuredVideoFrameRef.current = node;
-    if (!node || !featuredVideoEmbedUrl) return;
-    node.setAttribute('credentialless', '');
-    if (node.src !== featuredVideoEmbedUrl) {
-      node.src = featuredVideoEmbedUrl;
-    }
-  }, [featuredVideoEmbedUrl]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    void fetchLatestPublishedNativeHelperRelease().then((release) => {
-      if (!cancelled) {
-        setPublishedHelperRelease(release);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    setDontShowAgain(isCurrentVersionSuppressed);
-  }, [isCurrentVersionSuppressed]);
-
-  useEffect(() => {
-    if (!FEATURED_VIDEO || !featuredVideoFrameRef.current || !featuredVideoEmbedUrl) {
-      return;
-    }
-
-    let disposed = false;
-
-    loadYouTubeIframeApi()
-      .then((YT) => {
-        if (disposed || !featuredVideoFrameRef.current) {
-          return;
-        }
-
-        featuredVideoPlayerRef.current?.destroy();
-        featuredVideoPlayerRef.current = new YT.Player(featuredVideoFrameRef.current, {
-          events: {
-            onStateChange: (event) => {
-              if (event.data === YT.PlayerState.PLAYING) {
-                setIsFeaturedVideoExpanded(true);
-                return;
-              }
-              if (
-                event.data === YT.PlayerState.PAUSED ||
-                event.data === YT.PlayerState.ENDED ||
-                event.data === YT.PlayerState.CUED
-              ) {
-                setIsFeaturedVideoExpanded(false);
-              }
-            },
-          },
-        });
-      })
-      .catch(() => {
-        // Keep the embed usable even if the API script fails; only the auto-expand is skipped.
-      });
-
-    return () => {
-      disposed = true;
-      featuredVideoPlayerRef.current?.destroy();
-      featuredVideoPlayerRef.current = null;
-    };
-  }, [featuredVideoEmbedUrl]);
 
   const handleClose = useCallback(() => {
     if (isClosing) return;
-    if (dontShowAgain) {
-      setShowChangelogOnStartup(false);
-      setLastSeenChangelogVersion(APP_VERSION);
-    } else {
-      setShowChangelogOnStartup(true);
-      setLastSeenChangelogVersion(null);
-    }
     setIsClosing(true);
     setTimeout(() => {
       onClose();
     }, 200);
-  }, [onClose, isClosing, dontShowAgain, setLastSeenChangelogVersion, setShowChangelogOnStartup]);
+  }, [onClose, isClosing]);
 
   // Handle Escape key to close
   useEffect(() => {
@@ -562,7 +460,7 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
           </div>
           <div className="changelog-header-center">
             <button className="changelog-header-button" onClick={handleClose}>
-              Got it!
+              Close
             </button>
           </div>
           <div className="changelog-header-right">
@@ -572,49 +470,10 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
 
         {/* Scrollable content */}
         <div className="changelog-content">
-          {(FEATURED_VIDEO || BUILD_NOTICE) && (
-            <div className={`changelog-featured ${isFeaturedVideoExpanded ? 'is-video-expanded' : ''}`.trim()}>
-              <div className="changelog-featured-notices">
-                {featuredNotices.map((notice, index) => (
-                  <NoticeCard
-                    key={`${notice.type}-${notice.title}`}
-                    notice={notice}
-                    className={index === 0 ? 'changelog-video-notice' : ''}
-                    staggerIndex={index}
-                  />
-                ))}
-              </div>
-
-              {FEATURED_VIDEO && (
-                <div className="changelog-featured-side">
-                  <div className="changelog-video">
-                    <div className="changelog-video-shell">
-                      <div className="changelog-video-container">
-                        <iframe
-                          className="changelog-video-frame"
-                          title={FEATURED_VIDEO.title}
-                          loading="lazy"
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                          referrerPolicy="strict-origin-when-cross-origin"
-                          allowFullScreen
-                          ref={attachCredentiallessVideoFrame}
-                        />
-                      </div>
-                      <a
-                        className="changelog-video-fallback"
-                        href={`https://www.youtube.com/watch?v=${FEATURED_VIDEO.youtubeId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Open on YouTube if the embed is blocked
-                      </a>
-                    </div>
-                  </div>
-                  <ReleaseCalendar weeks={changelogCalendar} />
-                </div>
-              )}
-            </div>
-          )}
+          {/* Calendar - full width at top */}
+          <div className="changelog-calendar-section">
+            <ReleaseCalendar weeks={changelogCalendar} />
+          </div>
 
           {/* Filter tabs */}
           <div className="changelog-tabs">
@@ -677,18 +536,6 @@ export function WhatsNewDialog({ onClose }: WhatsNewDialogProps) {
               </div>
             );
           })}
-        </div>
-
-        {/* Footer */}
-        <div className="changelog-footer">
-          <label className="changelog-dont-show">
-            <input
-              type="checkbox"
-              checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
-            />
-            <span>Don't auto-show this version again</span>
-          </label>
         </div>
       </div>
     </div>

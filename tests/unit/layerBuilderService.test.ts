@@ -4,15 +4,26 @@ import { flags } from '../../src/engine/featureFlags';
 import { useTimelineStore } from '../../src/stores/timeline';
 import { useMediaStore } from '../../src/stores/mediaStore';
 import { DEFAULT_TRANSFORM } from '../../src/stores/timeline/constants';
+import { bindSourceRuntimeToClip } from '../../src/services/mediaRuntime/clipBindings';
+import {
+  getPreviewRuntimeSource,
+  getScrubRuntimeSource,
+  setRuntimeFrameProvider,
+} from '../../src/services/mediaRuntime/runtimePlayback';
+import { mediaRuntimeRegistry } from '../../src/services/mediaRuntime/registry';
+import { scrubSettleState } from '../../src/services/scrubSettleState';
 
 const initialTimelineState = useTimelineStore.getState();
 const initialMediaState = useMediaStore.getState();
 
 describe('LayerBuilderService paused visual provider selection', () => {
   beforeEach(() => {
+    mediaRuntimeRegistry.clear();
+    scrubSettleState.clear();
     useTimelineStore.setState(initialTimelineState);
     useMediaStore.setState(initialMediaState);
     flags.useFullWebCodecsPlayback = true;
+    flags.disableHtmlPreviewFallback = true;
   });
 
   it('treats a full WebCodecs source as renderable even before the video element is attached', () => {
@@ -319,6 +330,415 @@ describe('LayerBuilderService paused visual provider selection', () => {
     expect(layers).toHaveLength(1);
     expect(layers[0]?.source?.webCodecsPlayer).toBe(clipPlayer);
     expect(layers[0]?.source?.runtimeSessionKey).toBe('interactive-track:track-v1:media:clip-1');
+  });
+
+  it('prefers the paused runtime provider while scrub-settle is pending', () => {
+    const service = new LayerBuilderService();
+    const file = new File(['video'], 'clip.mp4', { type: 'video/mp4', lastModified: 103 });
+    const clipPlayer = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 22_500_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 22.5,
+      isPlaying: false,
+      pause: () => {},
+      seek: () => {},
+    };
+    const runtimeProvider = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => false,
+      getCurrentFrame: () => null,
+      getPendingSeekTime: () => 8.7,
+      getDebugInfo: () => null,
+      currentTime: 8.7,
+      isPlaying: false,
+      pause: () => {},
+      seek: () => {},
+    };
+    const source = bindSourceRuntimeToClip({
+      clipId: 'clip-1',
+      source: {
+        type: 'video',
+        naturalDuration: 30,
+        mediaFileId: 'media-clip-1',
+        webCodecsPlayer: clipPlayer as any,
+      },
+      file,
+      mediaFileId: 'media-clip-1',
+    });
+    const previewRuntimeSource = getScrubRuntimeSource(source, 'track-v1', true);
+
+    setRuntimeFrameProvider(previewRuntimeSource, runtimeProvider as any);
+    scrubSettleState.begin('clip-1', 8.7, 500, 'scrub-stop');
+
+    useMediaStore.setState({
+      activeCompositionId: null,
+      activeLayerSlots: {},
+      layerOpacities: {},
+      files: [{ id: 'media-clip-1', file, name: 'clip.mp4', duration: 30 }],
+      compositions: [],
+      proxyEnabled: false,
+    } as any);
+
+    useTimelineStore.setState({
+      tracks: [
+        {
+          id: 'track-v1',
+          name: 'Video 1',
+          type: 'video',
+          visible: true,
+          muted: false,
+          solo: false,
+        },
+      ],
+      clips: [
+        {
+          id: 'clip-1',
+          trackId: 'track-v1',
+          name: 'clip.mp4',
+          file,
+          startTime: 0,
+          duration: 30,
+          inPoint: 0,
+          outPoint: 30,
+          effects: [],
+          transform: { ...DEFAULT_TRANSFORM },
+          source,
+          isLoading: false,
+        },
+      ],
+      playheadPosition: 8.7,
+      isPlaying: false,
+      isDraggingPlayhead: false,
+      playbackSpeed: 1,
+    } as any);
+
+    const layers = service.buildLayersFromStore();
+
+    expect(layers).toHaveLength(1);
+    expect(layers[0]?.source?.webCodecsPlayer).toBe(runtimeProvider);
+  });
+
+  it('uses the playback runtime provider for active full WebCodecs playback', () => {
+    const service = new LayerBuilderService();
+    const file = new File(['video'], 'clip.mp4', { type: 'video/mp4', lastModified: 101 });
+    const clipPlayer = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_250_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 1.25,
+      isPlaying: false,
+      pause: () => {},
+      seek: () => {},
+    };
+    const runtimeProvider = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_260_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 1.26,
+      isPlaying: true,
+      pause: () => {},
+      seek: () => {},
+    };
+    const source = bindSourceRuntimeToClip({
+      clipId: 'clip-1',
+      source: {
+        type: 'video',
+        naturalDuration: 10,
+        mediaFileId: 'media-clip-1',
+        webCodecsPlayer: clipPlayer as any,
+      },
+      file,
+      mediaFileId: 'media-clip-1',
+    });
+    const previewRuntimeSource = getPreviewRuntimeSource(source, 'track-v1', true);
+
+    setRuntimeFrameProvider(previewRuntimeSource, runtimeProvider as any);
+
+    useMediaStore.setState({
+      activeCompositionId: null,
+      activeLayerSlots: {},
+      layerOpacities: {},
+      files: [{ id: 'media-clip-1', file, name: 'clip.mp4', duration: 10 }],
+      compositions: [],
+      proxyEnabled: false,
+    } as any);
+
+    useTimelineStore.setState({
+      tracks: [
+        {
+          id: 'track-v1',
+          name: 'Video 1',
+          type: 'video',
+          visible: true,
+          muted: false,
+          solo: false,
+        },
+      ],
+      clips: [
+        {
+          id: 'clip-1',
+          trackId: 'track-v1',
+          name: 'clip.mp4',
+          file,
+          startTime: 0,
+          duration: 10,
+          inPoint: 0,
+          outPoint: 10,
+          effects: [],
+          transform: { ...DEFAULT_TRANSFORM },
+          source,
+          isLoading: false,
+        },
+      ],
+      playheadPosition: 1.25,
+      isPlaying: true,
+      isDraggingPlayhead: false,
+      playbackSpeed: 1,
+    } as any);
+
+    const layers = service.buildLayersFromStore();
+
+    expect(layers).toHaveLength(1);
+    expect(layers[0]?.source?.webCodecsPlayer).toBe(runtimeProvider);
+    expect(layers[0]?.source?.runtimeSessionKey).toBe(previewRuntimeSource?.runtimeSessionKey);
+  });
+
+  it('keeps the scrub runtime provider active for playback while a scrub-stop settle is pending', () => {
+    const service = new LayerBuilderService();
+    const file = new File(['video'], 'clip.mp4', { type: 'video/mp4', lastModified: 111 });
+    const clipPlayer = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 29_200_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 29.2,
+      isPlaying: false,
+      pause: () => {},
+      seek: () => {},
+    };
+    const playbackRuntimeProvider = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 29_250_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 29.25,
+      isPlaying: true,
+      pause: () => {},
+      seek: () => {},
+    };
+    const scrubRuntimeProvider = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 30_000_000 }),
+      getPendingSeekTime: () => 30,
+      getDebugInfo: () => null,
+      currentTime: 30,
+      isPlaying: false,
+      pause: () => {},
+      seek: () => {},
+    };
+    const source = bindSourceRuntimeToClip({
+      clipId: 'clip-1',
+      source: {
+        type: 'video',
+        naturalDuration: 40,
+        mediaFileId: 'media-clip-1',
+        webCodecsPlayer: clipPlayer as any,
+      },
+      file,
+      mediaFileId: 'media-clip-1',
+    });
+    const previewRuntimeSource = getPreviewRuntimeSource(source, 'track-v1', true);
+    const scrubRuntimeSource = getScrubRuntimeSource(source, 'track-v1', true);
+
+    setRuntimeFrameProvider(previewRuntimeSource, playbackRuntimeProvider as any);
+    setRuntimeFrameProvider(scrubRuntimeSource, scrubRuntimeProvider as any);
+    scrubSettleState.begin('clip-1', 30, 500, 'scrub-stop');
+
+    useMediaStore.setState({
+      activeCompositionId: null,
+      activeLayerSlots: {},
+      layerOpacities: {},
+      files: [{ id: 'media-clip-1', file, name: 'clip.mp4', duration: 40 }],
+      compositions: [],
+      proxyEnabled: false,
+    } as any);
+
+    useTimelineStore.setState({
+      tracks: [
+        {
+          id: 'track-v1',
+          name: 'Video 1',
+          type: 'video',
+          visible: true,
+          muted: false,
+          solo: false,
+        },
+      ],
+      clips: [
+        {
+          id: 'clip-1',
+          trackId: 'track-v1',
+          name: 'clip.mp4',
+          file,
+          startTime: 0,
+          duration: 40,
+          inPoint: 0,
+          outPoint: 40,
+          effects: [],
+          transform: { ...DEFAULT_TRANSFORM },
+          source,
+          isLoading: false,
+        },
+      ],
+      playheadPosition: 30.2,
+      isPlaying: true,
+      isDraggingPlayhead: false,
+      playbackSpeed: 1,
+    } as any);
+
+    const layers = service.buildLayersFromStore();
+
+    expect(layers).toHaveLength(1);
+    expect(layers[0]?.source?.webCodecsPlayer).toBe(scrubRuntimeProvider);
+    expect(layers[0]?.source?.runtimeSessionKey).toBe(scrubRuntimeSource?.runtimeSessionKey);
+  });
+
+  it('uses the playback runtime provider for nested full WebCodecs playback', () => {
+    const service = new LayerBuilderService();
+    const file = new File(['video'], 'nested.mp4', { type: 'video/mp4', lastModified: 102 });
+    const clipPlayer = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_250_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 1.25,
+      isPlaying: false,
+      pause: () => {},
+      seek: () => {},
+    };
+    const runtimeProvider = {
+      isFullMode: () => true,
+      isSimpleMode: () => false,
+      hasFrame: () => true,
+      getCurrentFrame: () => ({ timestamp: 1_265_000 }),
+      getPendingSeekTime: () => null,
+      getDebugInfo: () => null,
+      currentTime: 1.265,
+      isPlaying: true,
+      pause: () => {},
+      seek: () => {},
+    };
+    const nestedSource = bindSourceRuntimeToClip({
+      clipId: 'nested-clip-1',
+      source: {
+        type: 'video',
+        naturalDuration: 10,
+        mediaFileId: 'media-nested-1',
+        webCodecsPlayer: clipPlayer as any,
+      },
+      file,
+      mediaFileId: 'media-nested-1',
+    });
+    const previewRuntimeSource = getPreviewRuntimeSource(nestedSource, 'nested-track-v1', true);
+
+    setRuntimeFrameProvider(previewRuntimeSource, runtimeProvider as any);
+
+    useMediaStore.setState({
+      activeCompositionId: null,
+      activeLayerSlots: {},
+      layerOpacities: {},
+      files: [{ id: 'media-nested-1', file, name: 'nested.mp4', duration: 10 }],
+      compositions: [{ id: 'comp-1', width: 1920, height: 1080 }],
+      proxyEnabled: false,
+    } as any);
+
+    useTimelineStore.setState({
+      tracks: [
+        {
+          id: 'track-v1',
+          name: 'Video 1',
+          type: 'video',
+          visible: true,
+          muted: false,
+          solo: false,
+        },
+      ],
+      clips: [
+        {
+          id: 'comp-clip-1',
+          trackId: 'track-v1',
+          name: 'Comp 1',
+          startTime: 0,
+          duration: 10,
+          inPoint: 0,
+          outPoint: 10,
+          effects: [],
+          transform: { ...DEFAULT_TRANSFORM },
+          isComposition: true,
+          compositionId: 'comp-1',
+          nestedTracks: [
+            {
+              id: 'nested-track-v1',
+              name: 'Nested Video 1',
+              type: 'video',
+              visible: true,
+              muted: false,
+              solo: false,
+            },
+          ],
+          nestedClips: [
+            {
+              id: 'nested-clip-1',
+              trackId: 'nested-track-v1',
+              name: 'nested.mp4',
+              file,
+              startTime: 0,
+              duration: 10,
+              inPoint: 0,
+              outPoint: 10,
+              effects: [],
+              transform: { ...DEFAULT_TRANSFORM },
+              source: nestedSource,
+              isLoading: false,
+            },
+          ],
+          isLoading: false,
+        },
+      ],
+      playheadPosition: 1.25,
+      isPlaying: true,
+      isDraggingPlayhead: false,
+      playbackSpeed: 1,
+    } as any);
+
+    const layers = service.buildLayersFromStore();
+    const nestedLayers = (layers[0]?.source as any)?.nestedComposition?.layers;
+
+    expect(layers).toHaveLength(1);
+    expect(nestedLayers).toHaveLength(1);
+    expect(nestedLayers[0]?.source?.webCodecsPlayer).toBe(runtimeProvider);
+    expect(nestedLayers[0]?.source?.runtimeSessionKey).toBe(
+      previewRuntimeSource?.runtimeSessionKey
+    );
   });
 
   it('rebuilds paused layers when the playhead jumps to a different clip without dragging', () => {

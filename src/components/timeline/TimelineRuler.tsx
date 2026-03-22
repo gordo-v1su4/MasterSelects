@@ -63,6 +63,7 @@ function TimelineRulerComponent({
   return (
     <div
       className="time-ruler"
+      data-ai-id="timeline-ruler"
       style={{ width, transform: `translateX(-${scrollX}px)` }}
       onMouseDown={onRulerMouseDown}
     >

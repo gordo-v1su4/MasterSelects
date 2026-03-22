@@ -157,8 +157,16 @@ fn check_http_auth(auth_header: Option<String>, expected_token: &Option<String>)
     }
 }
 
+/// Check if an origin matches *.masterselects.pages.dev (Cloudflare Pages previews)
+fn is_cloudflare_pages_origin(origin: &str) -> bool {
+    origin == "https://masterselects.pages.dev"
+        || (origin.starts_with("https://") && origin.ends_with(".masterselects.pages.dev"))
+}
+
 async fn run_http_server(port: u16, state: Arc<AppState>, allowed_origins: Arc<Vec<String>>) {
-    // Build CORS with explicit allowed origins
+    // CORS setup: static origins from config + Cloudflare Pages production domain.
+    // For preview deployments (*.masterselects.pages.dev), use --allowed-origins CLI flag.
+    // WebSocket handler has dynamic pattern matching for CF Pages subdomains.
     let cors_origins: Vec<String> = allowed_origins.iter().cloned().collect();
     let cors_headers: Vec<String> = cors_origins.iter().map(|o| o.to_string()).collect();
 
@@ -520,6 +528,7 @@ async fn handle_connection(
                     || origin_str.starts_with("http://127.0.0.1")
                     || origin_str.starts_with("https://localhost")
                     || origin_str.starts_with("https://127.0.0.1")
+                    || is_cloudflare_pages_origin(origin_str)
                     || allowed_origins.iter().any(|o| o == origin_str);
                 if !allowed {
                     warn!("Rejected WebSocket connection from disallowed origin: {}", origin_str);

@@ -137,7 +137,7 @@ export async function completeDownload(params: CompleteDownloadParams): Promise<
   log.debug('Download complete', { clipId, duration: naturalDuration });
 
   // Initialize WebCodecsPlayer
-  const webCodecsPlayer = await initWebCodecsPlayer(video, 'YouTube download');
+  const webCodecsPlayer = await initWebCodecsPlayer(video, file.name, file);
   if (webCodecsPlayer) {
     const currentClips = get().clips;
     const targetClip = currentClips.find((c: TimelineClip) => c.id === clipId);

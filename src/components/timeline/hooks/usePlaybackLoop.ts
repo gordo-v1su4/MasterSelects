@@ -2,7 +2,10 @@
 
 import { useEffect } from 'react';
 import { useTimelineStore } from '../../../stores/timeline';
-import { playheadState } from '../../../services/layerBuilder';
+import {
+  clearInternalPlaybackHold,
+  playheadState,
+} from '../../../services/layerBuilder';
 
 interface UsePlaybackLoopProps {
   isPlaying: boolean;
@@ -21,6 +24,7 @@ export function usePlaybackLoop({ isPlaying }: UsePlaybackLoopProps) {
       if (playheadState.isUsingInternalPosition) {
         useTimelineStore.setState({ playheadPosition: playheadState.position });
       }
+      clearInternalPlaybackHold();
       playheadState.isUsingInternalPosition = false;
       playheadState.hasMasterAudio = false;
       playheadState.masterAudioElement = null;
@@ -53,10 +57,14 @@ export function usePlaybackLoop({ isPlaying }: UsePlaybackLoopProps) {
         const effectiveStart = ip !== null ? ip : 0;
 
         let newPosition: number;
+        const heldPlaybackPosition = playheadState.heldPlaybackPosition;
 
-        // AUDIO MASTER CLOCK: If we have an active audio element, derive playhead from its time
-        // Only use audio master for normal forward playback (speed === 1)
-        if (playheadState.hasMasterAudio && playheadState.masterAudioElement && playbackSpeed === 1) {
+        if (heldPlaybackPosition !== null) {
+          newPosition = heldPlaybackPosition;
+          lastTime = currentTime;
+        } else if (playheadState.hasMasterAudio && playheadState.masterAudioElement && playbackSpeed === 1) {
+          // AUDIO MASTER CLOCK: If we have an active audio element, derive playhead from its time.
+          // Only use audio master for normal forward playback (speed === 1).
           const audio = playheadState.masterAudioElement;
           if (!audio.paused && audio.readyState >= 2) {
             // Calculate timeline position from audio's current time
@@ -177,6 +185,7 @@ export function usePlaybackLoop({ isPlaying }: UsePlaybackLoopProps) {
       if (playheadState.isUsingInternalPosition) {
         useTimelineStore.setState({ playheadPosition: playheadState.position });
       }
+      clearInternalPlaybackHold();
       playheadState.isUsingInternalPosition = false;
       playheadState.hasMasterAudio = false;
       playheadState.masterAudioElement = null;

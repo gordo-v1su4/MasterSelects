@@ -18,6 +18,7 @@ lerna-debug.log*
 
 # Environment
 .env
+.dev.vars
 .env.local
 .env.*.local
 *.local
@@ -69,6 +70,7 @@ tools/native-helper/ffmpeg/
 
 # Browser automation logs
 .browser-logs.json
+.wrangler/
 
 # AI Bridge session token (generated per dev session)
 .ai-bridge-token

@@ -1,7 +1,7 @@
 // App version - INCREMENT ON EVERY COMMIT!
 // Format: MAJOR.MINOR.PATCH
 // Increment PATCH (0.0.X) for each commit
-export const APP_VERSION = '1.3.9';
+export const APP_VERSION = '1.4.0';
 
 export interface ChangelogNotice {
   type: 'info' | 'warning' | 'success' | 'danger';
@@ -27,21 +27,18 @@ export const FEATURED_VIDEO: {
   youtubeId: '5ezX5ra0RTI',
   title: 'MasterSelects Demo',
   banner: {
-    type: 'danger',
-    title: 'Playback Fixes',
-    message: 'Fixed playback bugs on Win/Linux.',
+    type: 'success',
+    title: 'WebCodecs Playback available! \u{1F680}',
+    message: 'Breakthrough: GPU-accelerated playback via WebCodecs.',
     animated: true,
-    annotation: {
-      text: 'some',
-    },
   },
 };
 
 // Build/Platform notice shown at top of changelog (set to null to hide)
 export const BUILD_NOTICE: ChangelogNotice | null = {
   type: 'success',
-  title: 'Native Helper v0.3.10 available',
-  message: 'Includes the helper auth hardening, safer local bridge defaults, and the refreshed local helper workflow.',
+  title: 'Native Helper v0.3.12 available',
+  message: 'Adds masterselects.com helper detection while keeping the hardened localhost bridge checks and helper update flow in place.',
   animated: true,
 };
 

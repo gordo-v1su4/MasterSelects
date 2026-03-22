@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createTestTimelineStore } from '../../helpers/storeFactory';
-import { createMockClip, createMockTrack, createMockTransform, resetIdCounter } from '../../helpers/mockData';
+import { createMockClip, createMockTrack, resetIdCounter } from '../../helpers/mockData';
 
 describe('clipSlice', () => {
   let store: ReturnType<typeof createTestTimelineStore>;
@@ -543,7 +543,7 @@ describe('clipSlice', () => {
       expect(store.getState().clips.find(c => c.id === 'clip-1')!.reversed).toBe(false);
     });
 
-    it('reverses thumbnail array when toggling', () => {
+    it('preserves thumbnail array when toggling (UI handles display order)', () => {
       const clip = createMockClip({
         id: 'clip-1',
         trackId: 'video-1',
@@ -552,8 +552,9 @@ describe('clipSlice', () => {
       store = createTestTimelineStore({ clips: [clip] } as any);
 
       store.getState().toggleClipReverse('clip-1');
+      // thumbnails stay in original order; the reversed flag drives display order
       expect(store.getState().clips.find(c => c.id === 'clip-1')!.thumbnails).toEqual([
-        'thumb-c', 'thumb-b', 'thumb-a',
+        'thumb-a', 'thumb-b', 'thumb-c',
       ]);
     });
   });

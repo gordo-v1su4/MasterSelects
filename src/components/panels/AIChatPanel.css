@@ -43,6 +43,28 @@
   color: var(--text-secondary);
 }
 
+.ai-panel-overlay-subtext {
+  max-width: 320px;
+  text-align: center;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.ai-panel-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ai-panel-overlay-or {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 .ai-panel-overlay-content .btn-settings {
   padding: var(--sp-2) var(--sp-4);
   background: var(--accent);
@@ -73,6 +95,38 @@
   margin: 0;
   font-size: var(--font-xl);
   font-weight: var(--font-semibold);
+}
+
+.ai-chat-title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ai-access-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.ai-access-chip.hosted {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
+.ai-access-chip.byo {
+  border-color: var(--border-color);
+}
+
+.ai-access-chip.none {
+  color: var(--danger-light);
+  border-color: var(--danger-border);
 }
 
 .ai-chat-controls {

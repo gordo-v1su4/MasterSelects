@@ -280,6 +280,9 @@ export class LayerCollector {
       const clipProvider = source.webCodecsPlayer?.isFullMode()
         ? source.webCodecsPlayer
         : null;
+      const htmlPreviewDebugDisabled =
+        flags.useFullWebCodecsPlayback &&
+        flags.disableHtmlPreviewFallback;
       const hasFullWebCodecsPreview =
         flags.useFullWebCodecsPlayback &&
         (!!clipProvider || !!runtimeProvider?.isFullMode());
@@ -291,12 +294,14 @@ export class LayerCollector {
       const inScrubGrace = !isDragging && performance.now() < this.scrubGraceUntil;
       const isSettling = scrubSettleState.isPending(layer.sourceClipId);
       const allowHtmlScrubPreview =
+        !htmlPreviewDebugDisabled &&
         !hasFullWebCodecsPreview &&
         !deps.isPlaying &&
         (isDragging || inScrubGrace || isSettling) &&
         !!source.videoElement;
       const allowHtmlVideoPreview =
         !!source.videoElement &&
+        !htmlPreviewDebugDisabled &&
         (!hasFullWebCodecsPreview ||
           ENABLE_VISUAL_HTML_VIDEO_FALLBACK ||
           allowHtmlScrubPreview);
@@ -326,16 +331,28 @@ export class LayerCollector {
             ? runtimeProvider
             : null);
       const providerKey = this.getVideoProviderKey(layer, frameProvider, runtimeProvider);
+      const runtimeProviderKey = runtimeProvider
+        ? this.getVideoProviderKey(layer, runtimeProvider, runtimeProvider)
+        : providerKey;
       const canReuseLastFrame = this.canReuseLastSuccessfulVideoFrame(layerReuseKey, providerKey);
       const frameProviderStable = this.isPendingWebCodecsFrameStable(frameProvider ?? undefined);
       const holdingFrame = !frameProviderStable && canReuseLastFrame;
+      const allowRuntimeFrameReadDuringSettle =
+        scrubSettleState.isPending(layer.sourceClipId) &&
+        !!runtimeProvider?.isFullMode() &&
+        runtimeProvider !== clipProvider;
 
       const canReadRuntimeFrame =
         !!source.runtimeSourceId &&
         !!source.runtimeSessionKey &&
         !!runtimeProvider?.isFullMode() &&
-        (!frameProvider || frameProvider === runtimeProvider) &&
-        (runtimeProviderStable || canReuseLastFrame || allowPendingScrubFrame);
+        (!frameProvider || frameProvider === runtimeProvider || allowRuntimeFrameReadDuringSettle) &&
+        (
+          runtimeProviderStable ||
+          canReuseLastFrame ||
+          allowPendingScrubFrame ||
+          allowRuntimeFrameReadDuringSettle
+        );
 
       const runtimeFrameRead = canReadRuntimeFrame
         ? readRuntimeFrameForSource(source)
@@ -347,16 +364,59 @@ export class LayerCollector {
         'displayWidth' in runtimeFrame &&
         'displayHeight' in runtimeFrame
       ) {
+        const targetMediaTime =
+          layer.source?.mediaTime ??
+          runtimeFrameRead?.binding.session.currentTime ??
+          runtimeProvider?.getPendingSeekTime?.() ??
+          runtimeProvider?.currentTime;
+        const displayedMediaTime = this.getFrameTimestampSeconds(
+          runtimeFrameRead?.frameHandle?.timestamp,
+          targetMediaTime
+        );
+        const frameAcceptable = this.isAcceptableWebCodecsFrame(
+          displayedMediaTime,
+          targetMediaTime,
+          runtimeProvider ?? frameProvider,
+          { isPlaying: deps.isPlaying, isDragging }
+        );
+        const severelyStaleForCurrentTarget =
+          !isDragging &&
+          typeof displayedMediaTime === 'number' &&
+          typeof targetMediaTime === 'number' &&
+          Number.isFinite(displayedMediaTime) &&
+          Number.isFinite(targetMediaTime) &&
+          Math.abs(displayedMediaTime - targetMediaTime) > 2;
+        const effectiveHoldingFrame =
+          holdingFrame &&
+          !(
+            !isDragging &&
+            !frameAcceptable &&
+            (
+              (deps.isPlaying && this.isPlaybackStartupWarmupActive(runtimeProvider ?? frameProvider)) ||
+              severelyStaleForCurrentTarget
+            )
+          );
+        if (
+          !allowPendingScrubFrame &&
+          !effectiveHoldingFrame &&
+          !allowRuntimeFrameReadDuringSettle &&
+          !frameAcceptable
+        ) {
+          this.setCollectorState(layerReuseKey, 'drop', {
+            reason: 'stale_runtime_frame',
+          });
+          return null;
+        }
         const extTex = deps.textureManager.importVideoTexture(runtimeFrame);
         if (extTex) {
           wcPipelineMonitor.record('frame_read', {
             frameTs: runtimeFrame.timestamp,
           });
-          if (providerKey) {
-            this.lastSuccessfulVideoProviderKey.set(layerReuseKey, providerKey);
+          if (runtimeProviderKey) {
+            this.lastSuccessfulVideoProviderKey.set(layerReuseKey, runtimeProviderKey);
           }
-          this.setCollectorState(layerReuseKey, holdingFrame ? 'hold' : 'render', {
-            reason: holdingFrame ? 'same_provider_pending' : 'runtime_frame',
+          this.setCollectorState(layerReuseKey, effectiveHoldingFrame ? 'hold' : 'render', {
+            reason: effectiveHoldingFrame ? 'same_provider_pending' : 'runtime_frame',
           });
           this.currentDecoder = 'WebCodecs';
           this.currentWebCodecsInfo = frameProvider?.getDebugInfo?.() ?? undefined;
@@ -368,6 +428,9 @@ export class LayerCollector {
             textureView: null,
             sourceWidth: runtimeFrame.displayWidth,
             sourceHeight: runtimeFrame.displayHeight,
+            displayedMediaTime,
+            targetMediaTime,
+            previewPath: 'webcodecs',
           };
         }
       }
@@ -381,6 +444,47 @@ export class LayerCollector {
         }
         const frame = frameProvider.getCurrentFrame();
         if (frame) {
+          const targetMediaTime =
+            layer.source?.mediaTime ??
+            frameProvider.getPendingSeekTime?.() ??
+            frameProvider.currentTime;
+          const displayedMediaTime = this.getFrameTimestampSeconds(
+            frame.timestamp,
+            targetMediaTime
+          );
+          const frameAcceptable = this.isAcceptableWebCodecsFrame(
+            displayedMediaTime,
+            targetMediaTime,
+            frameProvider,
+            { isPlaying: deps.isPlaying, isDragging }
+          );
+          const severelyStaleForCurrentTarget =
+            !isDragging &&
+            typeof displayedMediaTime === 'number' &&
+            typeof targetMediaTime === 'number' &&
+            Number.isFinite(displayedMediaTime) &&
+            Number.isFinite(targetMediaTime) &&
+            Math.abs(displayedMediaTime - targetMediaTime) > 2;
+          const effectiveHoldingFrame =
+            holdingFrame &&
+            !(
+              !isDragging &&
+              !frameAcceptable &&
+              (
+                (deps.isPlaying && this.isPlaybackStartupWarmupActive(frameProvider)) ||
+                severelyStaleForCurrentTarget
+              )
+            );
+          if (
+            !allowPendingScrubFrame &&
+            !effectiveHoldingFrame &&
+            !frameAcceptable
+          ) {
+            this.setCollectorState(layerReuseKey, 'drop', {
+              reason: 'stale_provider_frame',
+            });
+            return null;
+          }
           const extTex = deps.textureManager.importVideoTexture(frame);
           if (extTex) {
             wcPipelineMonitor.record('frame_read', {
@@ -389,8 +493,8 @@ export class LayerCollector {
             if (providerKey) {
               this.lastSuccessfulVideoProviderKey.set(layerReuseKey, providerKey);
             }
-            this.setCollectorState(layerReuseKey, holdingFrame ? 'hold' : 'render', {
-              reason: holdingFrame ? 'same_provider_pending' : 'provider_frame',
+            this.setCollectorState(layerReuseKey, effectiveHoldingFrame ? 'hold' : 'render', {
+              reason: effectiveHoldingFrame ? 'same_provider_pending' : 'provider_frame',
             });
             this.currentDecoder = 'WebCodecs';
             this.currentWebCodecsInfo = frameProvider.getDebugInfo?.() ?? undefined;
@@ -402,11 +506,45 @@ export class LayerCollector {
               textureView: null,
               sourceWidth: frame.displayWidth,
               sourceHeight: frame.displayHeight,
+              displayedMediaTime,
+              targetMediaTime,
+              previewPath: 'webcodecs',
             };
           }
           this.setCollectorState(layerReuseKey, 'drop', {
             reason: 'import_failed',
           });
+        } else if (
+          // Scrub-to-play bridge: if the main provider has no frame yet but the
+          // clip's own WebCodecs player still holds a frame from the scrub session,
+          // show that as a visual placeholder to avoid black frames.
+          clipProvider &&
+          clipProvider !== frameProvider &&
+          deps.isPlaying &&
+          scrubSettleState.isPending(layer.sourceClipId)
+        ) {
+          const bridgeFrame = clipProvider.getCurrentFrame?.();
+          if (bridgeFrame) {
+            const extTex = deps.textureManager.importVideoTexture(bridgeFrame);
+            if (extTex) {
+              this.setCollectorState(layerReuseKey, 'hold', {
+                reason: 'scrub_bridge_frame',
+              });
+              this.currentDecoder = 'WebCodecs';
+              this.hasVideo = true;
+              return {
+                layer,
+                isVideo: true,
+                externalTexture: extTex,
+                textureView: null,
+                sourceWidth: bridgeFrame.displayWidth,
+                sourceHeight: bridgeFrame.displayHeight,
+                displayedMediaTime: this.getFrameTimestampSeconds(bridgeFrame.timestamp, layer.source?.mediaTime),
+                targetMediaTime: layer.source?.mediaTime,
+                previewPath: 'webcodecs',
+              };
+            }
+          }
         } else {
           this.setCollectorState(layerReuseKey, 'drop', {
             reason: 'no_frame',
@@ -485,6 +623,68 @@ export class LayerCollector {
 
   private getTargetVideoTime(layer: Layer, video: HTMLVideoElement): number {
     return layer.source?.mediaTime ?? video.currentTime;
+  }
+
+  private getFrameTimestampSeconds(timestamp: unknown, fallback?: number): number | undefined {
+    return typeof timestamp === 'number' && Number.isFinite(timestamp)
+      ? timestamp / 1_000_000
+      : fallback;
+  }
+
+  private isPlaybackStartupWarmupActive(
+    provider: NonNullable<Layer['source']>['webCodecsPlayer'] | null | undefined
+  ): boolean {
+    return (
+      !!provider &&
+      'isPlaybackStartupWarmupActive' in provider &&
+      typeof provider.isPlaybackStartupWarmupActive === 'function' &&
+      provider.isPlaybackStartupWarmupActive() === true
+    );
+  }
+
+  private getWebCodecsFrameToleranceSeconds(
+    provider: NonNullable<Layer['source']>['webCodecsPlayer'] | null,
+    isPlaying: boolean,
+    isDragging: boolean
+  ): number {
+    const startupWarmupActive =
+      isPlaying &&
+      this.isPlaybackStartupWarmupActive(provider);
+    const frameRate = provider?.getFrameRate?.() ?? 30;
+    const frameWindow = isDragging ? 12 : startupWarmupActive ? 18 : isPlaying ? 8 : 4;
+    const minTolerance = isDragging ? 0.2 : startupWarmupActive ? 0.2 : isPlaying ? 0.12 : 0.06;
+    const maxTolerance = isDragging ? 1.2 : startupWarmupActive ? 0.65 : isPlaying ? 0.35 : 0.18;
+
+    return Math.max(
+      minTolerance,
+      Math.min(maxTolerance, frameWindow / Math.max(frameRate, 1))
+    );
+  }
+
+  private isAcceptableWebCodecsFrame(
+    displayedMediaTime: number | undefined,
+    targetMediaTime: number | undefined,
+    provider: NonNullable<Layer['source']>['webCodecsPlayer'] | null,
+    options: {
+      isPlaying: boolean;
+      isDragging: boolean;
+    }
+  ): boolean {
+    if (
+      typeof displayedMediaTime !== 'number' ||
+      !Number.isFinite(displayedMediaTime) ||
+      typeof targetMediaTime !== 'number' ||
+      !Number.isFinite(targetMediaTime)
+    ) {
+      return true;
+    }
+
+    const tolerance = this.getWebCodecsFrameToleranceSeconds(
+      provider,
+      options.isPlaying,
+      options.isDragging
+    );
+    return Math.abs(displayedMediaTime - targetMediaTime) <= tolerance;
   }
 
   private traceScrubPath(

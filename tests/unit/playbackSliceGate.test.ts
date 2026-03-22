@@ -3,6 +3,7 @@ import { createPlaybackSlice } from '../../src/stores/timeline/playbackSlice';
 import { playheadState } from '../../src/services/layerBuilder/PlayheadState';
 
 const getRuntimeFrameProvider = vi.fn();
+const requestNewFrameRender = vi.fn();
 
 vi.mock('../../src/stores/mediaStore', () => ({
   useMediaStore: {
@@ -17,9 +18,16 @@ vi.mock('../../src/services/mediaRuntime/runtimePlayback', () => ({
   getRuntimeFrameProvider: (...args: unknown[]) => getRuntimeFrameProvider(...args),
 }));
 
+vi.mock('../../src/engine/WebGPUEngine', () => ({
+  engine: {
+    requestNewFrameRender: (...args: unknown[]) => requestNewFrameRender(...args),
+  },
+}));
+
 describe('playbackSlice HTML readiness gate', () => {
   beforeEach(() => {
     getRuntimeFrameProvider.mockReset();
+    requestNewFrameRender.mockReset();
     playheadState.position = 0;
     playheadState.isUsingInternalPosition = false;
   });
@@ -92,5 +100,27 @@ describe('playbackSlice HTML readiness gate', () => {
 
     expect(state.playheadPosition).toBe(20);
     expect(playheadState.position).toBe(20);
+  });
+
+  it('requests a fresh render when moving the paused playhead without dragging', () => {
+    const state: Record<string, any> = {
+      clips: [],
+      playheadPosition: 0,
+      duration: 60,
+      isPlaying: false,
+      isDraggingPlayhead: false,
+    };
+
+    const set = (partial: any) => {
+      const next = typeof partial === 'function' ? partial(state) : partial;
+      Object.assign(state, next);
+    };
+    const get = () => state as any;
+
+    Object.assign(state, createPlaybackSlice(set as any, get as any));
+
+    state.setPlayheadPosition(1 / 30);
+
+    expect(requestNewFrameRender).toHaveBeenCalledTimes(1);
   });
 });

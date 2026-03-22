@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector, persist } from 'zustand/middleware';
 import { apiKeyManager, type ApiKeyType } from '../services/apiKeyManager';
 import { projectFileService } from '../services/project/ProjectFileService';
+import { flags } from '../engine/featureFlags';
 import { Logger } from '../services/logger';
 const log = Logger.create('SettingsStore');
 
@@ -118,6 +119,9 @@ interface SettingsState {
   showChangelogOnStartup: boolean;
   lastSeenChangelogVersion: string | null;
 
+  // Playback engine mode
+  webCodecsEnabled: boolean;  // true = WebCodecs, false = HTML Video
+
   // UI state
   isSettingsOpen: boolean;
 
@@ -154,6 +158,7 @@ interface SettingsState {
   setShowChangelogOnStartup: (show: boolean) => void;
   setLastSeenChangelogVersion: (version: string | null) => void;
   markChangelogSeen: (version: string) => void;
+  setWebCodecsEnabled: (enabled: boolean) => void;
   openSettings: () => void;
   closeSettings: () => void;
   toggleSettings: () => void;
@@ -209,6 +214,7 @@ export const useSettingsStore = create<SettingsState>()(
       completedTutorials: [], // Campaign IDs that have been completed
       showChangelogOnStartup: true, // Show changelog dialog on every startup
       lastSeenChangelogVersion: null, // Latest app version whose changelog was acknowledged
+      webCodecsEnabled: false, // Default to HTML Video
       isSettingsOpen: false,
 
       // Output settings
@@ -335,6 +341,11 @@ export const useSettingsStore = create<SettingsState>()(
         set({ lastSeenChangelogVersion: version });
         persistChangelogStateToProject(get().showChangelogOnStartup, version);
       },
+      setWebCodecsEnabled: (enabled: boolean) => {
+        flags.useFullWebCodecsPlayback = enabled;
+        flags.disableHtmlPreviewFallback = enabled;
+        set({ webCodecsEnabled: enabled });
+      },
       openSettings: () => set({ isSettingsOpen: true }),
       closeSettings: () => set({ isSettingsOpen: false }),
       toggleSettings: () => set((state) => ({ isSettingsOpen: !state.isSettingsOpen })),
@@ -411,7 +422,15 @@ export const useSettingsStore = create<SettingsState>()(
         lastSeenChangelogVersion: state.lastSeenChangelogVersion,
         outputResolution: state.outputResolution,
         fps: state.fps,
+        webCodecsEnabled: state.webCodecsEnabled,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Sync feature flags with persisted setting on app start
+          flags.useFullWebCodecsPlayback = state.webCodecsEnabled;
+          flags.disableHtmlPreviewFallback = state.webCodecsEnabled;
+        }
+      },
     }
   )
   )

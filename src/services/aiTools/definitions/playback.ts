@@ -28,6 +28,121 @@ export const playbackToolDefinitions: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'simulateScrub',
+      description: 'Simulate a real drag scrub in the browser by holding playhead-drag mode and moving the playhead continuously with requestAnimationFrame. Useful for testing short, long, custom, or wild random scrubbing at different speeds.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            enum: ['short', 'long', 'random', 'custom'],
+            description: 'Scrub pattern preset. Use "custom" with points[] for explicit waypoints.',
+          },
+          speed: {
+            type: 'string',
+            enum: ['slow', 'normal', 'fast', 'wild'],
+            description: 'Drag speed preset. Faster presets shorten each segment between scrub waypoints.',
+          },
+          durationMs: {
+            type: 'number',
+            description: 'Total scrub duration in milliseconds. For custom points this is distributed across all segments.',
+          },
+          segmentMs: {
+            type: 'number',
+            description: 'Override the per-segment duration in milliseconds for preset patterns.',
+          },
+          rangeSeconds: {
+            type: 'number',
+            description: 'For short scrubs, how far to swing around the current playhead position.',
+          },
+          minTime: {
+            type: 'number',
+            description: 'Optional lower time bound in seconds.',
+          },
+          maxTime: {
+            type: 'number',
+            description: 'Optional upper time bound in seconds.',
+          },
+          points: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'Custom scrub waypoints in timeline seconds. Only used when pattern="custom".',
+          },
+          seed: {
+            type: 'number',
+            description: 'Optional deterministic seed for random scrubs.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'simulatePlayback',
+      description: 'Run real timeline playback in the browser for a fixed duration, then pause and report how the playhead actually progressed. Useful for reproducing longer playback freezes and checking playback at different speeds.',
+      parameters: {
+        type: 'object',
+        properties: {
+          startTime: {
+            type: 'number',
+            description: 'Optional playback start time in timeline seconds.',
+          },
+          durationMs: {
+            type: 'number',
+            description: 'How long to keep playback running before pausing, in milliseconds.',
+          },
+          playbackSpeed: {
+            type: 'number',
+            description: 'Optional playback speed for the run, e.g. 1, 2, 0.5, or -1.',
+          },
+          settleMs: {
+            type: 'number',
+            description: 'Optional pause-after-run settle time before returning, in milliseconds.',
+          },
+          resetDiagnostics: {
+            type: 'boolean',
+            description: 'Whether to reset WebCodecs/VF/health diagnostics before the run. Defaults to true.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'simulatePlaybackPath',
+      description: 'Run a scripted mixed playback-and-scrub stress path in the browser. The default preset starts at the current clip start, plays briefly, scrubs while playback is active to 30s, then to 3m, back to 10s, with play segments between each scrub.',
+      parameters: {
+        type: 'object',
+        properties: {
+          preset: {
+            type: 'string',
+            enum: ['play_scrub_stress_v1'],
+            description: 'Named scripted playback path preset.',
+          },
+          startTime: {
+            type: 'number',
+            description: 'Optional override start time in timeline seconds. Defaults to the active clip start.',
+          },
+          playbackSpeed: {
+            type: 'number',
+            description: 'Playback speed for the play segments. Defaults to 1.',
+          },
+          resetDiagnostics: {
+            type: 'boolean',
+            description: 'Whether to reset WebCodecs/VF/health diagnostics before the path. Defaults to true.',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'setClipSpeed',
       description: 'Set the playback speed of a clip. Also supports reversing.',
       parameters: {

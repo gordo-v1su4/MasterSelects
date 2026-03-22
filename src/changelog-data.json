@@ -1,5 +1,89 @@
 [
   {
+    "date": "2026-03-23",
+    "type": "new",
+    "title": "Model-Weighted Credit Costs",
+    "description": "AI chat credits now scale with model cost. Cheap models (GPT-4.1 Mini/Nano) cost 1 credit, mid-tier reasoning (o4-mini) costs 3, flagship models (GPT-4.1, GPT-5, o3) cost 5, and premium models (GPT-5.2 Pro, o3-pro) cost 8-50 credits per request. Credit costs are shown in the model dropdown.",
+    "section": "AI & Billing",
+    "commits": ["6c852a9b"]
+  },
+  {
+    "date": "2026-03-23",
+    "type": "improve",
+    "title": "Updated Pricing Plans",
+    "description": "Stripe prices updated to 4.90 €/mo (Starter), 14.90 €/mo (Pro), 29.90 €/mo (Studio). Monthly credits adjusted to break-even amounts: 4,500 / 13,500 / 27,000 credits. Prices now displayed in the pricing dialog.",
+    "section": "AI & Billing",
+    "commits": ["33ccf3e6"]
+  },
+  {
+    "date": "2026-03-23",
+    "type": "improve",
+    "title": "Legal Dialog: Name Updated to Roman Kuskowski",
+    "description": "Updated Impressum/Legal notice name across all 8 languages.",
+    "section": "UI"
+  },
+  {
+    "date": "2026-03-23",
+    "type": "new",
+    "title": "Dev Quick Login in Auth Dialog",
+    "description": "Local development auth dialog now includes quick login buttons for each plan tier (Free/Starter/Pro/Studio), with frontend-only mock fallback when the backend is not running.",
+    "section": "Developer Tools"
+  },
+  {
+    "date": "2026-03-23",
+    "type": "improve",
+    "title": "Toolbar & AI Panel Polish",
+    "description": "Removed WIP notice and version from toolbar center. Improved AI panel overlay with better button styling and 'or' separator for API key option.",
+    "section": "UI"
+  },
+  {
+    "date": "2026-03-22",
+    "type": "fix",
+    "title": "Fix Black Preview After Page Reload (WebCodecs Cold Start)",
+    "description": "After page reload, the preview stayed black until the user pressed play or moved the playhead. Three root causes: (1) feedPendingSeekSamples early-return in rememberPendingSeekFallback skipped the continuation feed, so the decoder never got all samples needed to reach the target; (2) flushStrictPausedSeek was called immediately after the first feed batch, blocking decoder.decode() for continuation feeds; (3) post-seek lookahead frames could overwrite the correctly-seeked target frame. Fixes: removed the early return, deferred the flush to after all samples are fed, and added holdCurrentFrameDuringPause + startPausedPreroll after seek resolution.",
+    "section": "WebCodecs Playback",
+    "commits": []
+  },
+  {
+    "date": "2026-03-22",
+    "type": "fix",
+    "title": "Faster Play Resume After Pause With Larger Preroll Buffer",
+    "description": "Increased the paused preroll buffer from 2 to 6 frames and widened the decoder feed position tolerance so advanceToTime can skip heavyweight decoder resets when the pipeline is already near the target. Reduces play-after-pause startup from ~300ms to ~60ms in warm sessions.",
+    "section": "WebCodecs Playback",
+    "commits": ["6ec1ca15"]
+  },
+  {
+    "date": "2026-03-22",
+    "type": "fix",
+    "title": "Bridge Scrub Frame Into Playback to Reduce Black Gap",
+    "description": "When the main provider has no frame during scrub-to-play settle, the LayerCollector now falls back to the clip's own WebCodecs player frame as a visual placeholder. Also warms up the playback decoder in the background during settle. Reduces max preview update gap by ~47%.",
+    "section": "WebCodecs Playback",
+    "commits": ["884acaba"]
+  },
+  {
+    "date": "2026-03-22",
+    "type": "fix",
+    "title": "Hold Scrub Frame During Scrub-to-Play Transition",
+    "description": "After scrubbing stops, the scrub provider's frame was immediately discarded while the playback decoder worked through the GOP (up to 2s for long-GOP H.264 4K). Now checks the actual playback provider readiness before releasing the hold, and begins a scrub settle state in the WebCodecs path so the playing path can keep the scrub frame visible.",
+    "section": "WebCodecs Playback",
+    "commits": ["0d26b7ff"]
+  },
+  {
+    "date": "2026-03-22",
+    "type": "new",
+    "title": "reloadApp AI Tool for Scripted Hard/Soft Reloads",
+    "description": "Added reloadApp tool to the AI bridge, enabling scripted hard and soft page reloads during automated playback testing without manual browser interaction.",
+    "section": "AI / Debug Tools",
+    "commits": ["884acaba"]
+  },
+  {
+    "date": "2026-03-17",
+    "type": "improve",
+    "title": "Website Sessions Can Now Edit the Timeline Through the Native Helper Bridge",
+    "description": "MasterSelects sessions connected through the Native Helper can now run the full editing toolset directly from the web app, including clip splits, trims, reorders, deletes, and batch edits, without being blocked by the old nativeHelper caller restrictions. Sensitive debug/log endpoints and local file import stay excluded from that bridge path.",
+    "section": "AI / Native Helper"
+  },
+  {
     "date": "2026-03-17",
     "type": "fix",
     "title": "Local AI Bridges Now Enforce Tokens, File Allowlists, and Tool Policies",

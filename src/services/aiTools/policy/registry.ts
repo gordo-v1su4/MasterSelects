@@ -5,6 +5,8 @@ import type { ToolPolicyEntry, CallerContext } from './types';
 
 const allCallers: CallerContext[] = ['chat', 'devBridge', 'nativeHelper', 'console', 'internal'];
 const interactiveCallers: CallerContext[] = ['chat', 'console', 'internal'];
+const bridgeTelemetryCallers: CallerContext[] = ['chat', 'devBridge', 'console', 'internal'];
+const helperEditingCallers: CallerContext[] = ['chat', 'devBridge', 'nativeHelper', 'console', 'internal'];
 
 // Helper to build policy entries
 function readOnly(riskLevel: 'low' | 'medium' = 'low'): ToolPolicyEntry {
@@ -18,14 +20,14 @@ function readOnly(riskLevel: 'low' | 'medium' = 'low'): ToolPolicyEntry {
   };
 }
 
-function sensitive(): ToolPolicyEntry {
+function bridgeTelemetry(): ToolPolicyEntry {
   return {
     readOnly: true,
     riskLevel: 'low',
     requiresConfirmation: false,
     sensitiveDataAccess: true,
     localFileAccess: false,
-    allowedCallers: interactiveCallers,
+    allowedCallers: bridgeTelemetryCallers,
   };
 }
 
@@ -36,7 +38,7 @@ function mutatingLow(): ToolPolicyEntry {
     requiresConfirmation: false,
     sensitiveDataAccess: false,
     localFileAccess: false,
-    allowedCallers: interactiveCallers,
+    allowedCallers: helperEditingCallers,
   };
 }
 
@@ -47,7 +49,7 @@ function mutatingMedium(): ToolPolicyEntry {
     requiresConfirmation: false,
     sensitiveDataAccess: false,
     localFileAccess: false,
-    allowedCallers: interactiveCallers,
+    allowedCallers: helperEditingCallers,
   };
 }
 
@@ -58,7 +60,7 @@ function mutatingHigh(): ToolPolicyEntry {
     requiresConfirmation: true,
     sensitiveDataAccess: false,
     localFileAccess: false,
-    allowedCallers: interactiveCallers,
+    allowedCallers: helperEditingCallers,
   };
 }
 
@@ -96,6 +98,9 @@ const TOOL_POLICY_MAP = new Map<string, ToolPolicyEntry>([
   ['selectMediaItems', readOnly()],
   ['play', readOnly()],
   ['pause', readOnly()],
+  ['simulateScrub', readOnly()],
+  ['simulatePlayback', readOnly()],
+  ['simulatePlaybackPath', readOnly()],
   ['undo', readOnly()],
   ['redo', readOnly()],
   ['setPlayhead', readOnly()],
@@ -103,10 +108,11 @@ const TOOL_POLICY_MAP = new Map<string, ToolPolicyEntry>([
   ['openComposition', readOnly()],
 
   // ── SENSITIVE (read-only but debug data) ──────────────────────────────
-  ['getStats', sensitive()],
-  ['getStatsHistory', sensitive()],
-  ['getLogs', sensitive()],
-  ['getPlaybackTrace', sensitive()],
+  ['getStats', bridgeTelemetry()],
+  ['getStatsHistory', bridgeTelemetry()],
+  ['getLogs', bridgeTelemetry()],
+  ['getPlaybackTrace', bridgeTelemetry()],
+  ['reloadApp', bridgeTelemetry()],
 
   // ── LOCAL FILE ACCESS ─────────────────────────────────────────────────
   ['listLocalFiles', { ...localFileAccess(), readOnly: true }],
