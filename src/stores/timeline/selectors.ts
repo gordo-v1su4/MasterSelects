@@ -101,8 +101,6 @@ export const selectPreviewExportState = (state: TimelineStore) => ({
   isExporting: state.isExporting,
   exportProgress: state.exportProgress,
   exportRange: state.exportRange,
-  isProxyCaching: state.isProxyCaching,
-  proxyCacheProgress: state.proxyCacheProgress,
 });
 
 // Keyframe state (changes during keyframe edits)

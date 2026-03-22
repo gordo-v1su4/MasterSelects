@@ -1,7 +1,7 @@
 // Source Monitor - displays raw media files (video/image) in the Preview panel
+// Always uses HTML video backend for simplicity and reliability
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { WebCodecsPlayer } from '../../engine/WebCodecsPlayer';
 import type { MediaFile } from '../../stores/mediaStore';
 
 interface SourceMonitorProps {
@@ -9,21 +9,13 @@ interface SourceMonitorProps {
   onClose: () => void;
 }
 
-type SourceBackend = 'webcodecs' | 'html';
-
 export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrubRef = useRef<HTMLDivElement>(null);
-  const webCodecsPlayerRef = useRef<WebCodecsPlayer | null>(null);
 
   const isVideo = file.type === 'video';
   const fps = file.fps || 30;
-  const webCodecsAvailable = isVideo && !!file.file;
 
-  const [backend, setBackend] = useState<SourceBackend>(
-    webCodecsAvailable ? 'webcodecs' : 'html'
-  );
   const [backendReady, setBackendReady] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,46 +23,18 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
 
-  const destroyWebCodecsPlayer = useCallback(() => {
-    webCodecsPlayerRef.current?.destroy();
-    webCodecsPlayerRef.current = null;
-    setBackendReady(false);
-    setIsPlaying(false);
-  }, []);
-
-  const drawWebCodecsFrame = useCallback((frame: VideoFrame | null) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !frame) {
-      return;
-    }
-
-    if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-      canvas.width = frame.displayWidth;
-      canvas.height = frame.displayHeight;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return;
-    }
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0, canvas.width, canvas.height);
-  }, []);
-
   useEffect(() => {
-    setBackend(webCodecsAvailable ? 'webcodecs' : 'html');
     setBackendError(null);
     setBackendReady(false);
     setCurrentTime(0);
     setDuration(file.duration || 0);
     setIsPlaying(false);
-  }, [file.id, file.duration, webCodecsAvailable]);
+  }, [file.id, file.duration]);
 
   // HTML video event listeners
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !isVideo || backend !== 'html') return;
+    if (!video || !isVideo) return;
 
     const onTimeUpdate = () => {
       if (!isScrubbing) {
@@ -109,90 +73,11 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
     };
-  }, [backend, file.duration, isScrubbing, isVideo]);
-
-  // WebCodecs source monitor
-  useEffect(() => {
-    if (!isVideo || backend !== 'webcodecs') {
-      destroyWebCodecsPlayer();
-      return;
-    }
-
-    if (!file.file) {
-      setBackend('html');
-      return;
-    }
-
-    let disposed = false;
-    setBackendReady(false);
-    setBackendError(null);
-
-    const player = new WebCodecsPlayer({
-      loop: false,
-      onFrame: (frame) => {
-        if (disposed) {
-          return;
-        }
-        drawWebCodecsFrame(frame);
-        setCurrentTime(player.currentTime);
-        setDuration(player.duration || file.duration || 0);
-        setIsPlaying(player.isPlaying);
-      },
-      onReady: () => {
-        if (disposed) {
-          return;
-        }
-        setBackendReady(true);
-        setDuration(player.duration || file.duration || 0);
-      },
-      onError: (error) => {
-        if (disposed) {
-          return;
-        }
-        setBackendError(error.message || 'WebCodecs preview failed');
-        setBackend('html');
-      },
-    });
-    webCodecsPlayerRef.current = player;
-
-    void (async () => {
-      try {
-        await player.loadFile(file.file!);
-        if (disposed) {
-          return;
-        }
-        setBackendReady(true);
-        setDuration(player.duration || file.duration || 0);
-
-        if (currentTime > 0.01) {
-          player.seek(Math.min(currentTime, player.duration || currentTime));
-        } else if (player.getCurrentFrame()) {
-          drawWebCodecsFrame(player.getCurrentFrame());
-        }
-      } catch (error) {
-        if (disposed) {
-          return;
-        }
-        setBackendError(
-          error instanceof Error ? error.message : 'WebCodecs preview failed'
-        );
-        setBackend('html');
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      player.destroy();
-      if (webCodecsPlayerRef.current === player) {
-        webCodecsPlayerRef.current = null;
-      }
-    };
-  }, [backend, destroyWebCodecsPlayer, drawWebCodecsFrame, file.duration, file.file, isVideo]);
+  }, [file.duration, isScrubbing, isVideo]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      destroyWebCodecsPlayer();
       const video = videoRef.current;
       if (video) {
         video.pause();
@@ -200,25 +85,10 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
         video.load();
       }
     };
-  }, [destroyWebCodecsPlayer]);
+  }, []);
 
   const togglePlayback = useCallback(() => {
-    if (!isVideo) {
-      return;
-    }
-
-    if (backend === 'webcodecs' && webCodecsPlayerRef.current) {
-      const player = webCodecsPlayerRef.current;
-      if (player.isPlaying) {
-        player.pause();
-        setIsPlaying(false);
-      } else {
-        player.play();
-        setIsPlaying(true);
-      }
-      return;
-    }
-
+    if (!isVideo) return;
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -226,9 +96,10 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
     } else {
       video.pause();
     }
-  }, [backend, isVideo]);
+  }, [isVideo]);
 
   // Keyboard handler: Space = play/pause, Escape = close
+  // Uses capture phase + stopImmediatePropagation so timeline doesn't also play
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const active = document.activeElement;
@@ -239,39 +110,26 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
 
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         onClose();
       } else if (e.key === ' ' && isVideo) {
         e.preventDefault();
+        e.stopImmediatePropagation();
         togglePlayback();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isVideo, onClose, togglePlayback]);
 
-  const seekSourceMonitor = useCallback((time: number, precise: boolean) => {
+  const seekSourceMonitor = useCallback((time: number, _precise: boolean) => {
     const clampedTime = Math.max(0, Math.min(duration || time, time));
     setCurrentTime(clampedTime);
-
-    if (backend === 'webcodecs' && webCodecsPlayerRef.current) {
-      const player = webCodecsPlayerRef.current;
-      player.pause();
-      setIsPlaying(false);
-      if (precise) {
-        player.seek(clampedTime);
-      } else {
-        player.fastSeek(clampedTime);
-      }
-      return;
-    }
-
     const video = videoRef.current;
-    if (!video) {
-      return;
-    }
+    if (!video) return;
     video.currentTime = clampedTime;
-  }, [backend, duration]);
+  }, [duration]);
 
   // Frame step
   const stepFrame = useCallback((direction: 1 | -1) => {
@@ -324,22 +182,13 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
     <div className="source-monitor">
       <div className="source-monitor-media">
         {isVideo ? (
-          <>
-            <video
-              ref={videoRef}
-              src={file.url}
-              className="source-monitor-video"
-              onClick={togglePlayback}
-              playsInline
-              style={{ display: backend === 'html' ? 'block' : 'none' }}
-            />
-            <canvas
-              ref={canvasRef}
-              className="source-monitor-canvas"
-              onClick={togglePlayback}
-              style={{ display: backend === 'webcodecs' ? 'block' : 'none' }}
-            />
-          </>
+          <video
+            ref={videoRef}
+            src={file.url}
+            className="source-monitor-video"
+            onClick={togglePlayback}
+            playsInline
+          />
         ) : (
           <img
             src={file.url}
@@ -373,24 +222,6 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
             </button>
           </div>
 
-          <div className="source-monitor-backend">
-            <button
-              className={`btn btn-sm ${backend === 'webcodecs' ? 'btn-active' : ''}`}
-              onClick={() => setBackend('webcodecs')}
-              disabled={!webCodecsAvailable}
-              title={webCodecsAvailable ? 'Use WebCodecs source preview' : 'WebCodecs requires a local file handle'}
-            >
-              WebCodecs
-            </button>
-            <button
-              className={`btn btn-sm ${backend === 'html' ? 'btn-active' : ''}`}
-              onClick={() => setBackend('html')}
-              title="Use HTML video source preview"
-            >
-              HTML
-            </button>
-          </div>
-
           <div className="source-monitor-timecode">
             <span className="timeline-time">{formatTimecode(currentTime, fps)}</span>
             <span className="source-monitor-time-sep">/</span>
@@ -405,7 +236,7 @@ export function SourceMonitor({ file, onClose }: SourceMonitorProps) {
           </div>
 
           <div className="source-monitor-status">
-            {backendReady ? backend : 'loading'}
+            {backendReady ? 'ready' : 'loading'}
             {backendError ? ` - ${backendError}` : ''}
           </div>
         </div>

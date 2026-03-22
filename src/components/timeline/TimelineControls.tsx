@@ -1,7 +1,10 @@
 // TimelineControls component - Playback controls and toolbar
 
-import { memo, useState, useRef, useEffect } from 'react';
+import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import type { TimelineControlsProps } from './types';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { engine } from '../../engine/WebGPUEngine';
+import { layerBuilder } from '../../services/layerBuilder';
 
 function TimelineControlsComponent({
   isPlaying,
@@ -31,10 +34,6 @@ function TimelineControlsComponent({
   onClearInOut,
   onToggleRamPreview,
   onToggleProxy,
-  onStartProxyCachePreload,
-  onCancelProxyCachePreload,
-  isProxyCaching,
-  proxyCacheProgress,
   onToggleTranscriptMarkers,
   onToggleThumbnails,
   onToggleWaveforms,
@@ -222,17 +221,7 @@ function TimelineControlsComponent({
         >
           RAM {ramPreviewEnabled ? 'ON' : 'OFF'} <span className="menu-wip-badge">🐛</span>
         </button>
-        <button
-          className={`btn btn-sm ${isProxyCaching ? 'btn-active' : ''}`}
-          onClick={isProxyCaching ? onCancelProxyCachePreload : onStartProxyCachePreload}
-          title={
-            isProxyCaching
-              ? `Warming up videos... ${proxyCacheProgress ?? 0}% - Click to cancel`
-              : 'Warmup all videos for smooth scrubbing (seeks through to fill browser cache)'
-          }
-        >
-          {isProxyCaching ? `Warmup ${proxyCacheProgress ?? 0}%` : 'Warmup'} <span className="menu-wip-badge">🐛</span>
-        </button>
+        <WebCodecsToggle />
         <div className="view-dropdown" ref={viewDropdownRef}>
           <button
             className={`btn btn-sm ${viewDropdownOpen ? 'btn-active' : ''}`}
@@ -283,6 +272,27 @@ function TimelineControlsComponent({
         </div>
       </div>
     </div>
+  );
+}
+
+function WebCodecsToggle() {
+  const enabled = useSettingsStore((s) => s.webCodecsEnabled);
+  const setWebCodecsEnabled = useSettingsStore((s) => s.setWebCodecsEnabled);
+
+  const toggle = useCallback(() => {
+    setWebCodecsEnabled(!enabled);
+    layerBuilder.invalidateCache();
+    engine.requestRender();
+  }, [enabled, setWebCodecsEnabled]);
+
+  return (
+    <button
+      className={`btn btn-sm ${enabled ? 'btn-active' : ''}`}
+      onClick={toggle}
+      title={enabled ? 'WebCodecs mode active (click to switch to HTML Video)' : 'HTML Video mode active (click to switch to WebCodecs)'}
+    >
+      {enabled ? 'WC' : 'HTML'}
+    </button>
   );
 }
 

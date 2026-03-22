@@ -113,9 +113,6 @@ export interface TimelineControlsProps {
   thumbnailsEnabled: boolean;
   waveformsEnabled: boolean;
   toolMode: 'select' | 'cut';
-  // Proxy cache preloading
-  isProxyCaching: boolean;
-  proxyCacheProgress: number | null;
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
@@ -127,8 +124,6 @@ export interface TimelineControlsProps {
   onClearInOut: () => void;
   onToggleRamPreview: () => void;
   onToggleProxy: () => void;
-  onStartProxyCachePreload: () => void;
-  onCancelProxyCachePreload: () => void;
   onToggleTranscriptMarkers: () => void;
   onToggleThumbnails: () => void;
   onToggleWaveforms: () => void;

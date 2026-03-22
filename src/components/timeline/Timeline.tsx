@@ -81,7 +81,7 @@ export function Timeline() {
     useTimelineStore(useShallow(selectUISettings));
 
   // Preview/export state
-  const { ramPreviewEnabled, ramPreviewProgress, ramPreviewRange, isRamPreviewing, isExporting, exportProgress, exportRange, isProxyCaching, proxyCacheProgress } =
+  const { ramPreviewEnabled, ramPreviewProgress, ramPreviewRange, isRamPreviewing, isExporting, exportProgress, exportRange } =
     useTimelineStore(useShallow(selectPreviewExportState));
 
   // Keyframe state
@@ -134,7 +134,6 @@ export function Timeline() {
   const {
     toggleLoopPlayback, toggleRamPreviewEnabled, startRamPreview,
     cancelRamPreview, getCachedRanges, getProxyCachedRanges,
-    startProxyCachePreload, cancelProxyCachePreload,
   } = store;
 
   // Tool actions
@@ -843,10 +842,6 @@ export function Timeline() {
           onClearInOut={clearInOut}
           onToggleRamPreview={toggleRamPreviewEnabled}
           onToggleProxy={toggleProxyEnabled}
-          isProxyCaching={isProxyCaching}
-          proxyCacheProgress={proxyCacheProgress}
-          onStartProxyCachePreload={startProxyCachePreload}
-          onCancelProxyCachePreload={cancelProxyCachePreload}
           onToggleTranscriptMarkers={toggleTranscriptMarkers}
           onToggleThumbnails={toggleThumbnailsEnabled}
           onToggleWaveforms={toggleWaveformsEnabled}
