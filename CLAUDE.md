@@ -40,17 +40,20 @@ Die `/masterselects` Skill stellt 4 Debug-Tools bereit, die über den HTTP Bridg
 
 ### Commit-Regeln
 ```bash
-# VOR jedem Commit: Build prüfen!
-npm run build
+# VOR jedem Commit: ALLE Checks durchführen!
+npm run build          # 1. Build muss fehlerfrei sein
+npx eslint .           # 2. Lint: 0 Errors (Warnings OK)
+npm run test           # 3. ALLE Tests müssen grün sein
 
 # Nach JEDER Änderung sofort:
 git add . && git commit -m "description" && git push origin staging
 ```
 
-**IMMER vor Commit:**
-- `npm run build` ausführen
-- Alle Errors beheben (Warnings sind OK)
-- Erst dann committen
+**IMMER vor Commit/Push:**
+- `npm run build` ausführen — muss fehlerfrei sein
+- `npx eslint .` ausführen — 0 Errors (Warnings sind OK)
+- `npm run test` ausführen — ALLE Tests müssen grün sein
+- Erst dann committen und pushen
 
 **NIEMALS:**
 - Direkt auf `master` committen
