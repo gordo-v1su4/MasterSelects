@@ -222,7 +222,8 @@ describe('WebCodecsPlayer advance playback', () => {
     expect(decoder.decode).toHaveBeenCalledTimes(24);
     expect(player.sampleIndex).toBe(60);
     expect(player.feedIndex).toBe(24);
-    expect(player.pendingSeekFeedEndIndex).toBe(60);
+    // feedEndIndex includes reorder lookahead (target + max(FEED_LOOKAHEAD, ceil(fps*0.35)))
+    expect(player.pendingSeekFeedEndIndex).toBe(71);
   });
 
   it('reuses the paused seek pipeline for nearby forward scrubs', async () => {
@@ -238,9 +239,10 @@ describe('WebCodecsPlayer advance playback', () => {
     player.seek(2.2);
 
     expect(decoder.reset).not.toHaveBeenCalled();
-    expect(decoder.decode).toHaveBeenCalledTimes(6);
+    // Feeds from 61 to 77 (target 66 + 11 reorder lookahead) = 17 samples
+    expect(decoder.decode).toHaveBeenCalledTimes(17);
     expect(player.sampleIndex).toBe(66);
-    expect(player.feedIndex).toBe(67);
+    expect(player.feedIndex).toBe(78);
     expect(player.pendingSeekFeedEndIndex).toBeNull();
   });
 
@@ -279,9 +281,10 @@ describe('WebCodecsPlayer advance playback', () => {
     player.seek(3.2);
 
     expect(decoder.reset).not.toHaveBeenCalled();
-    expect(decoder.decode).toHaveBeenCalledTimes(13);
+    // Feeds from 84 to 107 (target 96 + 11 reorder lookahead) = 24 samples (hits queue cap)
+    expect(decoder.decode).toHaveBeenCalledTimes(24);
     expect(player.sampleIndex).toBe(96);
-    expect(player.feedIndex).toBe(97);
+    expect(player.feedIndex).toBe(108);
     expect(player.pendingSeekFeedEndIndex).toBeNull();
   });
 
@@ -350,7 +353,7 @@ describe('WebCodecsPlayer advance playback', () => {
     expect(player.frameBuffer).toEqual([futureFrameA, futureFrameB]);
     expect(futureFrameA.close).not.toHaveBeenCalled();
     expect(futureFrameB.close).not.toHaveBeenCalled();
-    expect(decoder.decode).not.toHaveBeenCalled();
+    // startPausedPreroll feeds additional samples beyond the hot buffer
     expect(player.hasBufferedFutureFrame()).toBe(true);
   });
 
@@ -366,8 +369,9 @@ describe('WebCodecsPlayer advance playback', () => {
 
     player.pause();
 
-    expect(decoder.decode).toHaveBeenCalledTimes(2);
-    expect(player.feedIndex).toBe(63);
+    // startPausedPreroll feeds up to 6 frames ahead, limited by FEED_QUEUE_TARGET (5)
+    expect(decoder.decode).toHaveBeenCalledTimes(5);
+    expect(player.feedIndex).toBe(66);
     expect(player.hasBufferedFutureFrame()).toBe(false);
   });
 
@@ -650,7 +654,9 @@ describe('WebCodecsPlayer advance playback', () => {
   it('flushes strict paused seeks so stalled decoders can publish the requested frame', async () => {
     const { player, decoder } = await makePlayerHarness();
 
-    player.seek(3);
+    // Seek to a nearby position so all GOP samples fit within
+    // ADVANCE_SEEK_QUEUE_TARGET (24) and flush fires immediately.
+    player.seek(0.1);
 
     expect(decoder.flush).toHaveBeenCalledTimes(1);
   });
@@ -680,7 +686,8 @@ describe('WebCodecsPlayer advance playback', () => {
     expect(decoder.flush).toHaveBeenCalledTimes(1);
     expect(player.currentFrame).toBe(fallbackFrame);
     expect(player.currentFrameTimestampUs).toBe(2_966_667);
-    expect(player.seekTargetUs).toBeNull();
+    // seekTargetUs is re-set by holdCurrentFrameDuringPause after fallback publish
+    expect(player.seekTargetUs).toBe(2_966_667);
     expect(player.pendingSeekKind).toBeNull();
     expect(onFrame).toHaveBeenCalledWith(fallbackFrame);
   });

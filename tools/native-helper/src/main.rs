@@ -131,6 +131,8 @@ fn build_config(args: &Args) -> server::ServerConfig {
                 "http://localhost:3000".to_string(),
                 "http://127.0.0.1:5173".to_string(),
                 "http://127.0.0.1:3000".to_string(),
+                "https://masterselects.pages.dev".to_string(),
+                "https://staging.masterselects.pages.dev".to_string(),
             ]
         });
 
