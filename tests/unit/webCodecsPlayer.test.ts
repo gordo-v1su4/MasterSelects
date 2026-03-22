@@ -336,7 +336,7 @@ describe('WebCodecsPlayer advance playback', () => {
   });
 
   it('keeps buffered future frames hot when pausing playback', async () => {
-    const { player, decoder } = await makePlayerHarness();
+    const { player } = await makePlayerHarness();
     const futureFrameA = { timestamp: 2_033_333, close: vi.fn() };
     const futureFrameB = { timestamp: 2_066_667, close: vi.fn() };
 
