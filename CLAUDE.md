@@ -322,6 +322,111 @@ Logger.summary()                // Übersicht für AI
 | "Device mismatch" | HMR kaputt -> Seite neu laden |
 | Schwarzes Canvas | `readyState >= 2` prüfen |
 | WebCodecs Fehler | Fällt automatisch auf HTMLVideoElement zurück |
+| Schwarz nach Refresh | Cold-Start: `hasFrame=false` nach Restore, `primeRestoredWebCodecsPlayer` seek pending. Workaround: einmal Play/Pause |
+
+### WebCodecs Playback Debugging
+
+**Pipeline Monitors** — im Browser-Console verfügbar:
+```javascript
+// WebCodecs Pipeline (decode/seek/frame lifecycle)
+window.__WC_PIPELINE__
+
+// VideoFrame Pipeline (VF-mode: HTMLVideo + VideoFrame API)
+window.__VF_PIPELINE__
+```
+Beide sind 5000-Event Ring-Buffer mit Events wie `decode_feed`, `decode_output`, `frame_read`, `frame_drop`, `seek_start/end`, `drift_correct`, `stall`, etc.
+
+**Playback-spezifisches Logging:**
+```javascript
+// WebCodecs + Playback Health
+Logger.enable('WebCodecsPlayer,PlaybackHealth,LayerCollector')
+Logger.setLevel('DEBUG')
+
+// VideoSync + Frame Pipeline
+Logger.enable('VideoSyncManager,ParallelDecode,RenderLoop')
+Logger.setLevel('DEBUG')
+```
+
+**7 Monitoring Services** (`src/services/monitoring/`):
+
+| Service | Was es trackt |
+|---------|--------------|
+| `playbackHealthMonitor` | 8 Anomalie-Typen: FRAME_STALL, WARMUP_STUCK, SEEK_STUCK, GPU_SURFACE_COLD, HIGH_DROP_RATE, etc. Auto-Recovery nach 3+ Anomalien in 12s |
+| `playbackDebugStats` | Live-Stats: Pipeline-Name, Decoder-Resets, Seek-Timing, Collector Hold/Drop Counts |
+| `framePhaseMonitor` | Frame-Lifecycle: Zeit in stats/build/render/sync-video/sync-audio/cache Phasen |
+| `wcPipelineMonitor` | WebCodecs Event Ring-Buffer (`window.__WC_PIPELINE__`) |
+| `vfPipelineMonitor` | VideoFrame Event Ring-Buffer (`window.__VF_PIPELINE__`) |
+| `scrubSettleState` | Scrub-to-Play Transition: Settle, Retry, Warmup Stages pro Clip |
+
+**AI Debug Tools** (wenn Dev-Server läuft):
+```bash
+# Playback-Trace mit Pipeline-Events + Health-State
+/masterselects getPlaybackTrace windowMs=10000
+
+# Logs filtern nach Playback-Modulen
+/masterselects getLogs module=PlaybackHealth level=WARN
+
+# Engine-Stats Snapshot (FPS, Decoder, Drops, Audio)
+/masterselects getStats
+
+# Hard Reload (für scripted Tests)
+/masterselects reloadApp mode=hard
+```
+
+### Scripted Scrub & Stress Tests
+
+Über die AI Bridge (`POST http://localhost:5173/api/ai-tools`) lassen sich reproduzierbare Playback-Tests scripten. Node `fetch()` oder `curl` bevorzugen (PowerShell-Wrapper können Args verfälschen).
+
+**Wichtige Test-Tools:**
+
+| Tool | Zweck |
+|------|-------|
+| `simulateScrub` | DOM-basierter Scrub-Stress (patterns: `short`/`long`/`random`/`custom`, speeds: `slow`/`normal`/`fast`/`wild`) |
+| `simulatePlayback` | Play für N ms, misst Transport-Delta, Drift, Stalls |
+| `simulatePlaybackPath` | Preset-basierte Mixed Play/Scrub Runs (z.B. `play_scrub_stress_v1`) |
+| `getPlaybackTrace` | Event-Timeline + aggregierte Stats. Für lange Runs: `windowMs: 12000, limit: 1200` |
+| `getClipDetails` | Debug-Source: `webCodecsReady`, `webCodecsHasFrame`, `needsReload`, `runtimeSessionKey` |
+| `reloadApp` | Hard/Soft Reload für scripted Tests (`mode: "hard"/"soft"`, `delayMs`) |
+
+**Repro-Recipes:**
+```javascript
+// 1. Baseline Playback (15s normal play)
+await call('setPlayhead', { time: 0 });
+await call('simulatePlayback', { startTime: 0, durationMs: 15000, resetDiagnostics: true });
+await call('getPlaybackTrace', { windowMs: 16000, limit: 1200 });
+
+// 2. Random Wild Scrub Stress
+await call('setPlayhead', { time: 0 });
+await call('simulateScrub', { pattern: 'random', speed: 'wild', durationMs: 9000, minTime: 0, maxTime: 240, seed: 424242 });
+await call('getPlaybackTrace', { windowMs: 12000, limit: 1200 });
+
+// 3. Mixed Play/Scrub Regression Path
+await call('simulatePlaybackPath', { preset: 'play_scrub_stress_v1', startTime: 0, resetDiagnostics: true });
+await call('getPlaybackTrace', { windowMs: 20000, limit: 1200 });
+
+// 4. Play/Stop Cycle (warm decoder test)
+await call('simulatePlayback', { durationMs: 3000, resetDiagnostics: true });
+// wait 1s
+await call('simulatePlayback', { durationMs: 4000, resetDiagnostics: true });
+```
+
+**Worauf achten in Traces:**
+- `stalePreviewWhileTargetMoved` — Frame hängt obwohl Target sich bewegt
+- `decoderResets` / `seeks` — Explodierende Werte = zu viele Resets beim Scrubben
+- `previewFreezeEvents` / `longestPreviewFreezeMs` — Sichtbare Freezes
+- `previewPathCounts.empty` — Schwarze Frames nach Teleport/Seek
+- `driftSeconds` — Transport-Drift zwischen erwartet und tatsächlich
+- Health-Anomalien: `FRAME_STALL`, `SEEK_STUCK`, `HIGH_DROP_RATE`, `GPU_SURFACE_COLD`
+- `firstPreviewUpdateMs` — Startup-Latenz (Ziel: <100ms warm, <400ms cold)
+
+**Gotchas:**
+- `getStats` ist nur ein Snapshot — für kurze Freezes immer `getPlaybackTrace` oder `simulatePlayback` nutzen
+- `setPlayhead` ≠ Scrub (kein DOM-Drag, kein Grab/Pause-Flow)
+- Nach Änderungen an `WebCodecsPlayer` / Restore-Logic: Hard Reload statt HMR
+- Refresh-Bugs ≠ Teleport-Bugs — separater Repro-Pfad nötig
+- `wcStats` in getPlaybackTrace sind **kumulativ** über die Session — für A/B-Tests immer `reloadApp` zwischen Runs
+
+Detaillierte Docs: `docs/Features/Debugging.md` + `docs/Features/Playback-Debugging.md`
 
 ---
 
