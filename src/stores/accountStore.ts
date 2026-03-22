@@ -20,6 +20,7 @@ export interface AccountState {
   openAccountDialog: () => void;
   openPricingDialog: () => void;
   closeDialog: () => void;
+  devLogin: (plan?: string) => Promise<void>;
   login: (input: { email: string; provider: AuthProvider; redirectTo?: string }) => Promise<void>;
   logout: () => Promise<void>;
   startCheckout: (planId: BillingPlanId | string) => Promise<void>;
@@ -28,6 +29,31 @@ export interface AccountState {
 
 function pickCheckoutPlanId(planId: BillingPlanId | string): BillingPlanId | string {
   return planId || 'pro';
+}
+
+/* ── Dev-login mock data (used when backend is not running) ── */
+
+const DEV_PLAN_MOCKS: Record<string, { credits: number; entitlements: Record<string, string>; label: string }> = {
+  free:    { credits: 25,   label: 'Free',    entitlements: { hosted_ai_chat: 'true' } },
+  starter: { credits: 250,  label: 'Starter', entitlements: { hosted_ai_chat: 'true' } },
+  pro:     { credits: 1000, label: 'Pro',     entitlements: { hosted_ai_chat: 'true', kling_generation: 'true', priority_queue: 'true' } },
+  studio:  { credits: 5000, label: 'Studio',  entitlements: { hosted_ai_chat: 'true', kling_generation: 'true', priority_queue: 'true', api_access: 'true' } },
+};
+
+function applyDevMock(set: (partial: Partial<AccountState>) => void, planId: string): void {
+  const mock = DEV_PLAN_MOCKS[planId] ?? DEV_PLAN_MOCKS.studio;
+  set({
+    billingSummary: null,
+    creditBalance: mock.credits,
+    dialog: 'account',
+    entitlements: mock.entitlements,
+    error: null,
+    hostedAIEnabled: true,
+    isInitialized: true,
+    isLoading: false,
+    session: { authenticated: true, provider: 'dev' },
+    user: { email: 'dev@masterselects.local', id: 'dev-user' },
+  });
 }
 
 export const useAccountStore = create<AccountState>((set, get) => ({
@@ -76,6 +102,19 @@ export const useAccountStore = create<AccountState>((set, get) => ({
   openAccountDialog: () => set({ dialog: 'account', error: null, notice: null }),
   openPricingDialog: () => set({ dialog: 'pricing', error: null, notice: null }),
   closeDialog: () => set({ dialog: null, notice: null }),
+  devLogin: async (plan) => {
+    const planId = plan ?? 'studio';
+    set({ isLoading: true, error: null, notice: null });
+
+    try {
+      await cloudApi.auth.devLogin({ plan: planId });
+      await get().loadAccountState();
+      set({ dialog: 'account' });
+    } catch {
+      // Backend not running — use frontend-only mock
+      applyDevMock(set, planId);
+    }
+  },
   login: async (input) => {
     set({ isLoading: true, error: null, notice: null });
 

@@ -608,11 +608,12 @@ export function AIChatPanel() {
                 </button>
               )}
               {accountSession?.authenticated && (
-                <button className="btn-clear" onClick={openAccountDialog}>
+                <button className="btn-settings" onClick={openAccountDialog}>
                   Account
                 </button>
               )}
-              <button className="btn-clear" onClick={openSettings}>
+              <span className="ai-panel-overlay-or">or</span>
+              <button className="btn-settings" onClick={openSettings}>
                 API Keys
               </button>
             </div>

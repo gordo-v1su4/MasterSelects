@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useAccountStore } from '../../stores/accountStore';
+import type { BillingPlanId } from '../../services/cloudApi';
 import './authBillingDialogs.css';
+
+const DEV_PLANS: { id: BillingPlanId; label: string }[] = [
+  { id: 'free', label: 'Free' },
+  { id: 'starter', label: 'Starter' },
+  { id: 'pro', label: 'Pro' },
+  { id: 'studio', label: 'Studio' },
+];
+
+function isLocalDev(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { hostname, port } = window.location;
+  return (hostname === 'localhost' || hostname === '127.0.0.1') && port === '5173';
+}
 
 interface AuthDialogProps {
   onClose: () => void;
@@ -10,7 +24,7 @@ export function AuthDialog({ onClose }: AuthDialogProps) {
   const [email, setEmail] = useState('');
   const [provider, setProvider] = useState<'magic_link' | 'google'>('magic_link');
   const [isClosing, setIsClosing] = useState(false);
-  const { error, isLoading, login, notice } = useAccountStore();
+  const { devLogin, error, isLoading, login, notice } = useAccountStore();
 
   const handleClose = () => {
     if (isClosing) return;
@@ -118,6 +132,28 @@ export function AuthDialog({ onClose }: AuthDialogProps) {
 
           {notice && <div className="auth-dialog-notice auth-dialog-notice-success">{notice}</div>}
           {error && <div className="auth-dialog-notice auth-dialog-notice-error">{error}</div>}
+
+          {isLocalDev() && (
+            <div className="auth-dialog-dev-section">
+              <span className="auth-dialog-label">Dev Quick Login</span>
+              <div className="auth-dialog-dev-plans">
+                {DEV_PLANS.map((plan) => (
+                  <button
+                    key={plan.id}
+                    className="auth-dialog-dev-plan-btn"
+                    disabled={isLoading}
+                    type="button"
+                    onClick={() => devLogin(plan.id)}
+                  >
+                    {plan.label}
+                  </button>
+                ))}
+              </div>
+              <span className="auth-dialog-dev-hint">
+                Localhost only — creates a dev session with the selected plan.
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

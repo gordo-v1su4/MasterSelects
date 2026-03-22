@@ -195,13 +195,13 @@ function ImprintEN() {
   return (
     <div className="legal-text">
       <h3>Information according to § 5 TMG (German Telemedia Act)</h3>
-      <p>Julian Sportinger<br />[Address to be added]</p>
+      <p>Roman Kuskowski<br />[Address to be added]</p>
 
       <h3>Contact</h3>
       <p>Email: admin@masterselects.com</p>
 
       <h3>Responsible for content according to § 55 Abs. 2 RStV</h3>
-      <p>Julian Sportinger<br />[Address to be added]</p>
+      <p>Roman Kuskowski<br />[Address to be added]</p>
 
       <h3>EU Online Dispute Resolution</h3>
       <p>
@@ -253,7 +253,7 @@ function PrivacyEN() {
       </p>
 
       <h3>2. Data Controller</h3>
-      <p>Julian Sportinger<br />Email: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />Email: admin@masterselects.com</p>
 
       <h3>3. Hosting</h3>
       <p>
@@ -343,13 +343,13 @@ function ImprintDE() {
   return (
     <div className="legal-text">
       <h3>Angaben gemäß § 5 TMG</h3>
-      <p>Julian Sportinger<br />[Adresse wird nachgetragen]</p>
+      <p>Roman Kuskowski<br />[Adresse wird nachgetragen]</p>
 
       <h3>Kontakt</h3>
       <p>E-Mail: admin@masterselects.com</p>
 
       <h3>Verantwortlich für den Inhalt nach § 55 Abs. 2 RStV</h3>
-      <p>Julian Sportinger<br />[Adresse wird nachgetragen]</p>
+      <p>Roman Kuskowski<br />[Adresse wird nachgetragen]</p>
 
       <h3>EU-Streitschlichtung</h3>
       <p>
@@ -396,7 +396,7 @@ function PrivacyDE() {
       </p>
 
       <h3>2. Verantwortlicher</h3>
-      <p>Julian Sportinger<br />E-Mail: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />E-Mail: admin@masterselects.com</p>
 
       <h3>3. Hosting</h3>
       <p>
@@ -485,11 +485,11 @@ function ImprintFR() {
   return (
     <div className="legal-text">
       <h3>Informations conformément au § 5 TMG (loi allemande sur les télémédias)</h3>
-      <p>Julian Sportinger<br />[Adresse à compléter]</p>
+      <p>Roman Kuskowski<br />[Adresse à compléter]</p>
       <h3>Contact</h3>
       <p>Email : admin@masterselects.com</p>
       <h3>Responsable du contenu selon § 55 al. 2 RStV</h3>
-      <p>Julian Sportinger<br />[Adresse à compléter]</p>
+      <p>Roman Kuskowski<br />[Adresse à compléter]</p>
       <h3>Règlement des litiges en ligne (UE)</h3>
       <p>
         La Commission européenne met à disposition une plateforme de règlement en ligne des litiges :{' '}
@@ -513,7 +513,7 @@ function PrivacyFR() {
         sont traités exclusivement sur votre appareil. Vos fichiers média ne quittent jamais votre ordinateur.
       </p>
       <h3>2. Responsable du traitement</h3>
-      <p>Julian Sportinger<br />Email : admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />Email : admin@masterselects.com</p>
       <h3>3. Hébergement</h3>
       <p>
         Ce site est hébergé par <strong>Cloudflare, Inc.</strong> (USA), certifié EU-US Data Privacy Framework.
@@ -563,11 +563,11 @@ function ImprintES() {
   return (
     <div className="legal-text">
       <h3>Información según § 5 TMG (Ley alemana de telemedios)</h3>
-      <p>Julian Sportinger<br />[Dirección pendiente]</p>
+      <p>Roman Kuskowski<br />[Dirección pendiente]</p>
       <h3>Contacto</h3>
       <p>Email: admin@masterselects.com</p>
       <h3>Responsable del contenido según § 55 Abs. 2 RStV</h3>
-      <p>Julian Sportinger<br />[Dirección pendiente]</p>
+      <p>Roman Kuskowski<br />[Dirección pendiente]</p>
       <h3>Resolución de disputas en línea (UE)</h3>
       <p>
         La Comisión Europea proporciona una plataforma para la resolución de disputas en línea:{' '}
@@ -591,7 +591,7 @@ function PrivacyES() {
         exclusivamente en su dispositivo. Sus archivos multimedia nunca salen de su ordenador.
       </p>
       <h3>2. Responsable del tratamiento</h3>
-      <p>Julian Sportinger<br />Email: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />Email: admin@masterselects.com</p>
       <h3>3. Alojamiento</h3>
       <p>Alojado por <strong>Cloudflare, Inc.</strong> (EE.UU.), certificado EU-US Data Privacy Framework. Se aplican cláusulas contractuales tipo (CCT).</p>
       <h3>4. Cuentas y pagos</h3>
@@ -638,7 +638,7 @@ function ImprintPT() {
   return (
     <div className="legal-text">
       <h3>Informações conforme § 5 TMG (Lei alemã de telemídia)</h3>
-      <p>Julian Sportinger<br />[Endereço a ser adicionado]</p>
+      <p>Roman Kuskowski<br />[Endereço a ser adicionado]</p>
       <h3>Contato</h3>
       <p>Email: admin@masterselects.com</p>
       <h3>Direitos autorais</h3>
@@ -659,7 +659,7 @@ function PrivacyPT() {
         exclusivamente no seu dispositivo. Seus arquivos de mídia nunca saem do seu computador.
       </p>
       <h3>2. Controlador de dados</h3>
-      <p>Julian Sportinger<br />Email: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />Email: admin@masterselects.com</p>
       <h3>3. Hospedagem</h3>
       <p>Hospedado pela <strong>Cloudflare, Inc.</strong> (EUA), certificada pelo EU-US Data Privacy Framework.</p>
       <h3>4. Pagamentos</h3>
@@ -701,7 +701,7 @@ function ImprintJA() {
   return (
     <div className="legal-text">
       <h3>運営者情報（ドイツ電気通信メディア法 § 5 TMG に基づく）</h3>
-      <p>Julian Sportinger<br />[住所は後日追記]</p>
+      <p>Roman Kuskowski<br />[住所は後日追記]</p>
       <h3>連絡先</h3>
       <p>メール: admin@masterselects.com</p>
       <h3>著作権</h3>
@@ -721,7 +721,7 @@ function PrivacyJA() {
         <strong>MasterSelects は主にローカルアプリケーションです。</strong>すべてのビデオ、画像、音声ファイルはお使いのデバイス上でのみ処理されます。メディアファイルがコンピュータから外部に送信されることはありません。
       </p>
       <h3>2. データ管理者</h3>
-      <p>Julian Sportinger<br />メール: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />メール: admin@masterselects.com</p>
       <h3>3. ホスティング</h3>
       <p><strong>Cloudflare, Inc.</strong>（米国）でホスティング。EU-US データプライバシーフレームワーク認定済み。</p>
       <h3>4. 決済</h3>
@@ -763,7 +763,7 @@ function ImprintKO() {
   return (
     <div className="legal-text">
       <h3>운영자 정보 (독일 텔레미디어법 § 5 TMG)</h3>
-      <p>Julian Sportinger<br />[주소 추후 추가]</p>
+      <p>Roman Kuskowski<br />[주소 추후 추가]</p>
       <h3>연락처</h3>
       <p>이메일: admin@masterselects.com</p>
       <h3>저작권</h3>
@@ -783,7 +783,7 @@ function PrivacyKO() {
         <strong>MasterSelects는 주로 로컬 애플리케이션입니다.</strong> 모든 비디오, 이미지, 오디오 파일은 사용자의 기기에서만 처리됩니다. 미디어 파일은 절대 컴퓨터 밖으로 전송되지 않습니다.
       </p>
       <h3>2. 데이터 관리자</h3>
-      <p>Julian Sportinger<br />이메일: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />이메일: admin@masterselects.com</p>
       <h3>3. 호스팅</h3>
       <p><strong>Cloudflare, Inc.</strong>(미국)에서 호스팅. EU-US 데이터 프라이버시 프레임워크 인증.</p>
       <h3>4. 결제</h3>
@@ -825,7 +825,7 @@ function ImprintZH() {
   return (
     <div className="legal-text">
       <h3>运营者信息（根据德国电信媒体法 § 5 TMG）</h3>
-      <p>Julian Sportinger<br />[地址待补充]</p>
+      <p>Roman Kuskowski<br />[地址待补充]</p>
       <h3>联系方式</h3>
       <p>电子邮件: admin@masterselects.com</p>
       <h3>版权</h3>
@@ -845,7 +845,7 @@ function PrivacyZH() {
         <strong>MasterSelects 主要是一个本地应用程序。</strong>所有视频、图片和音频文件仅在您的设备上处理。您的媒体文件永远不会离开您的计算机。
       </p>
       <h3>2. 数据控制者</h3>
-      <p>Julian Sportinger<br />电子邮件: admin@masterselects.com</p>
+      <p>Roman Kuskowski<br />电子邮件: admin@masterselects.com</p>
       <h3>3. 托管</h3>
       <p>由 <strong>Cloudflare, Inc.</strong>（美国）托管，已获 EU-US 数据隐私框架认证。</p>
       <h3>4. 支付</h3>

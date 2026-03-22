@@ -396,6 +396,18 @@ export const cloudApi = {
         method: 'POST',
       });
     },
+    devLogin(body: { email?: string; plan?: string } = {}): Promise<{
+      nextStep: string;
+      ok: boolean;
+      plan: string;
+      session: CloudMeResponse['session'];
+      user: CloudSessionUser;
+    }> {
+      return requestJson('/api/auth/dev-login', {
+        body: JSON.stringify(body),
+        method: 'POST',
+      });
+    },
     logout(): Promise<{ ok: boolean }> {
       return requestJson<{ ok: boolean }>('/api/auth/logout', { method: 'POST' });
     },

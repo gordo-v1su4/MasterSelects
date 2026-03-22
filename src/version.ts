@@ -27,13 +27,10 @@ export const FEATURED_VIDEO: {
   youtubeId: '5ezX5ra0RTI',
   title: 'MasterSelects Demo',
   banner: {
-    type: 'danger',
-    title: 'Playback Fixes',
-    message: 'Fixed playback bugs on Win/Linux.',
+    type: 'success',
+    title: 'WebCodecs Playback available! \u{1F680}',
+    message: 'Breakthrough: GPU-accelerated playback via WebCodecs.',
     animated: true,
-    annotation: {
-      text: 'some',
-    },
   },
 };
 

@@ -45,19 +45,20 @@ npm run build          # 1. Build muss fehlerfrei sein
 npx eslint .           # 2. Lint: 0 Errors (Warnings OK)
 npm run test           # 3. ALLE Tests müssen grün sein
 
-# Nach JEDER Änderung sofort:
-git add . && git commit -m "description" && git push origin staging
+# Nach JEDER Änderung sofort committen (NICHT pushen!):
+git add . && git commit -m "description"
 ```
 
-**IMMER vor Commit/Push:**
+**IMMER vor Commit:**
 - `npm run build` ausführen — muss fehlerfrei sein
 - `npx eslint .` ausführen — 0 Errors (Warnings sind OK)
 - `npm run test` ausführen — ALLE Tests müssen grün sein
-- Erst dann committen und pushen
+- Erst dann committen
 
 **NIEMALS:**
 - Direkt auf `master` committen
 - Selbstständig zu `master` mergen
+- Selbstständig pushen (nur wenn User es explizit verlangt)
 - Mehrere Änderungen sammeln
 - Committen ohne vorherigen Build-Check
 

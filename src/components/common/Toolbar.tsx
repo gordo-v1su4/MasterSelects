@@ -27,7 +27,6 @@ import {
   setupAutoSync,
   syncStoresToProject,
 } from '../../services/projectSync';
-import { APP_VERSION } from '../../version';
 import { openOutputManager } from '../outputManager/OutputManagerBoot';
 
 type MenuId = 'file' | 'edit' | 'view' | 'output' | 'info' | null;
@@ -773,13 +772,8 @@ export function Toolbar({ onOpenChangelog, onOpenSplash }: ToolbarProps) {
       {/* Spacer */}
       <div className="toolbar-spacer" />
 
-      {/* Center - Version Info */}
-      <div className="toolbar-center">
-        <span style={{ color: '#ff6b6b', fontSize: '11px' }}>
-          Work in Progress - Expect Bugs!
-        </span>
-        <span className="version">v{APP_VERSION}</span>
-      </div>
+      {/* Center */}
+      <div className="toolbar-center" />
 
       {/* Spacer */}
       <div className="toolbar-spacer" />
