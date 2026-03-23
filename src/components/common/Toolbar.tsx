@@ -745,6 +745,10 @@ export function Toolbar({ onOpenChangelog, onOpenSplash }: ToolbarProps) {
           </button>
           {openMenu === 'info' && (
             <div className="menu-dropdown">
+              <button className="menu-option" onClick={() => { window.dispatchEvent(new CustomEvent('open-welcome-screen')); closeMenu(); }}>
+                <span>Where are you coming from?</span>
+              </button>
+              <div className="menu-separator" />
               <button className="menu-option" onClick={() => { window.dispatchEvent(new CustomEvent('open-tutorial-campaigns')); closeMenu(); }}>
                 <span>Tutorials</span>
               </button>
