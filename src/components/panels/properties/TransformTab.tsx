@@ -112,6 +112,7 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
     const v = pct / 100;
     handlePropertyChange('scale.x', v);
     handlePropertyChange('scale.y', v);
+    if (isModel) handlePropertyChange('scale.z', v);
   };
 
   const opacityPct = transform.opacity * 100;

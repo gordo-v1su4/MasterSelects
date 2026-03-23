@@ -70,7 +70,7 @@ export class ThreeSceneRenderer {
           canvas: this.canvas as unknown as HTMLCanvasElement,
           alpha: true,
           antialias: true,
-          premultipliedAlpha: true,
+          premultipliedAlpha: false, // Straight alpha — compositor expects non-premultiplied
         });
         this.renderer.setClearColor(0x000000, 0); // transparent background
       }

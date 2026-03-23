@@ -204,8 +204,8 @@ export function getInterpolatedClipTransform(
     scale: {
       x: interpolateKeyframes(keyframes, 'scale.x', time, baseTransform.scale.x),
       y: interpolateKeyframes(keyframes, 'scale.y', time, baseTransform.scale.y),
-      ...(baseTransform.scale.z !== undefined
-        ? { z: interpolateKeyframes(keyframes, 'scale.z' as AnimatableProperty, time, baseTransform.scale.z) }
+      ...(baseTransform.scale.z !== undefined || keyframes.some(k => k.property === 'scale.z')
+        ? { z: interpolateKeyframes(keyframes, 'scale.z' as AnimatableProperty, time, baseTransform.scale.z ?? 1) }
         : {}),
     },
     rotation: {

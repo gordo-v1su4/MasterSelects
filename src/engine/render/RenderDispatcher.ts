@@ -482,15 +482,19 @@ export class RenderDispatcher {
     );
 
     // Create a synthetic layer for the 3D scene
-    const insertIdx = indices3D[0]; // Insert at position of first 3D layer
+    // For a single 3D layer, pass its opacity/blendMode to the compositor directly.
+    // For multiple, Three.js handles per-layer opacity internally; composite at 100%.
+    const insertIdx = indices3D[0];
+    const firstLayer = layerData[indices3D[0]].layer;
+    const isSingle3D = indices3D.length === 1;
     const syntheticLayer: Layer = {
       id: '__three_scene__',
       name: '3D Scene',
       visible: true,
-      opacity: 1,
-      blendMode: 'normal',
+      opacity: isSingle3D ? firstLayer.opacity : 1,
+      blendMode: isSingle3D ? firstLayer.blendMode : 'normal',
       source: { type: 'image' },
-      effects: [],
+      effects: isSingle3D ? firstLayer.effects : [],
       position: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1 },
       rotation: { x: 0, y: 0, z: 0 },
