@@ -2,9 +2,25 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useTimelineStore } from '../../../stores/timeline';
 import { startBatch, endBatch } from '../../../stores/historyStore';
-import type { AnimatableProperty } from '../../../types';
+import type { AnimatableProperty, EffectType } from '../../../types';
+import { isAudioEffect } from '../../../types';
 import { EFFECT_REGISTRY, getDefaultParams, getCategoriesWithEffects } from '../../../effects';
+import type { EffectParam } from '../../../effects';
+import { EQ_BAND_PARAMS, EQ_FREQUENCIES } from '../../../engine/audio/AudioEffectRenderer';
 import { EffectKeyframeToggle, DraggableNumber } from './shared';
+
+// Audio effect parameter definitions (not in GPU registry)
+const AUDIO_EFFECT_PARAMS: Record<string, Record<string, EffectParam>> = {
+  'audio-volume': {
+    volume: { type: 'number', label: 'Volume', default: 1, min: 0, max: 3, step: 0.01, animatable: true },
+  },
+  'audio-eq': Object.fromEntries(
+    EQ_BAND_PARAMS.map((param, i) => [
+      param,
+      { type: 'number' as const, label: `${EQ_FREQUENCIES[i] >= 1000 ? `${EQ_FREQUENCIES[i] / 1000}k` : EQ_FREQUENCIES[i]} Hz`, default: 0, min: -12, max: 12, step: 0.1, animatable: true },
+    ])
+  ),
+};
 
 // Single parameter control renderer
 function renderParamControl(
@@ -109,20 +125,26 @@ interface EffectParamsProps {
 function EffectParams({ effect, onChange, clipId, onDragStart, onDragEnd }: EffectParamsProps) {
   const [qualityExpanded, setQualityExpanded] = useState(false);
 
+  // Check GPU registry first, then audio effect params
   const effectDef = EFFECT_REGISTRY.get(effect.type);
-  if (!effectDef) {
+  const audioParamDefs = AUDIO_EFFECT_PARAMS[effect.type];
+  const paramDefs = effectDef?.params ?? audioParamDefs;
+
+  if (!paramDefs) {
     return <p className="effect-info">Unknown effect type: {effect.type}</p>;
   }
 
-  const defaults = getDefaultParams(effect.type);
+  const defaults = effectDef
+    ? getDefaultParams(effect.type)
+    : Object.fromEntries(Object.entries(paramDefs).map(([k, v]) => [k, v.default]));
 
-  if (Object.keys(effectDef.params).length === 0) {
+  if (Object.keys(paramDefs).length === 0) {
     return <p className="effect-info">No parameters</p>;
   }
 
   // Separate regular params from quality params
-  const regularParams = Object.entries(effectDef.params).filter(([, def]) => !def.quality);
-  const qualityParams = Object.entries(effectDef.params).filter(([, def]) => def.quality);
+  const regularParams = Object.entries(paramDefs).filter(([, def]) => !def.quality);
+  const qualityParams = Object.entries(paramDefs).filter(([, def]) => def.quality);
 
   const handleResetQuality = () => {
     const resetParams: Record<string, number | boolean | string> = { ...effect.params };
@@ -197,8 +219,14 @@ export function EffectsTab({ clipId, effects }: EffectsTabProps) {
   const clipLocalTime = clip ? playheadPosition - clip.startTime : 0;
   const interpolatedEffects = getInterpolatedEffects(clipId, clipLocalTime);
 
-  // Get effects grouped by category from registry
+  // Get effects grouped by category from registry (video effects only)
   const effectCategories = useMemo(() => getCategoriesWithEffects(), []);
+
+  // Filter effects by current mode
+  const filteredEffects = useMemo(() =>
+    effects.filter(e => effectMode === 'audio' ? isAudioEffect(e.type as EffectType) : !isAudioEffect(e.type as EffectType)),
+    [effects, effectMode]
+  );
 
   return (
     <div className="properties-tab-content effects-tab">
@@ -238,13 +266,11 @@ export function EffectsTab({ clipId, effects }: EffectsTabProps) {
         </div>
       </div>
 
-      {effectMode === 'audio' ? (
-        <div className="panel-empty"><p>Audio effects coming soon</p></div>
-      ) : effects.length === 0 ? (
-        <div className="panel-empty"><p>No effects applied</p></div>
+      {filteredEffects.length === 0 ? (
+        <div className="panel-empty"><p>{effectMode === 'audio' ? 'No audio effects applied' : 'No effects applied'}</p></div>
       ) : (
         <div className="effects-list">
-          {effects.map((effect, idx) => {
+          {filteredEffects.map((effect, idx) => {
             const interpolated = interpolatedEffects.find(e => e.id === effect.id) || effect;
             const isEnabled = effect.enabled !== false; // default to true if undefined
             const isDragging = dragIdx === idx;
@@ -270,7 +296,7 @@ export function EffectsTab({ clipId, effects }: EffectsTabProps) {
                   const fromIdx = dragIdx ?? parseInt(e.dataTransfer.getData('text/plain'), 10);
                   if (!isNaN(fromIdx) && fromIdx !== idx) {
                     startBatch('Reorder effect');
-                    reorderClipEffect(clipId, effects[fromIdx].id, idx);
+                    reorderClipEffect(clipId, filteredEffects[fromIdx].id, idx);
                     endBatch();
                   }
                   setDragIdx(null);
