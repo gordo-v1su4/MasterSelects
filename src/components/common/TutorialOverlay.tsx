@@ -192,12 +192,13 @@ export function TutorialOverlay({ onClose, onSkip, part = 1, campaignSteps, camp
   const [panelRect, setPanelRect] = useState<DOMRect | null>(null);
   const [highlightRect, setHighlightRect] = useState<DOMRect | null>(null);
   const [isClosing, setIsClosing] = useState(false);
+  const [shortcutConfirmation, setShortcutConfirmation] = useState<string | null>(null);
   const activatePanelType = useDockStore((s) => s.activatePanelType);
   const setUserBackground = useSettingsStore((s) => s.setUserBackground);
   const setActiveShortcutPreset = useSettingsStore((s) => s.setActiveShortcutPreset);
   const closingRef = useRef(false);
 
-  const isWelcome = stepIndex === -1;
+  const isWelcome = stepIndex === -1 && !shortcutConfirmation;
 
   // Determine steps based on mode
   const steps: (PanelStep | TimelineStep | CampaignStep)[] = isCampaignMode
@@ -365,15 +366,23 @@ export function TutorialOverlay({ onClose, onSkip, part = 1, campaignSteps, camp
     if (presetMap[id]) {
       setActiveShortcutPreset(presetMap[id] as 'premiere' | 'davinci' | 'finalcut' | 'aftereffects' | 'beginner');
     }
-    setStepIndex(0);
+    // Show confirmation with the selected NLE label
+    const btn = WELCOME_BUTTONS.find((b) => b.id === id);
+    setShortcutConfirmation(btn?.label || id);
   }, [setUserBackground, setActiveShortcutPreset]);
+
+  const handleConfirmationDismiss = useCallback(() => {
+    setShortcutConfirmation(null);
+    // Tutorial not yet implemented — close overlay
+    close();
+  }, [close]);
 
   const tooltipStyle = getTooltipStyle();
 
   return (
     <div
       className={`tutorial-backdrop ${isClosing ? 'closing' : ''}`}
-      onClick={isWelcome ? undefined : advance}
+      onClick={isWelcome || shortcutConfirmation ? undefined : advance}
     >
       <svg className="tutorial-overlay-svg" width="100%" height="100%">
         <defs>
@@ -411,12 +420,12 @@ export function TutorialOverlay({ onClose, onSkip, part = 1, campaignSteps, camp
       )}
 
       {/* Clippy in own container so it doesn't fade with tooltip */}
-      <div className={`tutorial-clippy-wrapper ${isWelcome ? 'tutorial-clippy-wrapper--welcome' : ''}`} style={tooltipStyle}>
+      <div className={`tutorial-clippy-wrapper ${isWelcome || shortcutConfirmation ? 'tutorial-clippy-wrapper--welcome' : ''}`} style={tooltipStyle}>
         <ClippyMascot isClosing={isClosing} />
       </div>
 
       <div
-        className={`tutorial-tooltip ${isWelcome ? 'tutorial-tooltip--welcome' : ''}`}
+        className={`tutorial-tooltip ${isWelcome || shortcutConfirmation ? 'tutorial-tooltip--welcome' : ''}`}
         style={tooltipStyle}
       >
         {step && (
@@ -424,7 +433,21 @@ export function TutorialOverlay({ onClose, onSkip, part = 1, campaignSteps, camp
         )}
         <div className="tutorial-tooltip-content">
           <div className="tutorial-tooltip-text">
-            {isWelcome ? (
+            {shortcutConfirmation ? (
+              <>
+                <div className="tutorial-welcome-title">Shortcuts updated!</div>
+                <div className="tutorial-welcome-subtitle" style={{ marginBottom: 12 }}>
+                  Keyboard shortcuts have been set to <strong>{shortcutConfirmation}</strong> layout.
+                  You can change them anytime in Settings &gt; Shortcuts.
+                </div>
+                <div className="tutorial-welcome-subtitle" style={{ opacity: 0.6, fontSize: 11, marginBottom: 16 }}>
+                  Interactive tutorial coming soon.
+                </div>
+                <button className="tutorial-skip-btn" onClick={handleConfirmationDismiss} style={{ marginTop: 0 }}>
+                  Got it!
+                </button>
+              </>
+            ) : isWelcome ? (
               <>
                 <div className="tutorial-welcome-title">Welcome! Where are you coming from?</div>
                 <div className="tutorial-welcome-subtitle">This helps us tailor tips to your experience</div>
