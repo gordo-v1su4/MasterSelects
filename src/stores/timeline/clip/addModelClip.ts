@@ -14,6 +14,7 @@ export interface AddModelClipParams {
   file: File;
   startTime: number;
   estimatedDuration: number;
+  mediaFileId?: string;
 }
 
 /**
@@ -33,7 +34,8 @@ export function createModelClipPlaceholder(params: AddModelClipParams): Timeline
     duration: estimatedDuration || DEFAULT_MODEL_DURATION,
     inPoint: 0,
     outPoint: estimatedDuration || DEFAULT_MODEL_DURATION,
-    source: { type: 'model', naturalDuration: MAX_MODEL_DURATION },
+    source: { type: 'model', naturalDuration: MAX_MODEL_DURATION, mediaFileId: params.mediaFileId },
+    mediaFileId: params.mediaFileId,
     transform: { ...DEFAULT_TRANSFORM },
     effects: [],
     is3D: true,  // Auto-enable 3D for model clips

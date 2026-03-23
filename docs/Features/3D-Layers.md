@@ -1,6 +1,6 @@
 # 3D Layer System
 
-MasterSelects supports After Effects-style 3D layers via an integrated Three.js renderer. Layers can be toggled between 2D and 3D mode, and 3D model files (OBJ, glTF, GLB, FBX) can be imported directly as timeline clips.
+MasterSelects supports After Effects-style 3D layers via an integrated Three.js renderer. Layers can be toggled between 2D and 3D mode, 3D model files (OBJ, glTF, GLB, FBX) can be imported directly as timeline clips, and primitive 3D meshes can be created from the Media Panel.
 
 ## Architecture
 

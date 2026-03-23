@@ -227,6 +227,7 @@ export const createClipSlice: SliceCreator<CoreClipActions> = (set, get) => ({
     // Handle 3D model files
     if (mediaType === 'model') {
       const modelClip = createModelClipPlaceholder({ trackId, file, startTime, estimatedDuration: providedDuration ?? 10 });
+      modelClip.mediaFileId = mediaFileId;  // Link to MediaFile for nested comp lookup
       set({ clips: [...clips, modelClip] });
       updateDuration();
       loadModelMedia({ clip: modelClip, updateClip });

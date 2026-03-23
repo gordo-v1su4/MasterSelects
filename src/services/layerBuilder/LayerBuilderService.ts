@@ -996,6 +996,12 @@ export class LayerBuilderService {
         ...baseLayer,
         source: { type: 'image', imageElement: nestedClip.source.imageElement },
       } as Layer;
+    } else if (nestedClip.source?.type === 'model') {
+      return {
+        ...baseLayer,
+        source: { type: 'model', modelUrl: nestedClip.source.modelUrl },
+        is3D: true,
+      } as Layer;
     }
 
     return null;
