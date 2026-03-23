@@ -13,7 +13,6 @@ import {
   type ChangelogNotice as ChangelogNoticeConfig,
 } from '../../version';
 import {
-  NATIVE_HELPER_RELEASES_URL,
   type NativeHelperPublishedRelease,
 } from '../../services/nativeHelper/releases';
 

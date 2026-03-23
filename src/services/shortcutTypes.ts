@@ -34,7 +34,13 @@ export type ShortcutActionId =
   | 'project.saveAs'
   // History
   | 'history.undo'
-  | 'history.redo';
+  | 'history.redo'
+  // Preview
+  | 'preview.editMode'
+  | 'preview.slot1'
+  | 'preview.slot2'
+  | 'preview.slot3'
+  | 'preview.slot4';
 
 // A single key combination
 export interface KeyCombo {
@@ -55,7 +61,8 @@ export type ShortcutCategory =
   | 'Editing'
   | 'Tools'
   | 'Project'
-  | 'History';
+  | 'History'
+  | 'Preview';
 
 // Action metadata for settings UI display
 export interface ShortcutActionMeta {

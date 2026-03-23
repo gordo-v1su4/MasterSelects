@@ -42,6 +42,12 @@ export const ACTION_META: ShortcutActionMeta[] = [
   // History
   { id: 'history.undo', label: 'Undo', category: 'History' },
   { id: 'history.redo', label: 'Redo', category: 'History' },
+  // Preview
+  { id: 'preview.editMode', label: 'Toggle Edit Mode', category: 'Preview' },
+  { id: 'preview.slot1', label: 'Preview Slot 1', category: 'Preview' },
+  { id: 'preview.slot2', label: 'Preview Slot 2', category: 'Preview' },
+  { id: 'preview.slot3', label: 'Preview Slot 3', category: 'Preview' },
+  { id: 'preview.slot4', label: 'Preview Slot 4', category: 'Preview' },
 ];
 
 // All valid action IDs (for runtime validation)
@@ -84,6 +90,12 @@ const BASE_MAP: ShortcutMap = {
   // Overridden per preset:
   'tool.cutToggle': [{ key: 'c' }],
   'edit.splitAtPlayhead': [{ key: 'c', shift: true }],
+  // Preview
+  'preview.editMode': [{ key: 'tab' }],
+  'preview.slot1': [{ key: '1' }],
+  'preview.slot2': [{ key: '2' }],
+  'preview.slot3': [{ key: '3' }],
+  'preview.slot4': [{ key: '4' }],
 };
 
 // ─── Helper: create preset by overriding base ───────────────────────
