@@ -20,7 +20,7 @@ import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
 import { splitLayerEffects } from './layerEffectStack';
 import { getThreeSceneRenderer } from '../three/ThreeSceneRenderer';
 import { DEFAULT_CAMERA_CONFIG } from '../three/types';
-import type { Layer3DData, CameraConfig } from '../three/types';
+import type { Layer3DData } from '../three/types';
 
 const log = Logger.create('NestedCompRenderer');
 const ENABLE_VISUAL_HTML_VIDEO_FALLBACK = false;

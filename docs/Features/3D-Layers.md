@@ -29,6 +29,25 @@ Three.js renders all 3D-flagged layers into an OffscreenCanvas. The result is im
 - OBJ without MTL: gets default gray MeshStandardMaterial
 - Wireframe debug toggle: **"Wire" button** in Transform panel (blue wireframe)
 
+### Primitive Mesh Creation
+Create 3D mesh primitives from the Media Panel via **+ Add > Mesh** or right-click context menu:
+
+| Primitive | Three.js Geometry | Default Size |
+|-----------|------------------|--------------|
+| Cube | `BoxGeometry` | 0.6 x 0.6 x 0.6 |
+| Sphere | `SphereGeometry` | radius 0.35, 32x24 segments |
+| Plane | `PlaneGeometry` | 0.8 x 0.8 |
+| Cylinder | `CylinderGeometry` | radius 0.25, height 0.6 |
+| Torus | `TorusGeometry` | radius 0.3, tube 0.1 |
+| Cone | `ConeGeometry` | radius 0.3, height 0.6 |
+
+- Mesh items are stored in a "Meshes" folder in the Media Panel
+- Drag to timeline creates a clip with `is3D: true` and `meshType`
+- Default material: `MeshStandardMaterial` (color #aaaaaa, metalness 0.3, roughness 0.6)
+- Wireframe toggle supported
+- Default clip duration: 10 seconds (max 1 hour)
+- All transform properties (position, rotation, scale) and keyframe animation supported
+
 ### Transform Controls (3D Mode)
 | Property | 2D Mode | 3D Mode |
 |----------|---------|---------|
@@ -80,7 +99,8 @@ Effects can be reordered via drag-and-drop:
 | `src/engine/three/types.ts` | Layer3DData, CameraConfig types |
 | `src/engine/render/RenderDispatcher.ts` | 3D layer routing (`process3DLayers`) |
 | `src/engine/render/LayerCollector.ts` | Model layer passthrough |
-| `src/stores/timeline/clip/addModelClip.ts` | Model clip creation |
+| `src/stores/timeline/clip/addModelClip.ts` | Model clip creation (file-based) |
+| `src/stores/timeline/meshClipSlice.ts` | Primitive mesh clip creation |
 | `src/services/layerBuilder/LayerBuilderService.ts` | Model layer builder |
 | `src/engine/export/ExportLayerBuilder.ts` | Export 3D layer support |
 | `src/components/panels/properties/TransformTab.tsx` | 3D transform UI |

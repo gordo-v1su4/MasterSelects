@@ -23,7 +23,7 @@ MASterSelects is a browser-based professional video editing application built on
 | **AI Video Generation** | PiAPI integration for AI-powered video creation |
 | **SAM2 Segmentation** | Click-to-segment object tracking with WebGPU ONNX inference |
 | **Download Panel** | Download videos from YouTube, TikTok, Instagram, Twitter/X and more |
-| **3D Layer System** | Three.js integration: per-layer 3D toggle, OBJ/glTF/GLB model import, perspective camera |
+| **3D Layer System** | Three.js integration: per-layer 3D toggle, OBJ/glTF/GLB model import, primitive mesh creation (Cube/Sphere/Plane/Cylinder/Torus/Cone), perspective camera |
 | **30 GPU Effects** | Modular color, blur, distort, stylize, keying effects with quality controls |
 | **37 Blend Modes** | After Effects-style blend modes including stencil and silhouette |
 | **Video Scopes** | GPU-accelerated Histogram, Vectorscope, Waveform monitor (DaVinci-style) |
