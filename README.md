@@ -34,33 +34,25 @@
 
 ## Supported Formats
 
+Decoding depends on what the **browser** supports — the container is just the wrapper, the codec inside is what matters.
+
 <table>
-<tr><th>Import</th><th>Export</th></tr>
-<tr>
-<td>
-
-| Type | Formats |
-|------|---------|
-| **Video** | MP4 (H.264, H.265, AV1), WebM (VP8, VP9, AV1), MOV, MKV |
-| **Audio** | MP3, WAV, AAC, OGG, FLAC, M4A |
-| **Image** | PNG, JPG, WebP, GIF, BMP, AVIF, SVG |
-| **Project** | MasterSelects JSON, FCPXML (import planned) |
-| **Download** | YouTube, TikTok, Instagram, Twitter/X, Vimeo + [all yt-dlp sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) via Native Helper |
-
-</td>
-<td>
-
-| Type | Formats |
-|------|---------|
-| **WebCodecs** | MP4 (H.264, H.265, VP9, AV1) — GPU-accelerated |
-| **FFmpeg WASM** | ProRes, DNxHR, FFV1, UTVideo, MJPEG *(experimental)* |
-| **Audio** | AAC (in MP4 container) |
-| **Interchange** | FCPXML (Final Cut Pro / DaVinci Resolve) |
-| **Frames** | PNG sequence |
-
-</td>
-</tr>
+<tr><th colspan="2">Import (Decode)</th></tr>
+<tr><td><b>Containers</b></td><td>MP4, MOV, WebM, MKV, AVI, M4V</td></tr>
+<tr><td><b>Video codecs</b></td><td>H.264 (AVC), H.265 (HEVC)¹, VP8, VP9, AV1</td></tr>
+<tr><td><b>Audio codecs</b></td><td>AAC, MP3, Opus, Vorbis, FLAC, WAV/PCM</td></tr>
+<tr><td><b>Image</b></td><td>PNG, JPG, WebP, GIF, BMP, AVIF, SVG</td></tr>
+<tr><td><b>Download</b></td><td>YouTube, TikTok, Instagram, Twitter/X, Vimeo + <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md">all yt-dlp sites</a> via Native Helper</td></tr>
+<tr><th colspan="2">Export (Encode)</th></tr>
+<tr><td><b>Containers</b></td><td>MP4, WebM</td></tr>
+<tr><td><b>Video codecs</b></td><td>H.264, H.265¹, VP9, AV1 — GPU-accelerated via WebCodecs</td></tr>
+<tr><td><b>Audio codecs</b></td><td>AAC (MP4), Opus (WebM)</td></tr>
+<tr><td><b>Interchange</b></td><td>FCPXML (Final Cut Pro / DaVinci Resolve), PNG sequence</td></tr>
 </table>
+
+¹ H.265 decode/encode depends on OS & hardware — full support on Windows, partial on macOS/Linux.
+
+> **MOV** files work because they share the same ISO BMFF container as MP4 — any MOV with H.264/H.265 inside plays fine. **MKV** works if it contains browser-decodable codecs (H.264, VP9, etc.). Files with unsupported codecs (e.g. ProRes in MOV) fall back to the Native Helper decode path when available.
 
 ---
 
