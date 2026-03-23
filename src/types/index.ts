@@ -70,6 +70,7 @@ export type BlendMode =
 export interface LayerSource {
   type: 'video' | 'image' | 'camera' | 'color' | 'text' | 'solid' | 'model';
   modelUrl?: string;  // Blob URL to 3D model file (OBJ/glTF/GLB)
+  meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type (cube, sphere, etc.)
   file?: File;
   videoElement?: HTMLVideoElement;
   mediaTime?: number;
@@ -391,6 +392,7 @@ export interface TimelineClip {
   source: {
     type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model';
     modelUrl?: string;  // Blob URL to 3D model file
+    meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
     videoElement?: HTMLVideoElement;
     audioElement?: HTMLAudioElement;
     imageElement?: HTMLImageElement;
@@ -465,6 +467,7 @@ export interface TimelineClip {
   // 3D layer support (AE-style per-layer toggle)
   is3D?: boolean;
   wireframe?: boolean;  // Debug: show 3D model as wireframe
+  meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh geometry type
 }
 
 export interface TimelineTrack {
@@ -535,6 +538,7 @@ export interface SerializableClip {
   transitionOut?: TimelineTransition;
   // 3D layer support
   is3D?: boolean;
+  meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;
 }
 
 // Serializable timeline marker (for project save/load)

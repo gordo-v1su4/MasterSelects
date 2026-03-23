@@ -736,7 +736,7 @@ export class LayerBuilderService {
       visible: true,
       opacity: finalOpacity,
       blendMode: transform.blendMode as BlendMode,
-      source: { type: 'model', modelUrl: clip.source?.modelUrl },
+      source: { type: 'model', modelUrl: clip.source?.modelUrl, meshType: clip.meshType },
       effects,
       position: transform.position,
       scale: transform.scale,

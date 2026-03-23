@@ -192,6 +192,11 @@ export interface SolidClipActions {
   updateSolidColor: (clipId: string, color: string) => void;
 }
 
+// Mesh clip actions (extracted to meshClipSlice)
+export interface MeshClipActions {
+  addMeshClip: (trackId: string, startTime: number, meshType: import('../mediaStore/types').MeshPrimitiveType, duration?: number, skipMediaItem?: boolean) => string | null;
+}
+
 // Clip effect actions (extracted to clipEffectSlice)
 export interface ClipEffectActions {
   addClipEffect: (clipId: string, effectType: string) => void;
@@ -236,7 +241,7 @@ export interface CoreClipActions {
 }
 
 // Combined ClipActions = all sub-interfaces
-export type ClipActions = CoreClipActions & TextClipActions & SolidClipActions & ClipEffectActions & LinkedGroupActions & DownloadClipActions;
+export type ClipActions = CoreClipActions & TextClipActions & SolidClipActions & MeshClipActions & ClipEffectActions & LinkedGroupActions & DownloadClipActions;
 
 // Playback actions interface
 export interface PlaybackActions {

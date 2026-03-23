@@ -73,6 +73,7 @@ export function MediaPanel() {
   const compositions = useMediaStore(state => state.compositions);
   const folders = useMediaStore(state => state.folders);
   const solidItems = useMediaStore(state => state.solidItems);
+  const meshItems = useMediaStore(state => state.meshItems);
   const selectedIds = useMediaStore(state => state.selectedIds);
   const expandedFolderIds = useMediaStore(state => state.expandedFolderIds);
   const fileSystemSupported = useMediaStore(state => state.fileSystemSupported);
@@ -107,6 +108,9 @@ export function MediaPanel() {
     createSolidItem,
     getOrCreateSolidFolder,
     updateSolidItem,
+    createMeshItem,
+    getOrCreateMeshFolder,
+    removeMeshItem,
     setLabelColor,
   } = useMediaStore.getState();
 
@@ -520,9 +524,10 @@ export function MediaPanel() {
       if (files.find(f => f.id === id)) removeFile(id);
       else if (compositions.find(c => c.id === id)) removeComposition(id);
       else if (folders.find(f => f.id === id)) removeFolder(id);
+      else if (meshItems.find(m => m.id === id)) removeMeshItem(id);
     });
     closeContextMenu();
-  }, [selectedIds, files, compositions, folders, removeFile, removeComposition, removeFolder, closeContextMenu]);
+  }, [selectedIds, files, compositions, folders, meshItems, removeFile, removeComposition, removeFolder, removeMeshItem, closeContextMenu]);
 
   // Get the active parent folder (grid view: current open folder, list view: selected folder or null)
   const getActiveParentId = useCallback((): string | null => {
@@ -560,6 +565,13 @@ export function MediaPanel() {
     createSolidItem(undefined, '#ffffff', solidFolderId);
     closeContextMenu();
   }, [createSolidItem, getOrCreateSolidFolder, closeContextMenu]);
+
+  // New mesh item (in Media Panel, can be dragged to timeline)
+  const handleNewMesh = useCallback((meshType: import('../../stores/mediaStore/types').MeshPrimitiveType) => {
+    const meshFolderId = getOrCreateMeshFolder();
+    createMeshItem(meshType, undefined, meshFolderId);
+    closeContextMenu();
+  }, [createMeshItem, getOrCreateMeshFolder, closeContextMenu]);
 
   // Composition settings
   const openCompositionSettings = useCallback((comp: Composition) => {
@@ -666,6 +678,26 @@ export function MediaPanel() {
         isVideo: true,
       });
       e.dataTransfer.setData('application/x-solid-item-id', item.id);
+      e.dataTransfer.effectAllowed = 'copyMove';
+      if (e.currentTarget instanceof HTMLElement) {
+        e.dataTransfer.setDragImage(e.currentTarget, 10, 10);
+      }
+      return;
+    }
+
+    // Handle mesh item drag
+    if (item.type === 'model' && 'meshType' in item) {
+      const meshItem = item as import('../../stores/mediaStore/types').MeshItem;
+      setExternalDragPayload({
+        kind: 'mesh',
+        id: item.id,
+        duration: meshItem.duration,
+        hasAudio: false,
+        isAudio: false,
+        isVideo: true,
+        meshType: meshItem.meshType,
+      });
+      e.dataTransfer.setData('application/x-mesh-item-id', item.id);
       e.dataTransfer.effectAllowed = 'copyMove';
       if (e.currentTarget instanceof HTMLElement) {
         e.dataTransfer.setDragImage(e.currentTarget, 10, 10);
@@ -1290,6 +1322,18 @@ export function MediaPanel() {
                   <span className="add-dropdown-icon"><FileTypeIcon type="solid" /></span>
                   <span>Solid</span>
                 </div>
+                <div className="add-dropdown-item has-submenu">
+                  <span className="add-dropdown-icon"><FileTypeIcon type="mesh" /></span>
+                  <span>Mesh</span>
+                  <span className="submenu-arrow">&#9654;</span>
+                  <div className="add-dropdown-submenu">
+                    {(['cube', 'sphere', 'plane', 'cylinder', 'torus', 'cone'] as const).map(meshType => (
+                      <div key={meshType} className="add-dropdown-item" onClick={() => { handleNewMesh(meshType); setAddDropdownOpen(false); }}>
+                        <span>{meshType.charAt(0).toUpperCase() + meshType.slice(1)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <div className="add-dropdown-item" onClick={() => { /* TODO: Add adjustment layer */ setAddDropdownOpen(false); }}>
                   <span className="add-dropdown-icon"><FileTypeIcon type="solid" /></span>
                   <span>Adjustment Layer</span>
@@ -1454,7 +1498,8 @@ export function MediaPanel() {
           ? files.find(f => f.id === contextMenu.itemId) ||
             compositions.find(c => c.id === contextMenu.itemId) ||
             folders.find(f => f.id === contextMenu.itemId) ||
-            solidItems.find(s => s.id === contextMenu.itemId)
+            solidItems.find(s => s.id === contextMenu.itemId) ||
+            meshItems.find(m => m.id === contextMenu.itemId)
           : null;
         const isVideoFile = selectedItem && 'type' in selectedItem && selectedItem.type === 'video';
         const isComposition = selectedItem && 'type' in selectedItem && selectedItem.type === 'composition';
@@ -1499,6 +1544,18 @@ export function MediaPanel() {
             <div className="context-menu-item" onClick={() => { handleNewSolid(); closeContextMenu(); }}>
               <span className="context-menu-icon"><FileTypeIcon type="solid" /></span>
               Solid
+            </div>
+            <div className="context-menu-item has-submenu">
+              <span className="context-menu-icon"><FileTypeIcon type="mesh" /></span>
+              <span>Mesh</span>
+              <span className="submenu-arrow">&#9654;</span>
+              <div className="context-submenu">
+                {(['cube', 'sphere', 'plane', 'cylinder', 'torus', 'cone'] as const).map(meshType => (
+                  <div key={meshType} className="context-menu-item" onClick={() => { handleNewMesh(meshType); closeContextMenu(); }}>
+                    {meshType.charAt(0).toUpperCase() + meshType.slice(1)}
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="context-menu-item disabled" onClick={closeContextMenu}>
               <span className="context-menu-icon"><FileTypeIcon type="solid" /></span>

@@ -20,6 +20,7 @@ export interface Layer3DData {
   // 3D model source
   modelUrl?: string;  // Blob URL to OBJ/glTF/GLB file
   modelFileName?: string;  // Original filename (for format detection from blob URLs)
+  meshType?: import('../../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
   wireframe?: boolean;  // Debug: show as wireframe
 }
 

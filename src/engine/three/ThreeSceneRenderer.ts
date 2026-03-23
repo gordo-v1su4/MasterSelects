@@ -198,8 +198,46 @@ export class ThreeSceneRenderer {
         planeW = planeH * sourceAspect;
       }
 
-      // === 3D Model layers ===
-      if (layer.modelUrl) {
+      // === Primitive mesh layers (cube, sphere, etc.) ===
+      if (layer.meshType && !layer.modelUrl) {
+        const meshKey = `primitive:${layer.meshType}`;
+        if (!managed || managed.modelUrl !== meshKey) {
+          if (managed) this.scene.remove(managed.mesh);
+          const geometry = this.createPrimitiveGeometry(T, layer.meshType);
+          const material = new T.MeshStandardMaterial({
+            color: 0xaaaaaa,
+            metalness: 0.3,
+            roughness: 0.6,
+          });
+          const mesh = new T.Mesh(geometry, material);
+          managed = {
+            mesh,
+            texture: new T.Texture(),
+            layerId: layer.layerId,
+            lastSourceType: 'model',
+            planeW: 1,
+            planeH: 1,
+            isModel: true,
+            modelUrl: meshKey,
+          };
+          this.meshes.set(layer.layerId, managed);
+          this.scene.add(mesh);
+        }
+
+        // Apply wireframe mode
+        const mat = (managed.mesh as import('three').Mesh).material as import('three').MeshStandardMaterial;
+        if (layer.wireframe) {
+          mat.wireframe = true;
+          mat.color.setHex(0x4488ff);
+          mat.emissive.setHex(0x2244aa);
+        } else {
+          mat.wireframe = false;
+          mat.color.setHex(0xaaaaaa);
+          mat.emissive.setHex(0x000000);
+        }
+      }
+      // === 3D Model layers (file-based) ===
+      else if (layer.modelUrl) {
         // Register filename so loader knows the format (blob URLs have no extension)
         if (layer.modelFileName) {
           this.setModelFileName(layer.modelUrl, layer.modelFileName);
@@ -327,6 +365,26 @@ export class ThreeSceneRenderer {
     this.renderer.render(this.scene, this.camera);
 
     return this.canvas;
+  }
+
+  /** Create a Three.js geometry for a primitive mesh type */
+  private createPrimitiveGeometry(T: THREE, meshType: string): import('three').BufferGeometry {
+    switch (meshType) {
+      case 'cube':
+        return new T.BoxGeometry(0.6, 0.6, 0.6);
+      case 'sphere':
+        return new T.SphereGeometry(0.35, 32, 24);
+      case 'plane':
+        return new T.PlaneGeometry(0.8, 0.8);
+      case 'cylinder':
+        return new T.CylinderGeometry(0.25, 0.25, 0.6, 32);
+      case 'torus':
+        return new T.TorusGeometry(0.3, 0.1, 16, 48);
+      case 'cone':
+        return new T.ConeGeometry(0.3, 0.6, 32);
+      default:
+        return new T.BoxGeometry(0.6, 0.6, 0.6);
+    }
   }
 
   /** Load a 3D model (OBJ/glTF/GLB) and cache it */

@@ -353,9 +353,10 @@ export async function loadProjectToStores(): Promise<void> {
   const timelineStore = useTimelineStore.getState();
   timelineStore.clearTimeline();
 
-  // Restore text and solid items
+  // Restore text, solid, and mesh items
   const textItems = (projectData as any).textItems || [];
   const solidItems = (projectData as any).solidItems || [];
+  const meshItems = (projectData as any).meshItems || [];
 
   // Update media store
   useMediaStore.setState({
@@ -375,6 +376,7 @@ export async function loadProjectToStores(): Promise<void> {
     folders,
     textItems,
     solidItems,
+    meshItems,
     activeCompositionId: projectData.activeCompositionId,
     openCompositionIds: projectData.openCompositionIds || [],
     expandedFolderIds: projectData.expandedFolderIds || [],

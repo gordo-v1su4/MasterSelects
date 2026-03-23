@@ -103,6 +103,17 @@ export interface SolidItem extends MediaItem {
   duration: number; // Default duration when added to timeline
 }
 
+// 3D mesh primitive types
+export type MeshPrimitiveType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'torus' | 'cone';
+
+// 3D mesh item (for Media Panel - can be dragged to timeline)
+export interface MeshItem extends MediaItem {
+  type: 'model';
+  meshType: MeshPrimitiveType;
+  color: string;      // Mesh material color
+  duration: number;   // Default duration when added to timeline
+}
+
 // 3D camera configuration for compositions
 export interface CompositionCamera {
   enabled: boolean;
@@ -145,7 +156,7 @@ export interface MediaFolder {
 }
 
 // Union type for all items
-export type ProjectItem = MediaFile | Composition | MediaFolder | TextItem | SolidItem;
+export type ProjectItem = MediaFile | Composition | MediaFolder | TextItem | SolidItem | MeshItem;
 
 // Slice creator type for mediaStore
 export type MediaSliceCreator<T> = (
@@ -161,6 +172,7 @@ export interface MediaState {
   folders: MediaFolder[];
   textItems: TextItem[];
   solidItems: SolidItem[];
+  meshItems: MeshItem[];
 
   // Active composition
   activeCompositionId: string | null;
