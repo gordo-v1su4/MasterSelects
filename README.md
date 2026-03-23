@@ -8,10 +8,9 @@
 
 <table><tr><td align="center" style="border:none;background:#0d1117;">
 <h1>&#9889; 660 KB <sub>gzip</sub></h1>
-<sup><b>initial load &mdash; entire app, zero lazy chunks needed</b></sup>
+<sup><b>initial load</b></sup>
 </td></tr></table>
 
-<br><br>
 
 <p>
   GPU-first editing with <b>30 effects</b>, <b>37 blend modes</b>, <b>76 AI tools</b>, <b>real 3D via Three.js</b>, and only <b>14 dependencies</b>.<br>
