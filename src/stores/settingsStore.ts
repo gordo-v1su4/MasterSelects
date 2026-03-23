@@ -110,6 +110,7 @@ interface SettingsState {
   hasCompletedSetup: boolean;
   hasSeenTutorial: boolean;
   hasSeenTutorialPart2: boolean;
+  hasSeenAIChatOnboarding: boolean;
 
   // User background (which program they come from)
   userBackground: string | null;
@@ -160,6 +161,7 @@ interface SettingsState {
   setHasCompletedSetup: (completed: boolean) => void;
   setHasSeenTutorial: (seen: boolean) => void;
   setHasSeenTutorialPart2: (seen: boolean) => void;
+  setHasSeenAIChatOnboarding: (seen: boolean) => void;
   setUserBackground: (bg: string) => void;
   // Shortcut actions
   setActiveShortcutPreset: (preset: ShortcutPresetId) => void;
@@ -225,6 +227,7 @@ export const useSettingsStore = create<SettingsState>()(
       hasCompletedSetup: false, // Show welcome overlay on first run
       hasSeenTutorial: false, // Show tutorial on first run
       hasSeenTutorialPart2: false, // Show timeline tutorial after part 1
+      hasSeenAIChatOnboarding: false, // Show AI chat onboarding hint on first open
       userBackground: null, // Which program the user comes from
       activeShortcutPreset: DEFAULT_PRESET_ID as ShortcutPresetId,
       shortcutOverrides: null,
@@ -334,6 +337,10 @@ export const useSettingsStore = create<SettingsState>()(
 
       setHasSeenTutorialPart2: (seen) => {
         set({ hasSeenTutorialPart2: seen });
+      },
+
+      setHasSeenAIChatOnboarding: (seen) => {
+        set({ hasSeenAIChatOnboarding: seen });
       },
 
       setUserBackground: (bg) => {
@@ -482,6 +489,7 @@ export const useSettingsStore = create<SettingsState>()(
         hasCompletedSetup: state.hasCompletedSetup,
         hasSeenTutorial: state.hasSeenTutorial,
         hasSeenTutorialPart2: state.hasSeenTutorialPart2,
+        hasSeenAIChatOnboarding: state.hasSeenAIChatOnboarding,
         userBackground: state.userBackground,
         activeShortcutPreset: state.activeShortcutPreset,
         shortcutOverrides: state.shortcutOverrides,
