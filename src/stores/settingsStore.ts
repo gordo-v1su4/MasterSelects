@@ -8,6 +8,8 @@ import { apiKeyManager, type ApiKeyType } from '../services/apiKeyManager';
 import { projectFileService } from '../services/project/ProjectFileService';
 import { flags } from '../engine/featureFlags';
 import { Logger } from '../services/logger';
+import type { ShortcutPresetId, ShortcutMap, KeyCombo, ShortcutActionId, CustomShortcutPreset } from '../services/shortcutTypes';
+import { PRESETS, DEFAULT_PRESET_ID } from '../services/shortcutPresets';
 const log = Logger.create('SettingsStore');
 
 function persistChangelogStateToProject(
@@ -112,6 +114,11 @@ interface SettingsState {
   // User background (which program they come from)
   userBackground: string | null;
 
+  // Keyboard shortcuts
+  activeShortcutPreset: ShortcutPresetId;
+  shortcutOverrides: Partial<ShortcutMap> | null;
+  customPresets: CustomShortcutPreset[];
+
   // Tutorial campaign completion tracking
   completedTutorials: string[];
 
@@ -154,6 +161,14 @@ interface SettingsState {
   setHasSeenTutorial: (seen: boolean) => void;
   setHasSeenTutorialPart2: (seen: boolean) => void;
   setUserBackground: (bg: string) => void;
+  // Shortcut actions
+  setActiveShortcutPreset: (preset: ShortcutPresetId) => void;
+  setShortcutOverride: (action: ShortcutActionId, combos: KeyCombo[]) => void;
+  clearShortcutOverride: (action: ShortcutActionId) => void;
+  resetShortcutsToPreset: () => void;
+  saveCustomPreset: (name: string) => void;
+  loadCustomPreset: (name: string) => void;
+  deleteCustomPreset: (name: string) => void;
   completeTutorial: (campaignId: string) => void;
   setShowChangelogOnStartup: (show: boolean) => void;
   setLastSeenChangelogVersion: (version: string | null) => void;
@@ -211,6 +226,9 @@ export const useSettingsStore = create<SettingsState>()(
       hasSeenTutorial: false, // Show tutorial on first run
       hasSeenTutorialPart2: false, // Show timeline tutorial after part 1
       userBackground: null, // Which program the user comes from
+      activeShortcutPreset: DEFAULT_PRESET_ID as ShortcutPresetId,
+      shortcutOverrides: null,
+      customPresets: [] as CustomShortcutPreset[],
       completedTutorials: [], // Campaign IDs that have been completed
       showChangelogOnStartup: true, // Show changelog dialog on every startup
       lastSeenChangelogVersion: null, // Latest app version whose changelog was acknowledged
@@ -322,6 +340,54 @@ export const useSettingsStore = create<SettingsState>()(
         set({ userBackground: bg });
       },
 
+      setActiveShortcutPreset: (preset) => {
+        set({ activeShortcutPreset: preset, shortcutOverrides: null });
+      },
+
+      setShortcutOverride: (action, combos) => {
+        const current = get().shortcutOverrides || {};
+        set({ shortcutOverrides: { ...current, [action]: combos } });
+      },
+
+      clearShortcutOverride: (action) => {
+        const current = get().shortcutOverrides;
+        if (!current) return;
+        const next = { ...current };
+        delete next[action as keyof typeof next];
+        set({ shortcutOverrides: Object.keys(next).length > 0 ? next : null });
+      },
+
+      resetShortcutsToPreset: () => {
+        set({ shortcutOverrides: null });
+      },
+
+      saveCustomPreset: (name) => {
+        const state = get();
+        const presetId = state.activeShortcutPreset || DEFAULT_PRESET_ID;
+        const preset = PRESETS[presetId] || PRESETS[DEFAULT_PRESET_ID];
+        const effectiveMap = state.shortcutOverrides
+          ? { ...preset.map, ...state.shortcutOverrides } as ShortcutMap
+          : { ...preset.map };
+        const existing = state.customPresets.filter((p) => p.name !== name);
+        set({
+          customPresets: [
+            ...existing,
+            { name, map: effectiveMap, createdAt: Date.now() },
+          ],
+        });
+      },
+
+      loadCustomPreset: (name) => {
+        const custom = get().customPresets.find((p) => p.name === name);
+        if (!custom) return;
+        // Store the full map as overrides on top of current preset
+        set({ shortcutOverrides: custom.map });
+      },
+
+      deleteCustomPreset: (name) => {
+        set({ customPresets: get().customPresets.filter((p) => p.name !== name) });
+      },
+
       completeTutorial: (campaignId) => {
         const current = get().completedTutorials;
         if (!current.includes(campaignId)) {
@@ -417,6 +483,9 @@ export const useSettingsStore = create<SettingsState>()(
         hasSeenTutorial: state.hasSeenTutorial,
         hasSeenTutorialPart2: state.hasSeenTutorialPart2,
         userBackground: state.userBackground,
+        activeShortcutPreset: state.activeShortcutPreset,
+        shortcutOverrides: state.shortcutOverrides,
+        customPresets: state.customPresets,
         completedTutorials: state.completedTutorials,
         showChangelogOnStartup: state.showChangelogOnStartup,
         lastSeenChangelogVersion: state.lastSeenChangelogVersion,
