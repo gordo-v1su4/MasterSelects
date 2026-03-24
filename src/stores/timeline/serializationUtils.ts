@@ -126,6 +126,8 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         solidColor: clip.source?.type === 'solid' ? (clip.solidColor || clip.name.replace('Solid ', '')) : undefined,
         // 3D layer support
         is3D: clip.is3D || undefined,
+        // Gaussian avatar blendshapes
+        gaussianBlendshapes: clip.source?.type === 'gaussian-avatar' ? clip.source.gaussianBlendshapes : undefined,
       };
     });
 
@@ -1225,6 +1227,27 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
                   source: {
                     type: 'model' as const,
                     modelUrl: fileUrl,
+                    naturalDuration: serializedClip.naturalDuration || 3600,
+                    mediaFileId: serializedClip.mediaFileId,
+                  },
+                  is3D: true,
+                  isLoading: false,
+                }
+              : c
+          ),
+        }));
+        wakePreviewAfterRestore();
+      } else if (type === 'gaussian-avatar') {
+        // Gaussian Avatar clips — blob URL for the renderer to load
+        set(state => ({
+          clips: state.clips.map(c =>
+            c.id === clip.id
+              ? {
+                  ...c,
+                  source: {
+                    type: 'gaussian-avatar' as const,
+                    gaussianAvatarUrl: fileUrl,
+                    gaussianBlendshapes: serializedClip.gaussianBlendshapes || {},
                     naturalDuration: serializedClip.naturalDuration || 3600,
                     mediaFileId: serializedClip.mediaFileId,
                   },

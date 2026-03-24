@@ -68,7 +68,7 @@ export type BlendMode =
   | 'alpha-add';
 
 export interface LayerSource {
-  type: 'video' | 'image' | 'camera' | 'color' | 'text' | 'solid' | 'model';
+  type: 'video' | 'image' | 'camera' | 'color' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
   modelUrl?: string;  // Blob URL to 3D model file (OBJ/glTF/GLB)
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type (cube, sphere, etc.)
   file?: File;
@@ -89,6 +89,9 @@ export interface LayerSource {
   // Shared media runtime binding
   runtimeSourceId?: string;
   runtimeSessionKey?: string;
+  // Gaussian avatar support
+  gaussianAvatarUrl?: string;
+  gaussianBlendshapes?: Record<string, number>;
   // Nested composition support - pre-rendered layers from nested comp
   nestedComposition?: NestedCompositionData;
   // Text clip support
@@ -390,9 +393,11 @@ export interface TimelineClip {
   inPoint: number;        // Trim in point within source (seconds)
   outPoint: number;       // Trim out point within source (seconds)
   source: {
-    type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model';
+    type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
     modelUrl?: string;  // Blob URL to 3D model file
     meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
+    gaussianAvatarUrl?: string;  // URL to gaussian splat avatar file
+    gaussianBlendshapes?: Record<string, number>;  // ARKit blendshape weights
     videoElement?: HTMLVideoElement;
     audioElement?: HTMLAudioElement;
     imageElement?: HTMLImageElement;
@@ -502,7 +507,7 @@ export interface SerializableClip {
   duration: number;
   inPoint: number;
   outPoint: number;
-  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model';
+  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
   naturalDuration?: number;
   thumbnails?: string[];
   linkedClipId?: string;
@@ -539,6 +544,8 @@ export interface SerializableClip {
   // 3D layer support
   is3D?: boolean;
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;
+  // Gaussian avatar blendshape state
+  gaussianBlendshapes?: Record<string, number>;
 }
 
 // Serializable timeline marker (for project save/load)

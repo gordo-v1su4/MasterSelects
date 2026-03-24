@@ -301,6 +301,19 @@ export async function updateTimelineClips(mediaFileId: string, file: File): Prom
           isLoading: false,
         });
       }, { once: true });
+    } else if (sourceType === 'gaussian-avatar') {
+      // Gaussian avatar — create blob URL for the renderer
+      const gaussianAvatarUrl = URL.createObjectURL(file);
+      timelineStore.updateClip(clip.id, {
+        file,
+        needsReload: false,
+        isLoading: false,
+        source: {
+          ...clip.source!,
+          gaussianAvatarUrl,
+          gaussianBlendshapes: clip.source?.gaussianBlendshapes || {},
+        },
+      });
     } else {
       // Unknown type - just update the file reference
       timelineStore.updateClip(clip.id, {
