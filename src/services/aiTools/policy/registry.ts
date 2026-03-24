@@ -169,6 +169,14 @@ const TOOL_POLICY_MAP = new Map<string, ToolPolicyEntry>([
   // searchVideos is the definition name for the same handler as searchYouTube
   ['searchVideos', mutatingLow()],
   ['listVideoFormats', mutatingLow()],
+
+  // ── GAUSSIAN SPLAT DEBUG ────────────────────────────────────────────
+  ['getGaussianStatus', bridgeTelemetry()],
+  ['getGaussianClips', bridgeTelemetry()],
+  ['getGaussianLayers', bridgeTelemetry()],
+  ['testGaussianModule', bridgeTelemetry()],
+  ['testGaussianRenderer', bridgeTelemetry()],
+  ['testGaussianImportPipeline', mutatingLow()],
 ]);
 
 /**

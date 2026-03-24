@@ -122,6 +122,15 @@ import {
   handleGetStatsHistory,
 } from './stats';
 
+import {
+  handleGetGaussianStatus,
+  handleGetGaussianClips,
+  handleGetGaussianLayers,
+  handleTestGaussianModule,
+  handleTestGaussianRenderer,
+  handleTestGaussianImportPipeline,
+} from './gaussian';
+
 // Handler registry - maps tool names to handler functions
 const timelineHandlers: Record<string, (args: Record<string, unknown>, store: ReturnType<typeof useTimelineStore.getState>) => Promise<ToolResult>> = {
   getTimelineState: handleGetTimelineState,
@@ -225,6 +234,13 @@ const selfContainedHandlers: Record<string, (args: Record<string, unknown>) => P
   getStatsHistory: handleGetStatsHistory,
   getLogs: handleGetLogs,
   getPlaybackTrace: handleGetPlaybackTrace,
+  // Gaussian Splat
+  getGaussianStatus: handleGetGaussianStatus,
+  getGaussianClips: handleGetGaussianClips,
+  getGaussianLayers: handleGetGaussianLayers,
+  testGaussianModule: handleTestGaussianModule,
+  testGaussianRenderer: handleTestGaussianRenderer,
+  testGaussianImportPipeline: handleTestGaussianImportPipeline,
 };
 
 // YouTube handlers - self-contained, fetch their own stores
@@ -363,4 +379,11 @@ export {
   handleGetLogs,
   handleGetPlaybackTrace,
   handleGetStatsHistory,
+  // Gaussian Splat
+  handleGetGaussianStatus,
+  handleGetGaussianClips,
+  handleGetGaussianLayers,
+  handleTestGaussianModule,
+  handleTestGaussianRenderer,
+  handleTestGaussianImportPipeline,
 };

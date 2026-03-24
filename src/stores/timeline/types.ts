@@ -222,7 +222,7 @@ export interface DownloadClipActions {
 
 // Core clip actions (remain in clipSlice)
 export interface CoreClipActions {
-  addClip: (trackId: string, file: File, startTime: number, estimatedDuration?: number, mediaFileId?: string) => Promise<void>;
+  addClip: (trackId: string, file: File, startTime: number, estimatedDuration?: number, mediaFileId?: string, mediaTypeOverride?: string) => Promise<void>;
   addCompClip: (trackId: string, composition: Composition, startTime: number) => void;
   updateClip: (id: string, updates: Partial<TimelineClip>) => void;
   removeClip: (id: string) => void;
@@ -387,7 +387,7 @@ export interface ClipboardClipData {
   duration: number;
   inPoint: number;
   outPoint: number;
-  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model';
+  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
   naturalDuration?: number;
   transform: ClipTransform;
   effects: Effect[];
