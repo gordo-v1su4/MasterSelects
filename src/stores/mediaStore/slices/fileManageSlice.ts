@@ -301,6 +301,18 @@ export async function updateTimelineClips(mediaFileId: string, file: File): Prom
           isLoading: false,
         });
       }, { once: true });
+    } else if (sourceType === 'model') {
+      // 3D Model — create blob URL for Three.js loader
+      const modelUrl = URL.createObjectURL(file);
+      timelineStore.updateClip(clip.id, {
+        file,
+        needsReload: false,
+        isLoading: false,
+        source: {
+          ...clip.source!,
+          modelUrl,
+        },
+      });
     } else if (sourceType === 'gaussian-avatar') {
       // Gaussian avatar — create blob URL for the renderer
       const gaussianAvatarUrl = URL.createObjectURL(file);
