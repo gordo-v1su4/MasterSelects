@@ -29,6 +29,10 @@ import type { GaussianSplatSceneRenderer } from '../gaussian/GaussianSplatSceneR
 import type { Layer3DData, CameraConfig } from '../three/types';
 import { DEFAULT_CAMERA_CONFIG } from '../three/types';
 import { useMediaStore } from '../../stores/mediaStore';
+import { getGaussianSplatGpuRenderer } from '../gaussian/core/GaussianSplatGpuRenderer';
+import { buildSplatCamera } from '../gaussian/core/SplatCameraUtils';
+import { loadGaussianSplatAssetCached } from '../gaussian/loaders';
+import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../gaussian/types';
 
 const log = Logger.create('RenderDispatcher');
 
@@ -71,11 +75,13 @@ export class RenderDispatcher {
   private threeSceneTexture: GPUTexture | null = null;
   private threeSceneView: GPUTextureView | null = null;
   private threeSceneInitializing = false;
-  // Gaussian Splat rendering state
+  // Gaussian Splat rendering state (old avatar WebGL path)
   private gaussianTexture: GPUTexture | null = null;
   private gaussianTextureView: GPUTextureView | null = null;
   private gaussianInitializing = false;
   private gaussianErrorLogged = false;
+  // Native Gaussian Splat rendering state (new WebGPU path)
+  private splatLoadingClips = new Set<string>();
 
   constructor(deps: RenderDeps) {
     this.deps = deps;
@@ -275,6 +281,9 @@ export class RenderDispatcher {
     if (flags.useGaussianSplat) {
       this.processGaussianLayers(layerData, device, width, height);
     }
+
+    // === Native Gaussian Splat Pass (WebGPU) ===
+    this.processGaussianSplatLayers(layerData, device, width, height);
 
     // Pre-render nested compositions (batched with main composite)
     const commandBuffers: GPUCommandBuffer[] = [];
@@ -679,6 +688,114 @@ export class RenderDispatcher {
       layerData.splice(indices[i], 1);
     }
     layerData.splice(insertIdx, 0, syntheticData);
+  }
+
+  /**
+   * Process gaussian-splat layers (native WebGPU path).
+   * Each layer is rendered individually into its own texture — NO merging.
+   * The original layer object is preserved for compositor semantics.
+   */
+  private processGaussianSplatLayers(
+    layerData: LayerRenderData[],
+    device: GPUDevice,
+    width: number,
+    height: number,
+  ): void {
+    let hasSplatLayers = false;
+    for (let i = 0; i < layerData.length; i++) {
+      if (layerData[i].layer.source?.type === 'gaussian-splat') {
+        hasSplatLayers = true;
+        break;
+      }
+    }
+    if (!hasSplatLayers) return;
+
+    // Get or lazy-init the native WebGPU renderer
+    const renderer = getGaussianSplatGpuRenderer();
+    if (!renderer.isInitialized) {
+      renderer.initialize(device);
+    }
+    renderer.beginFrame();
+
+    // Process each gaussian-splat layer individually (reverse iteration for safe splice)
+    for (let i = layerData.length - 1; i >= 0; i--) {
+      const data = layerData[i];
+      if (data.layer.source?.type !== 'gaussian-splat') continue;
+
+      const clipId = data.layer.sourceClipId || data.layer.id;
+      const splatUrl = data.layer.source.gaussianSplatUrl;
+      const settings = data.layer.source.gaussianSplatSettings;
+
+      // No URL — remove layer
+      if (!splatUrl) {
+        layerData.splice(i, 1);
+        continue;
+      }
+
+      // Upload scene if not cached — trigger async load, skip this frame
+      if (!renderer.hasScene(clipId)) {
+        this.loadAndUploadSplatScene(clipId, splatUrl, renderer);
+        layerData.splice(i, 1);
+        continue;
+      }
+
+      // Build camera from layer transform + render settings
+      const camera = buildSplatCamera(
+        data.layer,
+        settings?.render ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render,
+        { width, height },
+      );
+
+      // Render this single splat into its own texture
+      const commandEncoder = device.createCommandEncoder();
+      const textureView = renderer.renderToTexture(
+        clipId, camera, { width, height }, commandEncoder,
+      );
+      device.queue.submit([commandEncoder.finish()]);
+
+      if (textureView) {
+        // In-place replacement — keep the SAME layer (preserving opacity, blend, masks, effects)
+        layerData[i] = {
+          layer: data.layer,
+          isVideo: false,
+          externalTexture: null,
+          textureView,
+          sourceWidth: width,
+          sourceHeight: height,
+        };
+      } else {
+        layerData.splice(i, 1);
+      }
+    }
+  }
+
+  /** Async helper: fetch splat file, parse, and upload to GPU renderer */
+  private async loadAndUploadSplatScene(
+    clipId: string,
+    url: string,
+    renderer: ReturnType<typeof getGaussianSplatGpuRenderer>,
+  ): Promise<void> {
+    if (this.splatLoadingClips.has(clipId)) return;
+    this.splatLoadingClips.add(clipId);
+
+    try {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      const file = new File([arrayBuffer], 'splat.ply');
+      const asset = await loadGaussianSplatAssetCached(clipId, file);
+
+      if (asset?.frames[0]?.buffer) {
+        renderer.uploadScene(clipId, {
+          splatCount: asset.frames[0].buffer.splatCount,
+          data: asset.frames[0].buffer.data,
+        });
+        log.info('Gaussian splat scene uploaded', { clipId, splatCount: asset.frames[0].buffer.splatCount });
+      }
+    } catch (err) {
+      log.error('Failed to load gaussian splat scene', { clipId, err });
+    } finally {
+      this.splatLoadingClips.delete(clipId);
+    }
   }
 
   renderEmptyFrame(device: GPUDevice): void {

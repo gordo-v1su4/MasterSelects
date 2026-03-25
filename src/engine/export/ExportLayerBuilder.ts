@@ -135,6 +135,19 @@ export function buildLayersAtTime(
         is3D: true,
       });
     }
+    // Handle Gaussian Splat clips (native WebGPU)
+    else if (clip.source?.type === 'gaussian-splat') {
+      layers.push({
+        ...baseLayerProps,
+        source: {
+          type: 'gaussian-splat',
+          gaussianSplatUrl: clip.source.gaussianSplatUrl,
+          gaussianSplatSettings: clip.source.gaussianSplatSettings,
+          mediaTime: clipLocalTime,
+        },
+        is3D: true,
+      });
+    }
     // Handle text and solid clips
     else if ((clip.source?.type === 'text' || clip.source?.type === 'solid') && clip.source.textCanvas) {
       layers.push({

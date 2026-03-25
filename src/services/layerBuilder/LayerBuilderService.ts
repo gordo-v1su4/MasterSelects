@@ -375,6 +375,10 @@ export class LayerBuilderService {
     else if (clip.source?.type === 'gaussian-avatar') {
       layer = this.buildGaussianAvatarLayer(clip, layerIndex, ctx, opacityOverride);
     }
+    // Gaussian Splat clip (native WebGPU path)
+    else if (clip.source?.type === 'gaussian-splat') {
+      layer = this.buildGaussianSplatLayer(clip, layerIndex, ctx, opacityOverride);
+    }
 
     // Pass through 3D flag from clip to layer
     if (layer && clip.is3D) {
@@ -779,6 +783,45 @@ export class LayerBuilderService {
         type: 'gaussian-avatar',
         gaussianAvatarUrl: clip.source?.gaussianAvatarUrl,
         gaussianBlendshapes: clip.source?.gaussianBlendshapes,
+      },
+      effects,
+      position: transform.position,
+      scale: transform.scale,
+      rotation: transform.rotation,
+      is3D: true,
+    };
+
+    this.addMaskProperties(layer, clip);
+    return layer;
+  }
+
+  /**
+   * Build Gaussian Splat layer — rendered natively via WebGPU
+   */
+  private buildGaussianSplatLayer(clip: TimelineClip, layerIndex: number, ctx: FrameContext, opacityOverride?: number): Layer {
+    const timeInfo = getClipTimeInfo(ctx, clip);
+    const transform = this.transformCache.getTransform(
+      `${ctx.activeCompId}_${layerIndex}`,
+      ctx.getInterpolatedTransform(clip.id, timeInfo.clipLocalTime)
+    );
+    const effects = ctx.getInterpolatedEffects(clip.id, timeInfo.clipLocalTime);
+
+    const finalOpacity = opacityOverride !== undefined
+      ? transform.opacity * opacityOverride
+      : transform.opacity;
+
+    const layer: Layer = {
+      id: `${ctx.activeCompId}_layer_${layerIndex}`,
+      name: clip.name,
+      sourceClipId: clip.id,
+      visible: true,
+      opacity: finalOpacity,
+      blendMode: transform.blendMode as BlendMode,
+      source: {
+        type: 'gaussian-splat',
+        gaussianSplatUrl: clip.source?.gaussianSplatUrl,
+        gaussianSplatSettings: clip.source?.gaussianSplatSettings,
+        mediaTime: timeInfo.clipLocalTime,
       },
       effects,
       position: transform.position,
