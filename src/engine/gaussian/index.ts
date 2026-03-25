@@ -20,3 +20,9 @@ export type {
   GaussianSplatAsset,
   SplatCache,
 } from './loaders';
+
+// WebGPU GPU renderer core
+export { GaussianSplatGpuRenderer, getGaussianSplatGpuRenderer } from './core/GaussianSplatGpuRenderer';
+export type { UploadableSplatData, SplatCameraParams } from './core/GaussianSplatGpuRenderer';
+export { SplatRenderTargetPool } from './core/SplatRenderTargetPool';
+export { buildSplatCamera } from './core/SplatCameraUtils';
