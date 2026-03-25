@@ -44,6 +44,11 @@ export class LayerBuilderService {
   // Lookahead preloading
   private lastLookaheadTime = 0;
 
+  constructor() {
+    // Legacy gaussian-avatar path stays on disk for migration/reference only.
+    void this.buildGaussianAvatarLayer;
+  }
+
   private hasRenderableVideoSource(source: TimelineClip['source'] | undefined): boolean {
     return !!source?.videoElement || !!source?.webCodecsPlayer?.isFullMode();
   }
@@ -370,10 +375,6 @@ export class LayerBuilderService {
     // 3D Model clip
     else if (clip.source?.type === 'model') {
       layer = this.buildModelLayer(clip, layerIndex, ctx, opacityOverride);
-    }
-    // Gaussian Avatar clip
-    else if (clip.source?.type === 'gaussian-avatar') {
-      layer = this.buildGaussianAvatarLayer(clip, layerIndex, ctx, opacityOverride);
     }
     // Gaussian Splat clip (native WebGPU path)
     else if (clip.source?.type === 'gaussian-splat') {
@@ -820,6 +821,7 @@ export class LayerBuilderService {
       source: {
         type: 'gaussian-splat',
         gaussianSplatUrl: clip.source?.gaussianSplatUrl,
+        gaussianSplatFileName: clip.file?.name ?? clip.name,
         gaussianSplatSettings: clip.source?.gaussianSplatSettings,
         mediaTime: timeInfo.clipLocalTime,
       },
@@ -1085,16 +1087,6 @@ export class LayerBuilderService {
       return {
         ...baseLayer,
         source: { type: 'model', modelUrl: nestedClip.source.modelUrl },
-        is3D: true,
-      } as Layer;
-    } else if (nestedClip.source?.type === 'gaussian-avatar') {
-      return {
-        ...baseLayer,
-        source: {
-          type: 'gaussian-avatar',
-          gaussianAvatarUrl: nestedClip.source.gaussianAvatarUrl,
-          gaussianBlendshapes: nestedClip.source.gaussianBlendshapes,
-        },
         is3D: true,
       } as Layer;
     }

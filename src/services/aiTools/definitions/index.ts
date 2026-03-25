@@ -15,7 +15,6 @@ import { playbackToolDefinitions } from './playback';
 import { transitionToolDefinitions } from './transitions';
 import { maskToolDefinitions } from './masks';
 import { statsToolDefinitions } from './stats';
-import { gaussianToolDefinitions } from './gaussian';
 
 // Combined tool definitions array (OpenAI function calling format)
 export const AI_TOOLS = [
@@ -34,7 +33,6 @@ export const AI_TOOLS = [
   ...transitionToolDefinitions,
   ...maskToolDefinitions,
   ...statsToolDefinitions,
-  ...gaussianToolDefinitions,
 ];
 
 // Re-export individual definition sets for selective use
@@ -54,5 +52,4 @@ export {
   transitionToolDefinitions,
   maskToolDefinitions,
   statsToolDefinitions,
-  gaussianToolDefinitions,
 };

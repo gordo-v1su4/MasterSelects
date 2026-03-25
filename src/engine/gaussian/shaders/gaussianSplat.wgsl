@@ -149,8 +149,14 @@ fn vs_main(
   let meanCam4 = camera.view * meanWorld;
   let meanCam = meanCam4.xyz;
 
-  // Skip splats behind the camera
-  if (meanCam.z < 0.01) {
+  // Right-handed view space: visible splats are in front of the camera at negative Z.
+  // Reject splats that are behind the eye or so close that their support overlaps
+  // the near plane heavily; those produce gigantic projected billboards and smear
+  // over the full frame when flying through the cloud.
+  let viewDepth = -meanCam.z;
+  let supportRadius3d = 3.0 * max(scale.x, max(scale.y, scale.z));
+  let minRenderableDepth = max(0.05, supportRadius3d);
+  if (viewDepth <= minRenderableDepth) {
     out.position = vec4f(0.0, 0.0, 2.0, 1.0); // behind clip plane
     out.color = vec3f(0.0);
     out.opacity = 0.0;
@@ -168,17 +174,8 @@ fn vs_main(
   // Project covariance to 2D
   let cov2d = projectCovariance(cov3d, meanCam, focal);
   let cr = conicAndRadius(cov2d);
-  let conic = cr.xyz;
-  let radius = cr.w;
-
-  if (radius <= 0.0) {
-    out.position = vec4f(0.0, 0.0, 2.0, 1.0);
-    out.color = vec3f(0.0);
-    out.opacity = 0.0;
-    out.conic = vec3f(0.0);
-    out.offset = vec2f(0.0);
-    return out;
-  }
+  let conic = select(vec3f(0.01, 0.0, 0.01), cr.xyz, cr.w > 0.0);
+  let radius = clamp(cr.w, 1.0, 512.0);
 
   // Project mean to clip space
   let meanClip = camera.projection * meanCam4;
@@ -219,14 +216,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
   // Evaluate 2D gaussian
   let power = -0.5 * (in.conic.x * dx * dx + 2.0 * in.conic.y * dx * dy + in.conic.z * dy * dy);
 
-  // Discard if outside gaussian bell (power > 0 means outside due to negative semidefinite)
+  // Outside the bell curve.
   if (power > 0.0) {
     discard;
   }
 
   let a = min(0.99, in.opacity * exp(power));
 
-  // Discard nearly-transparent fragments
   if (a < 1.0 / 255.0) {
     discard;
   }

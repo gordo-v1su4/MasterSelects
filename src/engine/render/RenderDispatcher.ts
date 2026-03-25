@@ -25,7 +25,6 @@ import { vfPipelineMonitor } from '../../services/vfPipelineMonitor';
 import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
 import { flags } from '../featureFlags';
 import type { ThreeSceneRenderer } from '../three/ThreeSceneRenderer';
-import type { GaussianSplatSceneRenderer } from '../gaussian/GaussianSplatSceneRenderer';
 import type { Layer3DData, CameraConfig } from '../three/types';
 import { DEFAULT_CAMERA_CONFIG } from '../three/types';
 import { useMediaStore } from '../../stores/mediaStore';
@@ -60,12 +59,24 @@ export interface RenderDeps {
   performanceStats: PerformanceStats;
   renderLoop: RenderLoop | null;
   threeSceneRenderer?: ThreeSceneRenderer | null;
-  gaussianSplatRenderer?: GaussianSplatSceneRenderer | null;
+}
+
+export interface RenderDispatcherDebugSnapshot {
+  inputLayers: number;
+  collectedLayerData: number;
+  after3DLayerData: number;
+  gaussianCandidates: number;
+  gaussianRendered: number;
+  gaussianPendingLoad: number;
+  gaussianMissingUrl: number;
+  gaussianNoTextureView: number;
+  finalLayerData: number;
 }
 
 export class RenderDispatcher {
   /** Whether the last render() call produced visible content */
   lastRenderHadContent = false;
+  lastRenderDebugSnapshot: RenderDispatcherDebugSnapshot | null = null;
   private deps: RenderDeps;
   private lastPreviewSignature = '';
   private lastPreviewTargetTimeMs?: number;
@@ -75,16 +86,14 @@ export class RenderDispatcher {
   private threeSceneTexture: GPUTexture | null = null;
   private threeSceneView: GPUTextureView | null = null;
   private threeSceneInitializing = false;
-  // Gaussian Splat rendering state (old avatar WebGL path)
-  private gaussianTexture: GPUTexture | null = null;
-  private gaussianTextureView: GPUTextureView | null = null;
-  private gaussianInitializing = false;
-  private gaussianErrorLogged = false;
   // Native Gaussian Splat rendering state (new WebGPU path)
   private splatLoadingClips = new Set<string>();
+  private splatSceneBounds = new Map<string, { min: [number, number, number]; max: [number, number, number] }>();
 
   constructor(deps: RenderDeps) {
     this.deps = deps;
+    // Legacy gaussian-avatar code stays on disk for migration/reference only.
+    void this.processGaussianLayers;
   }
 
   private getTargetVideoTime(layer: Layer, video: HTMLVideoElement): number {
@@ -241,6 +250,18 @@ export class RenderDispatcher {
       isPlaying: d.renderLoop?.getIsPlaying() ?? false,
     });
     const importTime = performance.now() - t1;
+    const debugSnapshot: RenderDispatcherDebugSnapshot = {
+      inputLayers: layers.length,
+      collectedLayerData: layerData.length,
+      after3DLayerData: layerData.length,
+      gaussianCandidates: layerData.filter((data) => data.layer.source?.type === 'gaussian-splat').length,
+      gaussianRendered: 0,
+      gaussianPendingLoad: 0,
+      gaussianMissingUrl: 0,
+      gaussianNoTextureView: 0,
+      finalLayerData: layerData.length,
+    };
+    this.lastRenderDebugSnapshot = debugSnapshot;
 
     // Update stats
     d.performanceStats.setDecoder(d.layerCollector.getDecoder());
@@ -276,14 +297,16 @@ export class RenderDispatcher {
     if (flags.use3DLayers) {
       this.process3DLayers(layerData, device, width, height);
     }
-
-    // === Gaussian Splat Avatar Pass ===
-    if (flags.useGaussianSplat) {
-      this.processGaussianLayers(layerData, device, width, height);
-    }
+    debugSnapshot.after3DLayerData = layerData.length;
 
     // === Native Gaussian Splat Pass (WebGPU) ===
-    this.processGaussianSplatLayers(layerData, device, width, height);
+    const gaussianSummary = this.processGaussianSplatLayers(layerData, device, width, height);
+    debugSnapshot.gaussianCandidates = gaussianSummary.gaussianCandidates;
+    debugSnapshot.gaussianRendered = gaussianSummary.rendered;
+    debugSnapshot.gaussianPendingLoad = gaussianSummary.pendingLoad;
+    debugSnapshot.gaussianMissingUrl = gaussianSummary.missingUrl;
+    debugSnapshot.gaussianNoTextureView = gaussianSummary.noTextureView;
+    debugSnapshot.finalLayerData = layerData.length;
 
     // Pre-render nested compositions (batched with main composite)
     const commandBuffers: GPUCommandBuffer[] = [];
@@ -411,7 +434,11 @@ export class RenderDispatcher {
     // Find 3D layers
     const indices3D: number[] = [];
     for (let i = 0; i < layerData.length; i++) {
-      if (layerData[i].layer.is3D && layerData[i].layer.source?.type !== 'gaussian-avatar') {
+      if (
+        layerData[i].layer.is3D &&
+        layerData[i].layer.source?.type !== 'gaussian-avatar' &&
+        layerData[i].layer.source?.type !== 'gaussian-splat'
+      ) {
         indices3D.push(i);
       }
     }
@@ -545,6 +572,12 @@ export class RenderDispatcher {
    * we simply capture the latest frame each compositor cycle.
    */
   private processGaussianLayers(layerData: LayerRenderData[], device: GPUDevice, width: number, height: number): void {
+    void layerData;
+    void device;
+    void width;
+    void height;
+    return;
+    /*
     // Find gaussian-avatar layers
     const indices: number[] = [];
     for (let i = 0; i < layerData.length; i++) {
@@ -688,6 +721,7 @@ export class RenderDispatcher {
       layerData.splice(indices[i], 1);
     }
     layerData.splice(insertIdx, 0, syntheticData);
+    */
   }
 
   /**
@@ -700,15 +734,27 @@ export class RenderDispatcher {
     device: GPUDevice,
     width: number,
     height: number,
-  ): void {
-    let hasSplatLayers = false;
+  ): {
+    gaussianCandidates: number;
+    rendered: number;
+    pendingLoad: number;
+    missingUrl: number;
+    noTextureView: number;
+  } {
+    let gaussianCandidates = 0;
     for (let i = 0; i < layerData.length; i++) {
       if (layerData[i].layer.source?.type === 'gaussian-splat') {
-        hasSplatLayers = true;
-        break;
+        gaussianCandidates++;
       }
     }
-    if (!hasSplatLayers) return;
+    const summary = {
+      gaussianCandidates,
+      rendered: 0,
+      pendingLoad: 0,
+      missingUrl: 0,
+      noTextureView: 0,
+    };
+    if (gaussianCandidates === 0) return summary;
 
     // Get or lazy-init the native WebGPU renderer
     const renderer = getGaussianSplatGpuRenderer();
@@ -725,16 +771,24 @@ export class RenderDispatcher {
       const clipId = data.layer.sourceClipId || data.layer.id;
       const splatUrl = data.layer.source.gaussianSplatUrl;
       const settings = data.layer.source.gaussianSplatSettings;
+      const renderSettings = settings?.render ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render;
 
       // No URL — remove layer
       if (!splatUrl) {
+        summary.missingUrl++;
         layerData.splice(i, 1);
         continue;
       }
 
       // Upload scene if not cached — trigger async load, skip this frame
       if (!renderer.hasScene(clipId)) {
-        this.loadAndUploadSplatScene(clipId, splatUrl, renderer);
+        this.loadAndUploadSplatScene(
+          clipId,
+          splatUrl,
+          data.layer.source.gaussianSplatFileName ?? data.layer.name,
+          renderer,
+        );
+        summary.pendingLoad++;
         layerData.splice(i, 1);
         continue;
       }
@@ -742,8 +796,9 @@ export class RenderDispatcher {
       // Build camera from layer transform + render settings
       const camera = buildSplatCamera(
         data.layer,
-        settings?.render ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render,
+        renderSettings,
         { width, height },
+        this.splatSceneBounds.get(clipId),
       );
 
       // Render this single splat into its own texture
@@ -753,16 +808,32 @@ export class RenderDispatcher {
         clipId, camera, { width, height }, commandEncoder,
         {
           clipLocalTime: data.layer.source.mediaTime,
+          backgroundColor: renderSettings.backgroundColor,
+          maxSplats: renderSettings.maxSplats,
           particleSettings: settings?.particle,
+          sortFrequency: renderSettings.sortFrequency,
           temporalSettings: settings?.temporal,
         },
       );
       device.queue.submit([commandEncoder.finish()]);
 
       if (textureView) {
+        summary.rendered++;
+        const compositeLayer = {
+          ...data.layer,
+          position: { x: 0, y: 0, z: 0 },
+          scale: {
+            x: 1,
+            y: 1,
+            ...(data.layer.scale.z !== undefined ? { z: 1 } : {}),
+          },
+          rotation: typeof data.layer.rotation === 'number'
+            ? 0
+            : { x: 0, y: 0, z: 0 },
+        };
         // In-place replacement — keep the SAME layer (preserving opacity, blend, masks, effects)
         layerData[i] = {
-          layer: data.layer,
+          layer: compositeLayer,
           isVideo: false,
           externalTexture: null,
           textureView,
@@ -770,15 +841,19 @@ export class RenderDispatcher {
           sourceHeight: height,
         };
       } else {
+        summary.noTextureView++;
         layerData.splice(i, 1);
       }
     }
+
+    return summary;
   }
 
   /** Async helper: fetch splat file, parse, and upload to GPU renderer */
   private async loadAndUploadSplatScene(
     clipId: string,
     url: string,
+    fileName: string,
     renderer: ReturnType<typeof getGaussianSplatGpuRenderer>,
   ): Promise<void> {
     if (this.splatLoadingClips.has(clipId)) return;
@@ -787,15 +862,19 @@ export class RenderDispatcher {
     try {
       const response = await fetch(url);
       const arrayBuffer = await response.arrayBuffer();
-      const file = new File([arrayBuffer], 'splat.ply');
+      const file = new File([arrayBuffer], fileName || 'splat.ply');
       const asset = await loadGaussianSplatAssetCached(clipId, file);
 
       if (asset?.frames[0]?.buffer) {
+        if (asset.metadata?.boundingBox) {
+          this.splatSceneBounds.set(clipId, asset.metadata.boundingBox);
+        }
         renderer.uploadScene(clipId, {
           splatCount: asset.frames[0].buffer.splatCount,
           data: asset.frames[0].buffer.data,
         });
         log.info('Gaussian splat scene uploaded', { clipId, splatCount: asset.frames[0].buffer.splatCount });
+        this.deps.renderLoop?.requestRender();
       }
     } catch (err) {
       log.error('Failed to load gaussian splat scene', { clipId, err });

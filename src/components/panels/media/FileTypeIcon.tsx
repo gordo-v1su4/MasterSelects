@@ -89,6 +89,20 @@ export const FileTypeIcon = memo(({ type, large }: FileTypeIconProps) => {
           <circle cx="10" cy="10.5" r="0.5" fill="#cc99ee" opacity="0.5"/>
         </svg>
       );
+    case 'gaussian-splat':
+      return (
+        <svg style={style} viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="2" width="14" height="12" rx="1.5" fill="#5a5f3a" stroke="#aab46a" strokeWidth="0.7"/>
+          <circle cx="5" cy="5" r="0.9" fill="#d9ef86" opacity="0.9"/>
+          <circle cx="8.2" cy="4.3" r="0.7" fill="#d9ef86" opacity="0.75"/>
+          <circle cx="10.8" cy="5.5" r="0.6" fill="#d9ef86" opacity="0.7"/>
+          <circle cx="6.1" cy="8.2" r="0.8" fill="#c6de74" opacity="0.8"/>
+          <circle cx="9.1" cy="8.8" r="0.7" fill="#c6de74" opacity="0.7"/>
+          <circle cx="5.2" cy="10.8" r="0.5" fill="#e7f6a5" opacity="0.65"/>
+          <circle cx="8.3" cy="11.4" r="0.8" fill="#d9ef86" opacity="0.75"/>
+          <circle cx="11.1" cy="10.2" r="0.5" fill="#e7f6a5" opacity="0.6"/>
+        </svg>
+      );
     default:
       return (
         <svg style={style} viewBox="0 0 16 16" fill="none">
@@ -227,6 +241,22 @@ const LargeIcon = memo(({ type, style }: { type?: string; style: React.CSSProper
           <circle cx="18" cy="32" r="1.5" fill="#cc99ee" opacity="0.5"/>
           <circle cx="30" cy="33" r="1.3" fill="#cc99ee" opacity="0.5"/>
           <circle cx="24" cy="30" r="1.5" fill="#bb88dd" opacity="0.4"/>
+        </svg>
+      );
+    case 'gaussian-splat':
+      return (
+        <svg style={style} viewBox="0 0 48 48" fill="none">
+          <rect x="4" y="8" width="40" height="32" rx="3" fill="#4a5030"/>
+          <rect x="4" y="8" width="40" height="32" rx="3" stroke="#93a455" strokeWidth="1"/>
+          <circle cx="14" cy="16" r="3" fill="#def28c" opacity="0.95"/>
+          <circle cx="23" cy="14" r="2.3" fill="#def28c" opacity="0.75"/>
+          <circle cx="31" cy="17" r="2" fill="#def28c" opacity="0.65"/>
+          <circle cx="18" cy="24" r="2.8" fill="#c8de74" opacity="0.85"/>
+          <circle cx="26" cy="26" r="2.4" fill="#c8de74" opacity="0.78"/>
+          <circle cx="34" cy="23" r="1.8" fill="#e8f7a7" opacity="0.62"/>
+          <circle cx="15" cy="32" r="2" fill="#e8f7a7" opacity="0.55"/>
+          <circle cx="23" cy="34" r="2.9" fill="#def28c" opacity="0.8"/>
+          <circle cx="31" cy="31" r="1.9" fill="#c8de74" opacity="0.65"/>
         </svg>
       );
     default:

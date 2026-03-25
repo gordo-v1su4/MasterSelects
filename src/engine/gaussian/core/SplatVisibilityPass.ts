@@ -16,7 +16,6 @@ export class SplatVisibilityPass {
   private cullUniformBuffer: GPUBuffer | null = null;
   private visibleIndexBuffer: GPUBuffer | null = null;
   private counterBuffer: GPUBuffer | null = null;
-  private counterReadBuffer: GPUBuffer | null = null;
   private counterResetBuffer: GPUBuffer | null = null;
 
   // Bind group layouts
@@ -56,7 +55,8 @@ export class SplatVisibilityPass {
   /**
    * Run frustum culling on the given splat data.
    * Returns the visible index buffer and counter buffer.
-   * The actual visible count must be read back asynchronously via getVisibleCount().
+   * Callers that need a visible count should copy counterBuffer into a dedicated
+   * MAP_READ buffer after execute().
    */
   execute(
     device: GPUDevice,
@@ -126,13 +126,6 @@ export class SplatVisibilityPass {
       pass.dispatchWorkgroups(workgroupCount);
       pass.end();
 
-      // Copy counter to read-back buffer
-      commandEncoder.copyBufferToBuffer(
-        this.counterBuffer!, 0,
-        this.counterReadBuffer!, 0,
-        4,
-      );
-
       return {
         visibleIndexBuffer: this.visibleIndexBuffer!,
         counterBuffer: this.counterBuffer!,
@@ -143,35 +136,14 @@ export class SplatVisibilityPass {
     }
   }
 
-  /**
-   * Read back the number of visible splats from the GPU.
-   * This must be called after the command buffer has been submitted and the GPU has finished.
-   */
-  async getVisibleCount(): Promise<number> {
-    if (!this.counterReadBuffer || !this.device) return 0;
-
-    try {
-      await this.counterReadBuffer.mapAsync(GPUMapMode.READ);
-      const data = new Uint32Array(this.counterReadBuffer.getMappedRange());
-      const count = data[0];
-      this.counterReadBuffer.unmap();
-      return count;
-    } catch (err) {
-      log.error('Failed to read visible count', err);
-      return 0;
-    }
-  }
-
   dispose(): void {
     this.visibleIndexBuffer?.destroy();
     this.counterBuffer?.destroy();
-    this.counterReadBuffer?.destroy();
     this.counterResetBuffer?.destroy();
     this.cullUniformBuffer?.destroy();
 
     this.visibleIndexBuffer = null;
     this.counterBuffer = null;
-    this.counterReadBuffer = null;
     this.counterResetBuffer = null;
     this.cullUniformBuffer = null;
     this.outputBindGroup = null;
@@ -277,7 +249,6 @@ export class SplatVisibilityPass {
 
     this.visibleIndexBuffer?.destroy();
     this.counterBuffer?.destroy();
-    this.counterReadBuffer?.destroy();
 
     // Visible index buffer: u32 per splat
     this.visibleIndexBuffer = device.createBuffer({
@@ -291,13 +262,6 @@ export class SplatVisibilityPass {
       size: 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       label: 'cull-counter',
-    });
-
-    // Read-back buffer for counter
-    this.counterReadBuffer = device.createBuffer({
-      size: 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      label: 'cull-counter-readback',
     });
 
     // Recreate output bind group

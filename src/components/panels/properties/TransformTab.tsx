@@ -2,6 +2,7 @@
 import { useCallback } from 'react';
 import { useTimelineStore } from '../../../stores/timeline';
 import { useMediaStore } from '../../../stores/mediaStore';
+import { useEngineStore } from '../../../stores/engineStore';
 import { startBatch, endBatch } from '../../../stores/historyStore';
 import type { BlendMode, AnimatableProperty } from '../../../types';
 import {
@@ -78,8 +79,16 @@ function RotationValue({ label, degrees, onChange, onDragStart, onDragEnd }: {
 
 export function TransformTab({ clipId, transform, speed = 1, is3D = false }: TransformTabProps) {
   const { setPropertyValue, updateClipTransform, toggle3D, updateClip } = useTimelineStore.getState();
-  const wireframe = useTimelineStore(s => s.clips.find(c => c.id === clipId)?.wireframe ?? false);
-  const isModel = useTimelineStore(s => s.clips.find(c => c.id === clipId)?.source?.type === 'model');
+  const gaussianSplatNavClipId = useEngineStore((s) => s.gaussianSplatNavClipId);
+  const setGaussianSplatNavClipId = useEngineStore((s) => s.setGaussianSplatNavClipId);
+  const clip = useTimelineStore(s => s.clips.find(c => c.id === clipId));
+  const wireframe = clip?.wireframe ?? false;
+  const sourceType = clip?.source?.type;
+  const isModel = sourceType === 'model';
+  const isGaussianSplat = sourceType === 'gaussian-splat';
+  const isLocked3D = isModel || isGaussianSplat;
+  const isEffectively3D = isLocked3D || is3D;
+  const gaussianNavEnabled = isGaussianSplat && gaussianSplatNavClipId === clipId;
 
   const handleBatchStart = useCallback(() => startBatch('Adjust transform'), []);
   const handleBatchEnd = useCallback(() => endBatch(), []);
@@ -108,8 +117,17 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
   const handleScaleXChange = (pct: number) => handlePropertyChange('scale.x', pct / 100);
   const handleScaleYChange = (pct: number) => handlePropertyChange('scale.y', pct / 100);
   const handleScaleZChange = (pct: number) => handlePropertyChange('scale.z', pct / 100);
+  const handleGaussianZoomChange = (pct: number) => {
+    const v = pct / 100;
+    handlePropertyChange('scale.x', v);
+    handlePropertyChange('scale.y', v);
+  };
   const handleUniformScaleChange = (pct: number) => {
     const v = pct / 100;
+    if (isGaussianSplat) {
+      handleGaussianZoomChange(pct);
+      return;
+    }
     handlePropertyChange('scale.x', v);
     handlePropertyChange('scale.y', v);
     if (isModel) handlePropertyChange('scale.z', v);
@@ -124,17 +142,35 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
     <div className="properties-tab-content transform-tab-compact">
       {/* 3D Toggle + Appearance + Time */}
       <div className="properties-section">
+        {isGaussianSplat && (
+          <div className="control-row" style={{ color: '#8d99a6', fontSize: '11px' }}>
+            Gaussian splats use these controls as camera orbit, pan and zoom.
+          </div>
+        )}
+        {isGaussianSplat && (
+          <div className="control-row">
+            <label className="prop-label">Free Nav</label>
+            <button
+              className={`btn btn-xs ${gaussianNavEnabled ? 'btn-active' : ''}`}
+              onClick={() => setGaussianSplatNavClipId(gaussianNavEnabled ? null : clipId)}
+              title={gaussianNavEnabled ? 'Disable preview mouse navigation' : 'Enable preview mouse navigation'}
+            >
+              {gaussianNavEnabled ? 'On' : 'Off'}
+            </button>
+            <span style={{ color: '#8d99a6', fontSize: '11px' }}>LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom</span>
+          </div>
+        )}
         <div className="control-row">
           <label className="prop-label">3D Layer</label>
-          {isModel ? (
+          {isLocked3D ? (
             <span className="btn btn-xs btn-active" style={{ cursor: 'default' }}>3D</span>
           ) : (
             <button
-              className={`btn btn-xs ${is3D ? 'btn-active' : ''}`}
+              className={`btn btn-xs ${isEffectively3D ? 'btn-active' : ''}`}
               onClick={() => toggle3D(clipId)}
-              title={is3D ? 'Disable 3D layer' : 'Enable 3D layer'}
+              title={isEffectively3D ? 'Disable 3D layer' : 'Enable 3D layer'}
             >
-              {is3D ? '3D' : '2D'}
+              {isEffectively3D ? '3D' : '2D'}
             </button>
           )}
           {isModel && (
@@ -183,16 +219,16 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
       <div className="properties-section">
         <div className="control-row">
           <PositionKeyframeToggle clipId={clipId} x={transform.position.x} y={transform.position.y} z={transform.position.z} />
-          <label className="prop-label">Position</label>
+          <label className="prop-label">{isGaussianSplat ? 'Camera' : 'Position'}</label>
           <div className="multi-value-row">
-            <LabeledValue label="X" value={posXPx} onChange={handlePosXChange}
+            <LabeledValue label={isGaussianSplat ? 'Pan X' : 'X'} value={posXPx} onChange={handlePosXChange}
               defaultValue={0} decimals={1} sensitivity={0.5}
               onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
-            <LabeledValue label="Y" value={posYPx} onChange={handlePosYChange}
+            <LabeledValue label={isGaussianSplat ? 'Pan Y' : 'Y'} value={posYPx} onChange={handlePosYChange}
               defaultValue={0} decimals={1} sensitivity={0.5}
               onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
-            {is3D && (
-              <LabeledValue label="Z" value={posZPx} onChange={handlePosZChange}
+            {isEffectively3D && (
+              <LabeledValue label={isGaussianSplat ? 'Dist' : 'Z'} value={posZPx} onChange={handlePosZChange}
                 defaultValue={0} decimals={1} sensitivity={0.5}
                 onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
             )}
@@ -204,17 +240,21 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
       <div className="properties-section">
         <div className="control-row">
           <ScaleKeyframeToggle clipId={clipId} scaleX={transform.scale.x} scaleY={transform.scale.y} />
-          <label className="prop-label">Scale</label>
+          <label className="prop-label">{isGaussianSplat ? 'Zoom' : 'Scale'}</label>
           <div className="multi-value-row">
-            <LabeledValue label="All" value={uniformScalePct} onChange={handleUniformScaleChange}
+            <LabeledValue label={isGaussianSplat ? 'Zoom' : 'All'} value={uniformScalePct} onChange={isGaussianSplat ? handleGaussianZoomChange : handleUniformScaleChange}
               defaultValue={100} decimals={1} suffix="%" min={1} sensitivity={1}
               onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
-            <LabeledValue label="X" value={scaleXPct} onChange={handleScaleXChange}
-              defaultValue={100} decimals={1} suffix="%" min={1} sensitivity={1}
-              onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
-            <LabeledValue label="Y" value={scaleYPct} onChange={handleScaleYChange}
-              defaultValue={100} decimals={1} suffix="%" min={1} sensitivity={1}
-              onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
+            {!isGaussianSplat && (
+              <LabeledValue label="X" value={scaleXPct} onChange={handleScaleXChange}
+                defaultValue={100} decimals={1} suffix="%" min={1} sensitivity={1}
+                onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
+            )}
+            {!isGaussianSplat && (
+              <LabeledValue label="Y" value={scaleYPct} onChange={handleScaleYChange}
+                defaultValue={100} decimals={1} suffix="%" min={1} sensitivity={1}
+                onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
+            )}
             {isModel && (
               <LabeledValue label="Z" value={scaleZPct} onChange={handleScaleZChange}
                 defaultValue={100} decimals={1} suffix="%" min={1} sensitivity={1}
@@ -227,22 +267,24 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
       {/* Rotation -- AE-style: Nx + remainder degrees */}
       <div className="properties-section">
         <div className="control-row">
-          <RotationKeyframeToggle clipId={clipId} x={transform.rotation.x} y={transform.rotation.y} z={transform.rotation.z} />
-          <label className="prop-label">Rotation</label>
+          <RotationKeyframeToggle clipId={clipId} x={transform.rotation.x} y={transform.rotation.y} z={isGaussianSplat ? 0 : transform.rotation.z} />
+          <label className="prop-label">{isGaussianSplat ? 'Orbit' : 'Rotation'}</label>
           <div className="multi-value-row rotation-row">
-            {is3D && (
-              <RotationValue label="X" degrees={transform.rotation.x}
+            {isEffectively3D && (
+              <RotationValue label={isGaussianSplat ? 'Pitch' : 'X'} degrees={transform.rotation.x}
                 onChange={(v) => handlePropertyChange('rotation.x', v)}
                 onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
             )}
-            {is3D && (
-              <RotationValue label="Y" degrees={transform.rotation.y}
+            {isEffectively3D && (
+              <RotationValue label={isGaussianSplat ? 'Yaw' : 'Y'} degrees={transform.rotation.y}
                 onChange={(v) => handlePropertyChange('rotation.y', v)}
                 onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
             )}
-            <RotationValue label="Z" degrees={transform.rotation.z}
-              onChange={(v) => handlePropertyChange('rotation.z', v)}
-              onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
+            {!isGaussianSplat && (
+              <RotationValue label="Z" degrees={transform.rotation.z}
+                onChange={(v) => handlePropertyChange('rotation.z', v)}
+                onDragStart={handleBatchStart} onDragEnd={handleBatchEnd} />
+            )}
           </div>
         </div>
       </div>

@@ -42,7 +42,7 @@ export class SplatRenderTargetPool {
     const texture = this.device.createTexture({
       size: { width, height },
       format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
     });
 
     const view = texture.createView();

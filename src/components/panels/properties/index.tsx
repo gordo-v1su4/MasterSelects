@@ -4,7 +4,7 @@ import { useTimelineStore } from '../../../stores/timeline';
 import { TextTab } from '../TextTab';
 
 // Tab type
-type PropertiesTab = 'transform' | 'effects' | 'masks' | 'transcript' | 'analysis' | 'text' | 'blendshapes';
+type PropertiesTab = 'transform' | 'effects' | 'masks' | 'transcript' | 'analysis' | 'text' | 'blendshapes' | 'gaussian-splat';
 
 // Lazy load tab components for code splitting
 const TransformTab = lazy(() => import('./TransformTab').then(m => ({ default: m.TransformTab })));
@@ -13,6 +13,7 @@ const MasksTab = lazy(() => import('./MasksTab').then(m => ({ default: m.MasksTa
 const TranscriptTab = lazy(() => import('./TranscriptTab').then(m => ({ default: m.TranscriptTab })));
 const AnalysisTab = lazy(() => import('./AnalysisTab').then(m => ({ default: m.AnalysisTab })));
 const BlendshapesTab = lazy(() => import('./BlendshapesTab').then(m => ({ default: m.BlendshapesTab })));
+const GaussianSplatTab = lazy(() => import('./GaussianSplatTab').then(m => ({ default: m.GaussianSplatTab })));
 
 // Tab loading fallback
 function TabLoading() {
@@ -51,6 +52,7 @@ export function PropertiesPanel() {
 
   // Check if it's a gaussian avatar clip
   const isGaussianAvatar = selectedClip?.source?.type === 'gaussian-avatar';
+  const isGaussianSplat = selectedClip?.source?.type === 'gaussian-splat';
 
   // Reset tab when switching between audio/video/text/solid clips
   useEffect(() => {
@@ -67,17 +69,27 @@ export function PropertiesPanel() {
       // Set appropriate default tab based on clip type
       if (isGaussianAvatar) {
         setActiveTab('blendshapes');
+      } else if (isGaussianSplat) {
+        setActiveTab('gaussian-splat');
       } else if (isSolidClip) {
         setActiveTab('transform');
       } else if (isTextClip) {
         setActiveTab('text');
       } else if (isAudioClip && (activeTab === 'transform' || activeTab === 'masks' || activeTab === 'text' || activeTab === 'blendshapes')) {
         setActiveTab('effects');
-      } else if (!isAudioClip && !isTextClip && (activeTab === 'text' || (!isGaussianAvatar && activeTab === 'blendshapes'))) {
+      } else if (
+        !isAudioClip &&
+        !isTextClip &&
+        (
+          activeTab === 'text' ||
+          (!isGaussianAvatar && activeTab === 'blendshapes') ||
+          (!isGaussianSplat && activeTab === 'gaussian-splat')
+        )
+      ) {
         setActiveTab('transform');
       }
     }
-  }, [selectedClipId, isAudioClip, isTextClip, isSolidClip, isGaussianAvatar, lastClipId, activeTab]);
+  }, [selectedClipId, isAudioClip, isTextClip, isSolidClip, isGaussianAvatar, isGaussianSplat, lastClipId, activeTab]);
 
   // Listen for external tab navigation requests (e.g. badge clicks in MediaPanel)
   useEffect(() => {
@@ -164,6 +176,11 @@ export function PropertiesPanel() {
                 Blendshapes
               </button>
             )}
+            {isGaussianSplat && (
+              <button className={`tab-btn ${activeTab === 'gaussian-splat' ? 'active' : ''}`} onClick={() => setActiveTab('gaussian-splat')}>
+                Gaussian
+              </button>
+            )}
             <button className={`tab-btn ${activeTab === 'effects' ? 'active' : ''}`} onClick={() => setActiveTab('effects')}>
               Effects {visualEffects.length > 0 && <span className="badge">{visualEffects.length}</span>}
             </button>
@@ -191,6 +208,7 @@ export function PropertiesPanel() {
           )}
           {activeTab === 'transform' && !isAudioClip && <TransformTab clipId={selectedClip.id} transform={transform} speed={interpolatedSpeed} is3D={selectedClip.is3D} hasKeyframes={hasKeyframes} />}
           {activeTab === 'blendshapes' && isGaussianAvatar && <BlendshapesTab clipId={selectedClip.id} />}
+          {activeTab === 'gaussian-splat' && isGaussianSplat && <GaussianSplatTab clipId={selectedClip.id} />}
           {activeTab === 'effects' && <EffectsTab clipId={selectedClip.id} effects={selectedClip.effects || []} isAudioClip={isAudioClip} />}
           {activeTab === 'masks' && !isAudioClip && <MasksTab clipId={selectedClip.id} masks={selectedClip.masks} />}
           {activeTab === 'transcript' && (

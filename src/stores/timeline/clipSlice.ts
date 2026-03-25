@@ -29,7 +29,6 @@ import { loadVideoMedia } from './clip/addVideoClip';
 import { createAudioClipPlaceholder, loadAudioMedia } from './clip/addAudioClip';
 import { createImageClipPlaceholder, loadImageMedia } from './clip/addImageClip';
 import { createModelClipPlaceholder, loadModelMedia } from './clip/addModelClip';
-import { createGaussianAvatarClipPlaceholder, loadGaussianAvatarMedia } from './clip/addGaussianAvatarClip';
 import { createGaussianSplatClipPlaceholder, loadGaussianSplatMedia } from './clip/addGaussianSplatClip';
 import { createVideoElement, createAudioElement } from './helpers/webCodecsHelpers';
 import {
@@ -236,14 +235,13 @@ export const createClipSlice: SliceCreator<CoreClipActions> = (set, get) => ({
       invalidateCache();
     }
 
-    // Handle Gaussian Avatar files
+    // Legacy gaussian-avatar clips are intentionally disabled.
     if (mediaType === 'gaussian-avatar') {
-      const avatarClip = createGaussianAvatarClipPlaceholder({ trackId, file, startTime, estimatedDuration: providedDuration ?? 30 });
-      avatarClip.mediaFileId = mediaFileId;  // Link to MediaFile for nested comp lookup
-      set({ clips: [...clips, avatarClip] });
-      updateDuration();
-      loadGaussianAvatarMedia({ clip: avatarClip, updateClip });
-      invalidateCache();
+      log.warn('Legacy gaussian-avatar clips are disabled. Import .ply or .splat instead.', {
+        file: file.name,
+        mediaFileId,
+      });
+      return;
     }
 
     // Handle Gaussian Splat files
@@ -904,6 +902,9 @@ export const createClipSlice: SliceCreator<CoreClipActions> = (set, get) => ({
     const { clips, invalidateCache } = get();
     const clip = clips.find(c => c.id === clipId);
     if (!clip) return;
+    if (clip.source?.type === 'gaussian-splat') {
+      return;
+    }
 
     const nowIs3D = !clip.is3D;
     set({

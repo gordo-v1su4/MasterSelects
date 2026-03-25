@@ -13,6 +13,7 @@ import { useMediaStore } from '../../stores/mediaStore';
 import { useDockStore } from '../../stores/dockStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useRenderTargetStore } from '../../stores/renderTargetStore';
+import { startBatch, endBatch } from '../../stores/historyStore';
 import { MaskOverlay } from './MaskOverlay';
 import { SAM2Overlay } from './SAM2Overlay';
 import { SourceMonitor } from './SourceMonitor';
@@ -42,6 +43,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const engineInitFailed = useEngineStore((s) => s.engineInitFailed);
   const engineInitError = useEngineStore((s) => s.engineInitError);
   const engineStats = useEngineStore(s => s.engineStats);
+  const gaussianSplatNavClipId = useEngineStore((s) => s.gaussianSplatNavClipId);
   const { clips, selectedClipIds, selectClip, updateClipTransform, maskEditMode, layers, selectedLayerId, selectLayer, updateLayer, tracks } = useTimelineStore(useShallow(s => ({
     clips: s.clips,
     selectedClipIds: s.selectedClipIds,
@@ -73,6 +75,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const selectedClipId = selectedClipIds.size > 0 ? [...selectedClipIds][0] : null;
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1920, height: 1080 });
@@ -261,13 +264,178 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const [viewZoom, setViewZoom] = useState(1);
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [isGaussianOrbiting, setIsGaussianOrbiting] = useState(false);
+  const [isGaussianPanning, setIsGaussianPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const gaussianOrbitStart = useRef({
+    clipId: null as string | null,
+    x: 0,
+    y: 0,
+    pitch: 0,
+    yaw: 0,
+    roll: 0,
+  });
+  const gaussianPanStart = useRef({
+    clipId: null as string | null,
+    x: 0,
+    y: 0,
+    panX: 0,
+    panY: 0,
+    panZ: 0,
+    zoom: 1,
+  });
+  const gaussianWheelBatchTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isEditableSource) {
       setEditMode(false);
     }
   }, [isEditableSource]);
+
+  const selectedClip = useMemo(
+    () => (selectedClipId ? clips.find((clip) => clip.id === selectedClipId) ?? null : null),
+    [clips, selectedClipId],
+  );
+
+  const selectedGaussianSplatClip = useMemo(
+    () => (selectedClip?.source?.type === 'gaussian-splat' ? selectedClip : null),
+    [selectedClip],
+  );
+
+  const gaussianNavEnabled = Boolean(
+    isEditableSource &&
+    !editMode &&
+    selectedGaussianSplatClip &&
+    gaussianSplatNavClipId === selectedGaussianSplatClip.id,
+  );
+
+  const isCanvasInteractionTarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Node)) return false;
+    return Boolean(
+      canvasRef.current?.contains(target) ||
+      canvasWrapperRef.current?.contains(target),
+    );
+  }, []);
+
+  const endGaussianWheelBatch = useCallback(() => {
+    if (gaussianWheelBatchTimerRef.current === null) return;
+    window.clearTimeout(gaussianWheelBatchTimerRef.current);
+    gaussianWheelBatchTimerRef.current = null;
+    endBatch();
+  }, []);
+
+  const scheduleGaussianWheelBatchEnd = useCallback(() => {
+    if (gaussianWheelBatchTimerRef.current === null) {
+      startBatch('Gaussian zoom');
+    } else {
+      window.clearTimeout(gaussianWheelBatchTimerRef.current);
+    }
+    gaussianWheelBatchTimerRef.current = window.setTimeout(() => {
+      gaussianWheelBatchTimerRef.current = null;
+      endBatch();
+    }, 180);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (gaussianWheelBatchTimerRef.current !== null) {
+        window.clearTimeout(gaussianWheelBatchTimerRef.current);
+        gaussianWheelBatchTimerRef.current = null;
+        endBatch();
+      }
+      if (gaussianOrbitStart.current.clipId) {
+        gaussianOrbitStart.current.clipId = null;
+        endBatch();
+      }
+      if (gaussianPanStart.current.clipId) {
+        gaussianPanStart.current.clipId = null;
+        endBatch();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (gaussianNavEnabled) return;
+    if (isGaussianOrbiting) {
+      gaussianOrbitStart.current.clipId = null;
+      setIsGaussianOrbiting(false);
+      endBatch();
+    }
+    if (isGaussianPanning) {
+      gaussianPanStart.current.clipId = null;
+      setIsGaussianPanning(false);
+      endBatch();
+    }
+  }, [gaussianNavEnabled, isGaussianOrbiting, isGaussianPanning]);
+
+  useEffect(() => {
+    if (!isGaussianOrbiting) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const { clipId, x, y, pitch, yaw, roll } = gaussianOrbitStart.current;
+      if (!clipId) return;
+
+      const dx = e.clientX - x;
+      const dy = e.clientY - y;
+      const nextPitch = pitch + dy * 0.25;
+      const nextYaw = yaw + dx * 0.25;
+
+      updateClipTransform(clipId, {
+        rotation: { x: nextPitch, y: nextYaw, z: roll },
+      });
+      engine.requestRender();
+    };
+
+    const finishGaussianOrbit = () => {
+      gaussianOrbitStart.current.clipId = null;
+      setIsGaussianOrbiting(false);
+      endBatch();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', finishGaussianOrbit);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', finishGaussianOrbit);
+    };
+  }, [isGaussianOrbiting, updateClipTransform]);
+
+  useEffect(() => {
+    if (!isGaussianPanning) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const { clipId, x, y, panX, panY, panZ, zoom } = gaussianPanStart.current;
+      if (!clipId) return;
+
+      const dx = e.clientX - x;
+      const dy = e.clientY - y;
+      const zoomDamping = 1 / Math.sqrt(Math.max(0.35, zoom));
+      const panScaleX = (2 / Math.max(1, effectiveResolution.width)) * zoomDamping;
+      const panScaleY = (2 / Math.max(1, effectiveResolution.height)) * zoomDamping;
+      const nextPanX = panX - dx * panScaleX;
+      const nextPanY = panY + dy * panScaleY;
+
+      updateClipTransform(clipId, {
+        position: { x: nextPanX, y: nextPanY, z: panZ },
+      });
+      engine.requestRender();
+    };
+
+    const finishGaussianPan = () => {
+      gaussianPanStart.current.clipId = null;
+      setIsGaussianPanning(false);
+      endBatch();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', finishGaussianPan);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', finishGaussianPan);
+    };
+  }, [effectiveResolution.height, effectiveResolution.width, isGaussianPanning, updateClipTransform]);
 
   // Sync layer selection when clip is selected in timeline (for edit mode)
   useEffect(() => {
@@ -327,6 +495,21 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
 
   // Handle zoom with scroll wheel in edit mode
   const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (gaussianNavEnabled && selectedGaussianSplatClip && isCanvasInteractionTarget(e.target)) {
+      e.preventDefault();
+      scheduleGaussianWheelBatchEnd();
+
+      const currentZoom = Math.max(0.05, selectedGaussianSplatClip.transform.scale.x || 1);
+      const zoomFactor = Math.exp(-e.deltaY * 0.0025);
+      const nextZoom = Math.max(0.05, Math.min(40, currentZoom * zoomFactor));
+
+      updateClipTransform(selectedGaussianSplatClip.id, {
+        scale: { x: nextZoom, y: nextZoom },
+      });
+      engine.requestRender();
+      return;
+    }
+
     if (!editMode || !containerRef.current) return;
 
     e.preventDefault();
@@ -356,15 +539,76 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       setViewZoom(newZoom);
       setViewPan({ x: newPanX, y: newPanY });
     }
-  }, [editMode, viewZoom, viewPan, containerSize]);
+  }, [
+    containerSize,
+    editMode,
+    gaussianNavEnabled,
+    isCanvasInteractionTarget,
+    scheduleGaussianWheelBatchEnd,
+    selectedGaussianSplatClip,
+    updateClipTransform,
+    viewPan,
+    viewZoom,
+  ]);
 
   // Tab key to toggle edit mode (via shortcut registry)
   useShortcut('preview.editMode', () => {
     setEditMode(prev => !prev);
   }, { enabled: isEditableSource });
 
-  // Handle panning with middle mouse or Alt+drag
+  // Handle gaussian nav and edit-mode panning
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (gaussianNavEnabled && selectedGaussianSplatClip && isCanvasInteractionTarget(e.target)) {
+      if (e.button === 0) {
+        if (e.shiftKey) {
+          e.preventDefault();
+          endGaussianWheelBatch();
+          startBatch('Gaussian pan');
+          gaussianPanStart.current = {
+            clipId: selectedGaussianSplatClip.id,
+            x: e.clientX,
+            y: e.clientY,
+            panX: selectedGaussianSplatClip.transform.position.x,
+            panY: selectedGaussianSplatClip.transform.position.y,
+            panZ: selectedGaussianSplatClip.transform.position.z,
+            zoom: selectedGaussianSplatClip.transform.scale.x || 1,
+          };
+          setIsGaussianPanning(true);
+          return;
+        }
+        e.preventDefault();
+        endGaussianWheelBatch();
+        startBatch('Gaussian orbit');
+        gaussianOrbitStart.current = {
+          clipId: selectedGaussianSplatClip.id,
+          x: e.clientX,
+          y: e.clientY,
+          pitch: selectedGaussianSplatClip.transform.rotation.x,
+          yaw: selectedGaussianSplatClip.transform.rotation.y,
+          roll: selectedGaussianSplatClip.transform.rotation.z,
+        };
+        setIsGaussianOrbiting(true);
+        return;
+      }
+
+      if (e.button === 1 || e.button === 2) {
+        e.preventDefault();
+        endGaussianWheelBatch();
+        startBatch('Gaussian pan');
+        gaussianPanStart.current = {
+          clipId: selectedGaussianSplatClip.id,
+          x: e.clientX,
+          y: e.clientY,
+          panX: selectedGaussianSplatClip.transform.position.x,
+          panY: selectedGaussianSplatClip.transform.position.y,
+          panZ: selectedGaussianSplatClip.transform.position.z,
+          zoom: selectedGaussianSplatClip.transform.scale.x || 1,
+        };
+        setIsGaussianPanning(true);
+        return;
+      }
+    }
+
     if (!editMode) return;
 
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -377,7 +621,14 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         panY: viewPan.y
       };
     }
-  }, [editMode, viewPan]);
+  }, [
+    editMode,
+    endGaussianWheelBatch,
+    gaussianNavEnabled,
+    isCanvasInteractionTarget,
+    selectedGaussianSplatClip,
+    viewPan,
+  ]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -393,6 +644,18 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const handleMouseUp = useCallback(() => {
     setIsPanning(false);
   }, []);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (gaussianNavEnabled && isCanvasInteractionTarget(e.target)) {
+      e.preventDefault();
+    }
+  }, [gaussianNavEnabled, isCanvasInteractionTarget]);
+
+  const handleAuxClick = useCallback((e: React.MouseEvent) => {
+    if (gaussianNavEnabled && isCanvasInteractionTarget(e.target)) {
+      e.preventDefault();
+    }
+  }, [gaussianNavEnabled, isCanvasInteractionTarget]);
 
   // Reset view
   const resetView = useCallback(() => {
@@ -438,12 +701,24 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     <div
       className="preview-container"
       ref={containerRef}
-      onWheel={handleWheel}
-      onMouseDown={handleMouseDown}
+      onWheelCapture={handleWheel}
+      onMouseDownCapture={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      style={{ cursor: isPanning ? 'grabbing' : (editMode ? 'crosshair' : 'default') }}
+      onContextMenu={handleContextMenu}
+      onAuxClick={handleAuxClick}
+      style={{
+        cursor: isGaussianOrbiting || isGaussianPanning
+          ? 'grabbing'
+          : isPanning
+            ? 'grabbing'
+            : gaussianNavEnabled
+              ? 'grab'
+              : editMode
+                ? 'crosshair'
+                : 'default',
+      }}
     >
       {/* Controls bar */}
       <PreviewControls
@@ -484,7 +759,11 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
           onToggle={() => setStatsExpanded(!statsExpanded)}
         />
 
-        <div className={`preview-canvas-wrapper ${showTransparencyGrid ? 'show-transparency-grid' : ''}`} style={viewTransform}>
+        <div
+          ref={canvasWrapperRef}
+          className={`preview-canvas-wrapper ${showTransparencyGrid ? 'show-transparency-grid' : ''}`}
+          style={viewTransform}
+        >
           {engineInitFailed ? (
             <div className="loading">
               <p style={{ color: '#ff6b6b', fontWeight: 'bold', marginBottom: 8 }}>WebGPU Initialization Failed</p>
@@ -556,6 +835,11 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         {editMode && isEditableSource && (
           <div className="preview-edit-hint">
             Drag: Move | Handles: Scale (Shift: Lock Ratio) | Scroll: Zoom | Alt+Drag: Pan
+          </div>
+        )}
+        {gaussianNavEnabled && (
+          <div className="preview-edit-hint">
+            Gaussian Nav: LMB orbit | MMB/RMB/Shift+LMB pan | Wheel zoom
           </div>
         )}
 

@@ -123,18 +123,6 @@ export function buildLayersAtTime(
         is3D: true,
       });
     }
-    // Handle Gaussian Avatar clips
-    else if (clip.source?.type === 'gaussian-avatar') {
-      layers.push({
-        ...baseLayerProps,
-        source: {
-          type: 'gaussian-avatar',
-          gaussianAvatarUrl: clip.source.gaussianAvatarUrl,
-          gaussianBlendshapes: clip.source.gaussianBlendshapes,
-        },
-        is3D: true,
-      });
-    }
     // Handle Gaussian Splat clips (native WebGPU)
     else if (clip.source?.type === 'gaussian-splat') {
       layers.push({
@@ -142,6 +130,7 @@ export function buildLayersAtTime(
         source: {
           type: 'gaussian-splat',
           gaussianSplatUrl: clip.source.gaussianSplatUrl,
+          gaussianSplatFileName: clip.file?.name ?? clip.name,
           gaussianSplatSettings: clip.source.gaussianSplatSettings,
           mediaTime: clipLocalTime,
         },

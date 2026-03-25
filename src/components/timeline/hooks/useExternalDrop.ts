@@ -971,8 +971,10 @@ export function useExternalDrop({
         const mediaStore = useMediaStore.getState();
         const mediaFile = mediaStore.files.find((f) => f.id === mediaFileId);
         if (mediaFile?.file) {
-          // Pass mediaType override for types that can't be auto-detected (e.g. gaussian-avatar .zip files)
-          const typeOverride = mediaFile.type === 'gaussian-avatar' ? 'gaussian-avatar' : undefined;
+          // Pass mediaType override for formats that are intentionally clip-typed.
+          const typeOverride = mediaFile.type === 'gaussian-splat'
+            ? mediaFile.type
+            : undefined;
           addClip(newTrackId, mediaFile.file, startTime, mediaFile.duration, mediaFileId, typeOverride);
           return;
         }
@@ -1097,8 +1099,10 @@ export function useExternalDrop({
           }
           // Video+audio files are allowed on both track types
 
-          // Pass mediaType override for types that can't be auto-detected (e.g. gaussian-avatar .zip files)
-          const typeOverride = mediaFile.type === 'gaussian-avatar' ? 'gaussian-avatar' : undefined;
+          // Pass mediaType override for formats that are intentionally clip-typed.
+          const typeOverride = mediaFile.type === 'gaussian-splat'
+            ? mediaFile.type
+            : undefined;
           addClip(trackId, mediaFile.file, resolveDropStartTime(mediaFile.duration), mediaFile.duration, mediaFileId, typeOverride);
           return;
         }

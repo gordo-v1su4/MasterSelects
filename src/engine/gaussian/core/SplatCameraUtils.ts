@@ -8,8 +8,9 @@ import type { SplatCameraParams } from './GaussianSplatGpuRenderer';
  *
  * Mapping:
  *  - position.z  -> camera distance from origin (default 5)
- *  - rotation    -> orbit angles (x = pitch, y = yaw). Accepts number (yaw only) or {x,y,z}.
- *  - scale.x     -> zoom multiplier (affects FOV)
+ *  - position.x/y -> pan in camera screen space (-1..1 roughly equals full viewport)
+ *  - rotation    -> orbit angles in radians (x = pitch, y = yaw). Accepts number (yaw only) or {x,y,z}.
+ *  - scale.x     -> zoom multiplier (dollies camera distance)
  *  - settings.nearPlane / farPlane  -> clipping planes
  */
 export function buildSplatCamera(
@@ -20,53 +21,71 @@ export function buildSplatCamera(
   },
   settings: { nearPlane: number; farPlane: number },
   viewport: { width: number; height: number },
+  sceneBounds?: {
+    min: [number, number, number];
+    max: [number, number, number];
+  },
 ): SplatCameraParams {
   // Extract orbit angles
   let pitch = 0;
   let yaw = 0;
+  let roll = 0;
   if (typeof layer.rotation === 'number') {
-    yaw = layer.rotation * (Math.PI / 180);
+    yaw = layer.rotation;
   } else {
-    pitch = layer.rotation.x * (Math.PI / 180);
-    yaw = layer.rotation.y * (Math.PI / 180);
+    pitch = layer.rotation.x;
+    yaw = layer.rotation.y;
+    roll = layer.rotation.z;
   }
 
-  // Camera distance (position.z, default 5)
-  const distance = layer.position.z !== 0 ? Math.abs(layer.position.z) : 5;
+  const centerX = sceneBounds ? (sceneBounds.min[0] + sceneBounds.max[0]) * 0.5 : 0;
+  const centerY = sceneBounds ? (sceneBounds.min[1] + sceneBounds.max[1]) * 0.5 : 0;
+  const centerZ = sceneBounds ? (sceneBounds.min[2] + sceneBounds.max[2]) * 0.5 : 0;
+  const extentX = sceneBounds ? sceneBounds.max[0] - sceneBounds.min[0] : 0;
+  const extentY = sceneBounds ? sceneBounds.max[1] - sceneBounds.min[1] : 0;
+  const extentZ = sceneBounds ? sceneBounds.max[2] - sceneBounds.min[2] : 0;
+  const sceneRadius = Math.max(
+    0.001,
+    Math.sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ) * 0.5,
+  );
 
-  // Zoom from scale.x (default 1)
+  // Default camera distance frames the scene bounds when available.
+  const defaultDistance = Math.max(sceneRadius * 2.5, 5);
+  const baseDistance = layer.position.z !== 0 ? Math.abs(layer.position.z) : defaultDistance;
+
+  // Zoom from scale.x (default 1). Higher zoom moves the camera closer,
+  // lower zoom moves it farther away without introducing extreme fisheye FOV.
   const zoom = Math.max(0.01, layer.scale.x || 1);
+  const distance = baseDistance / zoom;
 
-  // FOV: base 60 degrees, scaled inversely by zoom
-  const baseFovDeg = 60;
-  const fovDeg = baseFovDeg / zoom;
-  const fov = fovDeg * (Math.PI / 180);
+  // Keep a stable field of view; "zoom" is handled as a dolly.
+  const fov = 60 * (Math.PI / 180);
 
   const near = settings.nearPlane;
   const far = settings.farPlane;
   const aspect = viewport.width / Math.max(1, viewport.height);
+  const halfHeight = Math.tan(fov * 0.5) * distance;
+  const halfWidth = halfHeight * aspect;
 
-  // Build orbital camera position
-  const cosPitch = Math.cos(pitch);
-  const sinPitch = Math.sin(pitch);
-  const cosYaw = Math.cos(yaw);
-  const sinYaw = Math.sin(yaw);
-
-  // Camera position on orbit sphere + pan offset
-  const eyeX = distance * cosPitch * sinYaw + layer.position.x;
-  const eyeY = distance * sinPitch + layer.position.y;
-  const eyeZ = distance * cosPitch * cosYaw;
-
-  // Look-at target is world origin + pan offset
-  const targetX = layer.position.x;
-  const targetY = layer.position.y;
-  const targetZ = 0;
+  const eyeOffset = rotateOrbitVector(0, 0, distance, pitch, yaw, roll);
+  const upVector = normalize(rotateOrbitVector(0, 1, 0, pitch, yaw, roll));
+  const forwardVector = normalize(eyeOffset);
+  const rightVector = normalize(cross(upVector, forwardVector));
+  const cameraUpVector = normalize(cross(forwardVector, rightVector));
+  const panWorldX = layer.position.x * halfWidth;
+  const panWorldY = layer.position.y * halfHeight;
+  const targetX = centerX + rightVector[0] * panWorldX + cameraUpVector[0] * panWorldY;
+  const targetY = centerY + rightVector[1] * panWorldX + cameraUpVector[1] * panWorldY;
+  const targetZ = centerZ + rightVector[2] * panWorldX + cameraUpVector[2] * panWorldY;
+  const eyeX = targetX + eyeOffset[0];
+  const eyeY = targetY + eyeOffset[1];
+  const eyeZ = targetZ + eyeOffset[2];
 
   // Build view matrix (lookAt)
   const viewMatrix = lookAt(
     eyeX, eyeY, eyeZ,
     targetX, targetY, targetZ,
-    0, 1, 0,
+    cameraUpVector[0], cameraUpVector[1], cameraUpVector[2],
   );
 
   // Build projection matrix
@@ -80,6 +99,56 @@ export function buildSplatCamera(
     near,
     far,
   };
+}
+
+function rotateOrbitVector(
+  x: number,
+  y: number,
+  z: number,
+  pitch: number,
+  yaw: number,
+  roll: number,
+): [number, number, number] {
+  // Roll around local Z.
+  const cosRoll = Math.cos(roll);
+  const sinRoll = Math.sin(roll);
+  const rollX = x * cosRoll - y * sinRoll;
+  const rollY = x * sinRoll + y * cosRoll;
+  const rollZ = z;
+
+  // Pitch uses the existing "positive pitch moves camera upward" convention,
+  // which corresponds to rotating the orbit basis by -pitch around X.
+  const cosPitch = Math.cos(pitch);
+  const sinPitch = Math.sin(pitch);
+  const pitchX = rollX;
+  const pitchY = rollY * cosPitch + rollZ * sinPitch;
+  const pitchZ = -rollY * sinPitch + rollZ * cosPitch;
+
+  // Yaw around world Y.
+  const cosYaw = Math.cos(yaw);
+  const sinYaw = Math.sin(yaw);
+  const yawX = pitchX * cosYaw + pitchZ * sinYaw;
+  const yawY = pitchY;
+  const yawZ = -pitchX * sinYaw + pitchZ * cosYaw;
+
+  return [yawX, yawY, yawZ];
+}
+
+function cross(
+  a: [number, number, number],
+  b: [number, number, number],
+): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function normalize(v: [number, number, number]): [number, number, number] {
+  const len = Math.hypot(v[0], v[1], v[2]);
+  if (len <= 1e-8) return [0, 0, 0];
+  return [v[0] / len, v[1] / len, v[2] / len];
 }
 
 /**

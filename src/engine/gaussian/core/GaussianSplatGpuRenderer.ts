@@ -45,12 +45,38 @@ interface SplatSceneGpuResources {
   sortedBindGroup: GPUBindGroup | null;
 }
 
+export interface GaussianSplatRenderDebugSnapshot {
+  clipId: string;
+  sceneSplatCount: number;
+  activeSplatCount: number;
+  effectiveSplatCount: number;
+  drawCount: number;
+  viewport: { width: number; height: number };
+  backgroundColor?: string;
+  usedCull: boolean;
+  usedSort: boolean;
+}
+
+export interface GaussianSplatRenderTargetSummary {
+  width: number;
+  height: number;
+  centerPixel: [number, number, number, number];
+  nonTransparentSampled: number;
+  nonBlackSampled: number;
+}
+
 /** Optional parameters for temporal + particle pipeline steps */
 export interface SplatRenderOptions {
   /** Clip-local time in seconds (for particle effects) */
   clipLocalTime?: number;
+  /** Clear color for the render target. Use "transparent" to preserve alpha. */
+  backgroundColor?: string;
+  /** Max splat budget (0 = unlimited) */
+  maxSplats?: number;
   /** Particle effect settings */
   particleSettings?: GaussianSplatParticleSettings;
+  /** Sort every N frames (1 = every frame, 0 = never) */
+  sortFrequency?: number;
   /** Temporal playback settings (informational — frame switching handled externally via uploadScene) */
   temporalSettings?: GaussianSplatTemporalSettings;
 }
@@ -65,7 +91,7 @@ const FLOATS_PER_SPLAT = 14;
 /** Only run frustum culling for scenes above this count */
 const CULL_THRESHOLD = 50000;
 /** Only run depth sorting for scenes above this count */
-const SORT_THRESHOLD = 1000;
+const SORT_THRESHOLD = 50000;
 
 // ── Renderer Class ────────────────────────────────────────────────────────────
 
@@ -91,6 +117,10 @@ export class GaussianSplatGpuRenderer {
   private sortPass = new SplatSortPass();
   /** Last known visible count from async readback (used as draw count estimate) */
   private lastVisibleCount: Map<string, number> = new Map();
+  private lastRenderDebug: Map<string, GaussianSplatRenderDebugSnapshot> = new Map();
+  private lastRenderTargets: Map<string, { texture: GPUTexture; width: number; height: number }> = new Map();
+  /** One-time debug logging per clip for smoke-test diagnosis */
+  private renderDebugLoggedClips: Set<string> = new Set();
 
   get isInitialized(): boolean {
     return this._initialized;
@@ -220,9 +250,7 @@ export class GaussianSplatGpuRenderer {
    *   4. Depth sort (compute, if splatCount > SORT_THRESHOLD) [Wave 4]
    *   5. Rasterize (instanced quad rendering with sorted index indirection)
    *
-   * @param options - Optional temporal/particle settings from layer source
-   * @param sortFrequency - Sort every N frames (1 = every frame, 0 = never)
-   * @param maxSplats - Max splat budget (0 = unlimited)
+   * @param options - Optional render/temporal/particle settings from layer source
    */
   renderToTexture(
     clipId: string,
@@ -230,8 +258,6 @@ export class GaussianSplatGpuRenderer {
     viewport: { width: number; height: number },
     commandEncoder: GPUCommandEncoder,
     options?: SplatRenderOptions,
-    sortFrequency = 1,
-    maxSplats = 0,
   ): GPUTextureView | null {
     if (!this._initialized || !this.device || !this.pipeline) {
       return null;
@@ -250,6 +276,10 @@ export class GaussianSplatGpuRenderer {
     try {
       // Update camera uniforms
       this.writeCameraUniforms(camera);
+
+      const maxSplats = options?.maxSplats ?? 0;
+      const sortFrequency = options?.sortFrequency ?? 1;
+      const clearColor = parseClearColor(options?.backgroundColor);
 
       // Determine which splat data buffer to use (may be overridden by particle pass)
       let activeSplatBuffer = scene.splatBuffer;
@@ -288,6 +318,7 @@ export class GaussianSplatGpuRenderer {
       // ── Step 3: Frustum Culling [Wave 4] ──────────────────────────────────
       let cullIndexBuffer: GPUBuffer | null = null;
       let drawCount = effectiveSplatCount;
+      let hasValidatedCullResult = false;
 
       if (
         this.visibilityPass.isInitialized &&
@@ -300,26 +331,43 @@ export class GaussianSplatGpuRenderer {
         );
 
         if (cullResult) {
-          cullIndexBuffer = cullResult.visibleIndexBuffer;
-          // Use last known visible count as draw estimate.
-          // On the very first frame we use full splatCount (conservative).
-          drawCount = this.lastVisibleCount.get(clipId) ?? effectiveSplatCount;
+          const validatedVisibleCount = this.lastVisibleCount.get(clipId);
+          if (validatedVisibleCount !== undefined && validatedVisibleCount > 0) {
+            cullIndexBuffer = cullResult.visibleIndexBuffer;
+            drawCount = Math.min(validatedVisibleCount, effectiveSplatCount);
+            hasValidatedCullResult = true;
+          }
 
-          // Kick off async readback for next frame's draw count
-          this.readbackVisibleCount(clipId);
+          // Kick off async readback for next frame's draw count using a dedicated
+          // staging buffer so multiple active clips do not race on shared readback state.
+          const readbackBuffer = this.device.createBuffer({
+            size: 4,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            label: `splat-visible-count-readback-${clipId}`,
+          });
+          commandEncoder.copyBufferToBuffer(
+            cullResult.counterBuffer, 0,
+            readbackBuffer, 0,
+            4,
+          );
+          this.readbackVisibleCount(clipId, readbackBuffer);
         }
       }
 
       // ── Step 4: Depth Sort (back-to-front) [Wave 4] ──────────────────────
       let sortedIndexBuffer: GPUBuffer | null = null;
-      const shouldSort = effectiveSplatCount > SORT_THRESHOLD;
+      const shouldSort = effectiveSplatCount > SORT_THRESHOLD && hasValidatedCullResult;
       const sortThisFrame = shouldSort && (
-        sortFrequency <= 1 || scene.framesSinceSort >= sortFrequency
+        sortFrequency !== 0 && (
+          !scene.sortedBindGroup ||
+          sortFrequency <= 1 ||
+          scene.framesSinceSort + 1 >= sortFrequency
+        )
       );
 
       if (sortThisFrame && this.sortPass.isInitialized) {
         const sourceIndexBuffer = cullIndexBuffer ?? scene.identityIndexBuffer;
-        const sortCount = cullIndexBuffer ? drawCount : effectiveSplatCount;
+        const sortCount = hasValidatedCullResult ? drawCount : effectiveSplatCount;
 
         const sorted = this.sortPass.execute(
           this.device, commandEncoder,
@@ -336,7 +384,12 @@ export class GaussianSplatGpuRenderer {
       }
 
       // ── Step 5: Rasterize ────────────────────────────────────────────────
-      const { view: targetView } = this.renderTargetPool.acquire(viewport.width, viewport.height);
+      const { texture: targetTexture, view: targetView } = this.renderTargetPool.acquire(viewport.width, viewport.height);
+      this.lastRenderTargets.set(clipId, {
+        texture: targetTexture,
+        width: viewport.width,
+        height: viewport.height,
+      });
 
       // Determine which bind group to use
       let renderBindGroup = scene.bindGroup; // default: identity indices + original data
@@ -365,7 +418,7 @@ export class GaussianSplatGpuRenderer {
         colorAttachments: [
           {
             view: targetView,
-            clearValue: { r: 0, g: 0, b: 0, a: 0 },
+            clearValue: clearColor,
             loadOp: 'clear',
             storeOp: 'store',
           },
@@ -378,6 +431,31 @@ export class GaussianSplatGpuRenderer {
       passEncoder.setBindGroup(1, this.cameraBindGroup!);
 
       // Instanced draw: 4 vertices per quad, one instance per splat
+      if (!this.renderDebugLoggedClips.has(clipId)) {
+        log.info('Gaussian debug render', {
+          clipId,
+          sceneSplatCount: scene.splatCount,
+          activeSplatCount,
+          effectiveSplatCount,
+          drawCount,
+          viewport,
+          hasParticleOverride: activeSplatBuffer !== scene.splatBuffer,
+          usedCull: !!cullIndexBuffer,
+          usedSort: !!sortedIndexBuffer,
+        });
+        this.renderDebugLoggedClips.add(clipId);
+      }
+      this.lastRenderDebug.set(clipId, {
+        clipId,
+        sceneSplatCount: scene.splatCount,
+        activeSplatCount,
+        effectiveSplatCount,
+        drawCount,
+        viewport,
+        backgroundColor: options?.backgroundColor,
+        usedCull: !!cullIndexBuffer,
+        usedSort: !!sortedIndexBuffer,
+      });
       passEncoder.draw(4, drawCount, 0, 0);
       passEncoder.end();
 
@@ -397,6 +475,83 @@ export class GaussianSplatGpuRenderer {
 
   hasScene(clipId: string): boolean {
     return this.sceneCache.has(clipId);
+  }
+
+  getLastRenderDebug(clipId: string): GaussianSplatRenderDebugSnapshot | null {
+    return this.lastRenderDebug.get(clipId) ?? null;
+  }
+
+  async readLastRenderTargetSummary(clipId: string): Promise<GaussianSplatRenderTargetSummary | null> {
+    if (!this.device) return null;
+
+    const target = this.lastRenderTargets.get(clipId);
+    if (!target) return null;
+
+    const { texture, width, height } = target;
+    const bytesPerPixel = 4;
+    const unalignedBytesPerRow = width * bytesPerPixel;
+    const bytesPerRow = Math.ceil(unalignedBytesPerRow / 256) * 256;
+    const bufferSize = bytesPerRow * height;
+
+    const readbackBuffer = this.device.createBuffer({
+      size: bufferSize,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      label: `splat-render-target-readback-${clipId}`,
+    });
+
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyTextureToBuffer(
+      { texture },
+      { buffer: readbackBuffer, bytesPerRow, rowsPerImage: height },
+      { width, height, depthOrArrayLayers: 1 },
+    );
+    this.device.queue.submit([commandEncoder.finish()]);
+
+    await readbackBuffer.mapAsync(GPUMapMode.READ);
+    const src = new Uint8Array(readbackBuffer.getMappedRange());
+    const pixels = new Uint8Array(width * height * bytesPerPixel);
+
+    for (let y = 0; y < height; y++) {
+      const srcOffset = y * bytesPerRow;
+      const dstOffset = y * unalignedBytesPerRow;
+      pixels.set(src.subarray(srcOffset, srcOffset + unalignedBytesPerRow), dstOffset);
+    }
+
+    const centerX = Math.floor(width / 2);
+    const centerY = Math.floor(height / 2);
+    const centerIndex = (centerY * width + centerX) * bytesPerPixel;
+    const centerPixel: [number, number, number, number] = [
+      pixels[centerIndex] ?? 0,
+      pixels[centerIndex + 1] ?? 0,
+      pixels[centerIndex + 2] ?? 0,
+      pixels[centerIndex + 3] ?? 0,
+    ];
+
+    let nonTransparentSampled = 0;
+    let nonBlackSampled = 0;
+    const stride = Math.max(1, Math.floor(Math.min(width, height) / 64));
+    for (let y = 0; y < height; y += stride) {
+      for (let x = 0; x < width; x += stride) {
+        const index = (y * width + x) * bytesPerPixel;
+        const r = pixels[index] ?? 0;
+        const g = pixels[index + 1] ?? 0;
+        const b = pixels[index + 2] ?? 0;
+        const a = pixels[index + 3] ?? 0;
+        if (a > 0) nonTransparentSampled++;
+        if (r > 0 || g > 0 || b > 0) nonBlackSampled++;
+      }
+    }
+
+    readbackBuffer.unmap();
+    readbackBuffer.destroy();
+
+    return {
+      width,
+      height,
+      centerPixel,
+      nonTransparentSampled,
+      nonBlackSampled,
+    };
   }
 
   dispose(): void {
@@ -455,6 +610,9 @@ export class GaussianSplatGpuRenderer {
     }
     this.sceneCache.clear();
     this.lastVisibleCount.clear();
+    this.lastRenderDebug.clear();
+    this.lastRenderTargets.clear();
+    this.renderDebugLoggedClips.clear();
 
     // Wave 5: Dispose particle output buffers
     for (const [, entry] of this.particleOutputBuffers) {
@@ -632,14 +790,25 @@ export class GaussianSplatGpuRenderer {
    * Asynchronously read back the visible splat count from the cull pass.
    * Updates lastVisibleCount for the next frame's draw call.
    */
-  private readbackVisibleCount(clipId: string): void {
-    this.visibilityPass.getVisibleCount().then((count) => {
-      if (count > 0) {
+  private readbackVisibleCount(clipId: string, readbackBuffer: GPUBuffer): void {
+    if (!this.device) {
+      readbackBuffer.destroy();
+      return;
+    }
+
+    this.device.queue.onSubmittedWorkDone()
+      .then(() => readbackBuffer.mapAsync(GPUMapMode.READ))
+      .then(() => {
+        const data = new Uint32Array(readbackBuffer.getMappedRange());
+        const count = data[0] ?? 0;
         this.lastVisibleCount.set(clipId, count);
-      }
-    }).catch((err) => {
-      log.debug('Visible count readback failed (expected during rapid frame changes)', { clipId, error: err });
-    });
+        readbackBuffer.unmap();
+        readbackBuffer.destroy();
+      })
+      .catch((err) => {
+        readbackBuffer.destroy();
+        log.debug('Visible count readback failed (expected during rapid frame changes)', { clipId, error: err });
+      });
   }
 }
 
@@ -649,15 +818,52 @@ let instance: GaussianSplatGpuRenderer | null = null;
 
 if (import.meta.hot) {
   import.meta.hot.accept();
-  if (import.meta.hot.data?.gaussianSplatGpuRenderer) {
-    instance = import.meta.hot.data.gaussianSplatGpuRenderer;
-  }
   import.meta.hot.dispose((data) => {
-    data.gaussianSplatGpuRenderer = instance;
+    instance?.dispose();
+    data.gaussianSplatGpuRenderer = null;
+    instance = null;
   });
 }
 
 export function getGaussianSplatGpuRenderer(): GaussianSplatGpuRenderer {
   if (!instance) instance = new GaussianSplatGpuRenderer();
   return instance;
+}
+
+export function resetGaussianSplatGpuRenderer(): void {
+  instance?.dispose();
+  instance = null;
+}
+
+function parseClearColor(backgroundColor?: string): GPUColor {
+  if (!backgroundColor || backgroundColor === 'transparent') {
+    return { r: 0, g: 0, b: 0, a: 0 };
+  }
+
+  const normalized = backgroundColor.trim().toLowerCase();
+  if (!normalized.startsWith('#')) {
+    return { r: 0, g: 0, b: 0, a: 0 };
+  }
+
+  const hex = normalized.slice(1);
+  if (hex.length === 3 || hex.length === 4) {
+    const values = hex.split('').map((char) => parseInt(char + char, 16) / 255);
+    return {
+      r: values[0] ?? 0,
+      g: values[1] ?? 0,
+      b: values[2] ?? 0,
+      a: values[3] ?? 1,
+    };
+  }
+
+  if (hex.length === 6 || hex.length === 8) {
+    return {
+      r: parseInt(hex.slice(0, 2), 16) / 255,
+      g: parseInt(hex.slice(2, 4), 16) / 255,
+      b: parseInt(hex.slice(4, 6), 16) / 255,
+      a: hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1,
+    };
+  }
+
+  return { r: 0, g: 0, b: 0, a: 0 };
 }

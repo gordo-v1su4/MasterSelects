@@ -14,8 +14,6 @@ const log = Logger.create('GaussianParseHeader');
 const FORMAT_BY_EXTENSION: Record<string, GaussianSplatFormat> = {
   '.ply': 'ply',
   '.splat': 'splat',
-  '.ksplat': 'ksplat',
-  '.gsplat': 'gsplat-zip',
 };
 
 /**
@@ -53,7 +51,7 @@ export async function parseGaussianSplatHeader(
 
   if (!resolvedFormat) {
     throw new Error(`Cannot detect gaussian splat format for file "${file.name}". ` +
-      'Supported extensions: .ply, .splat, .ksplat, .gsplat');
+      'Supported extensions: .ply, .splat');
   }
 
   let metadata: GaussianSplatMetadata;

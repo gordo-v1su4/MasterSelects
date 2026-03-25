@@ -86,7 +86,7 @@ export const DEFAULT_GAUSSIAN_SPLAT_SETTINGS: GaussianSplatSettings = {
   render: {
     maxSplats: 0,
     splatScale: 1.0,
-    nearPlane: 0.1,
+    nearPlane: 1.0,
     farPlane: 1000,
     backgroundColor: 'transparent',
     sortFrequency: 1,

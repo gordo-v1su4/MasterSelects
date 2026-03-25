@@ -112,7 +112,7 @@ export function MediaPanel() {
     getOrCreateMeshFolder,
     removeMeshItem,
     setLabelColor,
-    importGaussianAvatar,
+    importGaussianSplat,
   } = useMediaStore.getState();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -575,19 +575,19 @@ export function MediaPanel() {
   }, [createMeshItem, getOrCreateMeshFolder, closeContextMenu]);
 
   // Import Gaussian Avatar (.zip) — opens file picker, imports with forced gaussian-avatar type
-  const handleImportGaussianAvatar = useCallback(() => {
+  const handleImportGaussianSplat = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.zip';
+    input.accept = '.ply,.splat';
     input.onchange = async (e) => {
       const fileList = (e.target as HTMLInputElement).files;
       if (fileList && fileList.length > 0) {
-        await importGaussianAvatar(fileList[0]);
+        await importGaussianSplat(fileList[0]);
       }
     };
     input.click();
     closeContextMenu();
-  }, [importGaussianAvatar, closeContextMenu]);
+  }, [importGaussianSplat, closeContextMenu]);
 
   // Composition settings
   const openCompositionSettings = useCallback((comp: Composition) => {
@@ -1350,9 +1350,9 @@ export function MediaPanel() {
                     ))}
                   </div>
                 </div>
-                <div className="add-dropdown-item" onClick={() => { handleImportGaussianAvatar(); setAddDropdownOpen(false); }}>
-                  <span className="add-dropdown-icon"><FileTypeIcon type="gaussian-avatar" /></span>
-                  <span>Gaussian Avatar</span>
+                <div className="add-dropdown-item" onClick={() => { handleImportGaussianSplat(); setAddDropdownOpen(false); }}>
+                  <span className="add-dropdown-icon"><FileTypeIcon type="gaussian-splat" /></span>
+                  <span>Gaussian Splat</span>
                 </div>
                 <div className="add-dropdown-separator" />
                 <div className="add-dropdown-item" onClick={() => { /* TODO: Add adjustment layer */ setAddDropdownOpen(false); }}>
@@ -1578,9 +1578,9 @@ export function MediaPanel() {
                 ))}
               </div>
             </div>
-            <div className="context-menu-item" onClick={() => { handleImportGaussianAvatar(); closeContextMenu(); }}>
-              <span className="context-menu-icon"><FileTypeIcon type="gaussian-avatar" /></span>
-              Gaussian Avatar
+            <div className="context-menu-item" onClick={() => { handleImportGaussianSplat(); closeContextMenu(); }}>
+              <span className="context-menu-icon"><FileTypeIcon type="gaussian-splat" /></span>
+              Gaussian Splat
             </div>
             <div className="context-menu-separator" />
             <div className="context-menu-item disabled" onClick={closeContextMenu}>

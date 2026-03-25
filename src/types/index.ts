@@ -94,6 +94,7 @@ export interface LayerSource {
   gaussianBlendshapes?: Record<string, number>;
   // Gaussian splat clip support
   gaussianSplatUrl?: string;
+  gaussianSplatFileName?: string;
   gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;
   // Nested composition support - pre-rendered layers from nested comp
   nestedComposition?: NestedCompositionData;
@@ -402,6 +403,7 @@ export interface TimelineClip {
     gaussianAvatarUrl?: string;  // URL to gaussian splat avatar file
     gaussianBlendshapes?: Record<string, number>;  // ARKit blendshape weights
     gaussianSplatUrl?: string;  // URL to gaussian splat scene file
+    gaussianSplatFileName?: string;  // Original filename for format detection after blob URL conversion
     gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;  // Gaussian splat render settings
     videoElement?: HTMLVideoElement;
     audioElement?: HTMLAudioElement;

@@ -27,7 +27,7 @@ export interface FileImportActions {
  * Shows as grey/loading while the full import runs in the background.
  */
 function createPlaceholder(file: File, id: string, parentId?: string | null): MediaFile {
-  const type = detectMediaType(file) as 'video' | 'audio' | 'image';
+  const type = detectMediaType(file) as 'video' | 'audio' | 'image' | 'model' | 'gaussian-splat';
   return {
     id,
     name: file.name,
@@ -222,6 +222,11 @@ export const createFileImportSlice: MediaSliceCreator<FileImportActions> = (set,
   },
 
   importGaussianAvatar: async (file: File, parentId?: string | null) => {
+    void parentId;
+    log.warn(`Blocked legacy gaussian-avatar import: ${file.name}`);
+    throw new Error('Legacy gaussian-avatar import is disabled. Import .ply or .splat instead.');
+    /*
+
     // Deduplication: check if file with same name + size already exists
     const existing = get().files.find(f =>
       f.name === file.name && f.fileSize === file.size && !f.isImporting
@@ -264,6 +269,7 @@ export const createFileImportSlice: MediaSliceCreator<FileImportActions> = (set,
       }));
       throw err;
     }
+    */
   },
 
   importGaussianSplat: async (file: File, parentId?: string | null) => {
