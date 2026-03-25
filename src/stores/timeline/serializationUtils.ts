@@ -13,6 +13,7 @@ import { layerBuilder } from '../../services/layerBuilder';
 import { sanitizePlayheadPosition } from '../../services/layerBuilder/PlayheadState';
 import { thumbnailCacheService } from '../../services/thumbnailCacheService';
 import type { WebCodecsPlayer } from '../../engine/WebCodecsPlayer';
+import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../../engine/gaussian/types';
 
 const log = Logger.create('Timeline');
 
@@ -128,6 +129,8 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         is3D: clip.is3D || undefined,
         // Gaussian avatar blendshapes
         gaussianBlendshapes: clip.source?.type === 'gaussian-avatar' ? clip.source.gaussianBlendshapes : undefined,
+        // Gaussian splat settings
+        gaussianSplatSettings: clip.source?.type === 'gaussian-splat' ? clip.source.gaussianSplatSettings : undefined,
       };
     });
 
@@ -1248,6 +1251,27 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
                     type: 'gaussian-avatar' as const,
                     gaussianAvatarUrl: fileUrl,
                     gaussianBlendshapes: serializedClip.gaussianBlendshapes || {},
+                    naturalDuration: serializedClip.naturalDuration || 3600,
+                    mediaFileId: serializedClip.mediaFileId,
+                  },
+                  is3D: true,
+                  isLoading: false,
+                }
+              : c
+          ),
+        }));
+        wakePreviewAfterRestore();
+      } else if (type === 'gaussian-splat') {
+        // Gaussian Splat clips — blob URL for the renderer to load
+        set(state => ({
+          clips: state.clips.map(c =>
+            c.id === clip.id
+              ? {
+                  ...c,
+                  source: {
+                    type: 'gaussian-splat' as const,
+                    gaussianSplatUrl: fileUrl,
+                    gaussianSplatSettings: serializedClip.gaussianSplatSettings || DEFAULT_GAUSSIAN_SPLAT_SETTINGS,
                     naturalDuration: serializedClip.naturalDuration || 3600,
                     mediaFileId: serializedClip.mediaFileId,
                   },

@@ -68,7 +68,7 @@ export type BlendMode =
   | 'alpha-add';
 
 export interface LayerSource {
-  type: 'video' | 'image' | 'camera' | 'color' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
+  type: 'video' | 'image' | 'camera' | 'color' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
   modelUrl?: string;  // Blob URL to 3D model file (OBJ/glTF/GLB)
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type (cube, sphere, etc.)
   file?: File;
@@ -92,6 +92,9 @@ export interface LayerSource {
   // Gaussian avatar support
   gaussianAvatarUrl?: string;
   gaussianBlendshapes?: Record<string, number>;
+  // Gaussian splat clip support
+  gaussianSplatUrl?: string;
+  gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;
   // Nested composition support - pre-rendered layers from nested comp
   nestedComposition?: NestedCompositionData;
   // Text clip support
@@ -393,11 +396,13 @@ export interface TimelineClip {
   inPoint: number;        // Trim in point within source (seconds)
   outPoint: number;       // Trim out point within source (seconds)
   source: {
-    type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
+    type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
     modelUrl?: string;  // Blob URL to 3D model file
     meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
     gaussianAvatarUrl?: string;  // URL to gaussian splat avatar file
     gaussianBlendshapes?: Record<string, number>;  // ARKit blendshape weights
+    gaussianSplatUrl?: string;  // URL to gaussian splat scene file
+    gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;  // Gaussian splat render settings
     videoElement?: HTMLVideoElement;
     audioElement?: HTMLAudioElement;
     imageElement?: HTMLImageElement;
@@ -507,7 +512,7 @@ export interface SerializableClip {
   duration: number;
   inPoint: number;
   outPoint: number;
-  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
+  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
   naturalDuration?: number;
   thumbnails?: string[];
   linkedClipId?: string;
@@ -546,6 +551,8 @@ export interface SerializableClip {
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;
   // Gaussian avatar blendshape state
   gaussianBlendshapes?: Record<string, number>;
+  // Gaussian splat settings
+  gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;
 }
 
 // Serializable timeline marker (for project save/load)

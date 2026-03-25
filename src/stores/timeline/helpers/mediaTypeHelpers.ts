@@ -81,3 +81,15 @@ export function getFileExtension(file: File | string): string {
   const name = typeof file === 'string' ? file : file.name;
   return name.split('.').pop()?.toLowerCase() || '';
 }
+
+export const GAUSSIAN_SPLAT_EXTENSIONS = ['ply', 'splat', 'ksplat'] as const;
+
+/**
+ * Check if a file or filename is a gaussian splat file.
+ */
+export function isGaussianSplatFile(file: File | string): boolean {
+  const name = typeof file === 'string' ? file : file.name;
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (name.toLowerCase().endsWith('.gsplat.zip')) return true;
+  return GAUSSIAN_SPLAT_EXTENSIONS.includes(ext as typeof GAUSSIAN_SPLAT_EXTENSIONS[number]);
+}

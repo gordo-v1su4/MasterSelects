@@ -387,7 +387,7 @@ export interface ClipboardClipData {
   duration: number;
   inPoint: number;
   outPoint: number;
-  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar';
+  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
   naturalDuration?: number;
   transform: ClipTransform;
   effects: Effect[];

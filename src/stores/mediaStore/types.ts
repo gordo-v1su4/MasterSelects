@@ -3,7 +3,7 @@
 import type { CompositionTimelineData, TranscriptWord, TranscriptStatus, AnalysisStatus } from '../../types';
 
 // Media item types
-export type MediaType = 'video' | 'audio' | 'image' | 'composition' | 'text' | 'solid' | 'model';
+export type MediaType = 'video' | 'audio' | 'image' | 'composition' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
 
 // Proxy status for video files
 export type ProxyStatus = 'none' | 'generating' | 'ready' | 'error';
@@ -45,7 +45,7 @@ export interface MediaItem {
 
 // Imported file
 export interface MediaFile extends MediaItem {
-  type: 'video' | 'audio' | 'image' | 'model';
+  type: 'video' | 'audio' | 'image' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
   file?: File;
   url: string;
   duration?: number;
