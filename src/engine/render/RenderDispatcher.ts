@@ -747,9 +747,15 @@ export class RenderDispatcher {
       );
 
       // Render this single splat into its own texture
+      // Wave 5: pass clip-local time and particle/temporal settings from layer source
       const commandEncoder = device.createCommandEncoder();
       const textureView = renderer.renderToTexture(
         clipId, camera, { width, height }, commandEncoder,
+        {
+          clipLocalTime: data.layer.source.mediaTime,
+          particleSettings: settings?.particle,
+          temporalSettings: settings?.temporal,
+        },
       );
       device.queue.submit([commandEncoder.finish()]);
 
