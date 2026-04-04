@@ -295,74 +295,57 @@
   margin: 4px 0;
 }
 
-/* ─── Floating Prompt Bubble ─── */
+/* ─── Compact Prompt Bubble (always visible, bottom-right) ─── */
 
-.flashboard-bubble {
+.fb-bubble {
   position: absolute;
-  bottom: 16px;
-  right: 16px;
-  width: 360px;
-  background: var(--bg-elevated, #2a2a3e);
+  bottom: 8px;
+  right: 8px;
+  width: 260px;
+  background: var(--bg-elevated, #252536);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   z-index: 100;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
-.flashboard-bubble-close {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 2px;
-  z-index: 1;
-}
-
-.flashboard-bubble-close:hover {
-  color: var(--text-primary);
-}
-
-.flashboard-bubble-prompt-row {
+.fb-bubble-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: flex-end;
 }
 
-.flashboard-bubble-prompt {
+.fb-bubble-input {
   flex: 1;
   background: var(--bg-input, rgba(255, 255, 255, 0.06));
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--text-primary);
-  font-size: 13px;
-  padding: 8px 10px;
+  font-size: 12px;
+  padding: 6px 8px;
   resize: none;
   outline: none;
   font-family: inherit;
-  min-height: 40px;
+  min-height: 28px;
+  max-height: 60px;
 }
 
-.flashboard-bubble-prompt:focus {
+.fb-bubble-input:focus {
   border-color: var(--accent);
 }
 
-.flashboard-bubble-generate {
-  width: 36px;
-  height: 36px;
+.fb-bubble-go {
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 50%;
   background: var(--accent);
   color: var(--text-on-accent);
-  font-size: 14px;
+  font-size: 11px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -370,90 +353,62 @@
   flex-shrink: 0;
 }
 
-.flashboard-bubble-generate:hover {
-  background: var(--accent-hover);
-}
+.fb-bubble-go:hover { background: var(--accent-hover); }
+.fb-bubble-go:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.flashboard-bubble-generate:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.flashboard-bubble-chips {
+.fb-bubble-bar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
-.flashboard-bubble-chip {
-  padding: 3px 10px;
+.fb-chip {
+  padding: 2px 7px;
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
-  color: var(--text-secondary);
-  font-size: 11px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.flashboard-bubble-chip:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
+.fb-chip:hover { color: var(--text-primary); background: var(--bg-hover); }
 
-.flashboard-bubble-chip-select {
-  padding: 3px 8px;
+.fb-chip-sel {
+  padding: 2px 6px;
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
-  color: var(--text-secondary);
-  font-size: 11px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
   cursor: pointer;
   outline: none;
   appearance: none;
   -webkit-appearance: none;
 }
 
-.flashboard-bubble-chip-select:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
+.fb-chip-sel:hover { color: var(--text-primary); }
 
-.flashboard-bubble-settings {
+.fb-settings {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   padding-top: 4px;
   border-top: 1px solid var(--border-color);
 }
 
-.flashboard-bubble-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.flashboard-bubble-field label {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.flashboard-bubble-field select,
-.flashboard-bubble-field input[type="text"] {
+.fb-settings-sel {
   background: var(--bg-input, rgba(255, 255, 255, 0.06));
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-primary);
-  font-size: 12px;
-  padding: 5px 8px;
+  font-size: 11px;
+  padding: 4px 6px;
   outline: none;
 }
 
-.flashboard-bubble-field select:focus,
-.flashboard-bubble-field input[type="text"]:focus {
-  border-color: var(--accent);
-}
+.fb-settings-sel:focus { border-color: var(--accent); }
 
 /* ─── Mode Toggle (in AIVideoPanel header) ─── */
 
