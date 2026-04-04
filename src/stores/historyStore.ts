@@ -8,6 +8,7 @@ import type { TimelineClip, TimelineTrack, Layer, Keyframe } from '../types';
 import type { MediaFile, Composition, MediaFolder, TextItem, SolidItem } from './mediaStore/types';
 import type { TimelineMarker } from './timeline/types';
 import type { DockNode } from '../types/dock';
+import type { FlashBoard } from './flashboardStore/types';
 
 const log = Logger.create('History');
 
@@ -43,6 +44,29 @@ interface StateSnapshot {
   // Dock layout state
   dock: {
     layout: DockNode | null;
+  };
+
+  // FlashBoard state (boards + activeBoardId, excluding ephemeral UI state)
+  flashboard: {
+    activeBoardId: string | null;
+    boards: Array<{
+      id: string;
+      name: string;
+      createdAt: number;
+      updatedAt: number;
+      viewport: { zoom: number; panX: number; panY: number };
+      nodes: Array<{
+        id: string;
+        kind: 'generation' | 'reference';
+        createdAt: number;
+        updatedAt: number;
+        position: { x: number; y: number };
+        size: { width: number; height: number };
+        request?: any;
+        job?: any;
+        result?: any;
+      }>;
+    }>;
   };
 }
 
@@ -103,6 +127,13 @@ interface MediaStoreState {
   solidItems: SolidItem[];
 }
 
+interface FlashBoardStoreSnapshot {
+  activeBoardId: string | null;
+  boards: FlashBoard[];
+  selectedNodeIds: string[];
+  composer: { draftNodeId: string | null; isOpen: boolean };
+}
+
 // Callback to flush pending debounced captures before undo/redo (set by useGlobalHistory)
 // Flush = execute the pending capture immediately so its state isn't lost
 let flushPendingCaptureCallback: (() => void) | null = null;
@@ -122,12 +153,15 @@ let getMediaState: (() => MediaStoreState) | undefined;
 let setMediaState: ((state: Partial<MediaStoreState>) => void) | undefined;
 let getDockState: (() => any) | undefined;
 let setDockState: ((state: any) => void) | undefined;
+let getFlashBoardState: (() => FlashBoardStoreSnapshot) | undefined;
+let setFlashBoardState: ((state: Partial<FlashBoardStoreSnapshot>) => void) | undefined;
 
 // Initialize store references (called from useGlobalHistory)
 export function initHistoryStoreRefs(stores: {
   timeline: { getState: () => TimelineStoreState; setState: (state: Partial<TimelineStoreState>) => void };
   media: { getState: () => MediaStoreState; setState: (state: Partial<MediaStoreState>) => void };
   dock: { getState: () => any; setState: (state: any) => void };
+  flashboard: { getState: () => FlashBoardStoreSnapshot; setState: (state: Partial<FlashBoardStoreSnapshot>) => void };
 }) {
   getTimelineState = stores.timeline.getState;
   setTimelineState = stores.timeline.setState;
@@ -135,6 +169,8 @@ export function initHistoryStoreRefs(stores: {
   setMediaState = stores.media.setState;
   getDockState = stores.dock.getState;
   setDockState = stores.dock.setState;
+  getFlashBoardState = stores.flashboard.getState;
+  setFlashBoardState = stores.flashboard.setState;
 }
 
 // Deep clone helper (handles most objects, excluding DOM elements and functions)
@@ -186,6 +222,7 @@ function createSnapshot(label: string): StateSnapshot {
   const timeline = getTimelineState?.() || ({} as any);
   const media = getMediaState?.() || ({} as any);
   const dock = getDockState?.() || ({} as any);
+  const fb = getFlashBoardState?.() || ({ activeBoardId: null, boards: [] } as any);
 
   // Convert Map<string, Keyframe[]> to plain object for cloning
   const keyframesObj: Record<string, Keyframe[]> = {};
@@ -220,6 +257,10 @@ function createSnapshot(label: string): StateSnapshot {
     },
     dock: {
       layout: deepClone(dock.layout || {}),
+    },
+    flashboard: {
+      activeBoardId: fb.activeBoardId ?? null,
+      boards: deepClone(fb.boards || []),
     },
   };
 }
@@ -287,6 +328,14 @@ function applySnapshot(snapshot: StateSnapshot) {
   if (setDockState) {
     setDockState({
       layout: deepClone(snapshot.dock.layout),
+    });
+  }
+
+  // Apply FlashBoard state (only boards + activeBoardId, not ephemeral UI)
+  if (setFlashBoardState && snapshot.flashboard) {
+    setFlashBoardState({
+      activeBoardId: snapshot.flashboard.activeBoardId,
+      boards: deepClone(snapshot.flashboard.boards),
     });
   }
 }

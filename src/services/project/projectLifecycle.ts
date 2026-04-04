@@ -5,6 +5,7 @@ import { useMediaStore } from '../../stores/mediaStore';
 import { useTimelineStore } from '../../stores/timeline';
 import { useYouTubeStore } from '../../stores/youtubeStore';
 import { useDockStore } from '../../stores/dockStore';
+import { useFlashBoardStore } from '../../stores/flashboardStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { projectFileService } from '../projectFileService';
 import { syncStoresToProject, saveCurrentProject } from './projectSave';
@@ -162,6 +163,17 @@ export function setupAutoSync(): void {
       }
     }
   });
+
+  // Subscribe to FlashBoard store changes
+  useFlashBoardStore.subscribe(
+    (state) => [state.boards, state.activeBoardId],
+    () => {
+      if (projectFileService.isProjectOpen()) {
+        projectFileService.markDirty();
+        triggerContinuousSaveIfEnabled();
+      }
+    }
+  );
 
   // In continuous mode, flush pending save on page unload
   window.addEventListener('beforeunload', () => {
