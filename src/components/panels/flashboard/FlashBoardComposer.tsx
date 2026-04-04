@@ -1,8 +1,10 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useFlashBoardStore } from '../../../stores/flashboardStore';
 import { selectActiveBoard } from '../../../stores/flashboardStore/selectors';
 import { getCatalogEntries } from '../../../services/flashboard/FlashBoardModelCatalog';
 import type { CatalogEntry } from '../../../services/flashboard/types';
+
+type PopoverType = 'model' | 'aspect' | 'duration' | 'mode' | null;
 
 export function FlashBoardComposer() {
   const board = useFlashBoardStore(selectActiveBoard);
@@ -11,8 +13,8 @@ export function FlashBoardComposer() {
   const queueNode = useFlashBoardStore((s) => s.queueNode);
 
   const catalog = useMemo(() => getCatalogEntries(), []);
-  const [showSettings, setShowSettings] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
+  const [popover, setPopover] = useState<PopoverType>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
 
   const [service, setService] = useState<CatalogEntry['service']>('kieai');
   const [providerId, setProviderId] = useState(catalog[0]?.providerId ?? '');
@@ -27,33 +29,31 @@ export function FlashBoardComposer() {
     [catalog, service, providerId]
   );
 
-  const serviceProviders = useMemo(
-    () => catalog.filter((e) => e.service === service),
-    [catalog, service]
-  );
 
-  const handleServiceChange = useCallback((newService: CatalogEntry['service']) => {
+  // Close popover on outside click
+  useEffect(() => {
+    if (!popover) return;
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setPopover(null);
+      }
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [popover]);
+
+  const handleProviderChange = useCallback((newService: CatalogEntry['service'], newId: string) => {
     setService(newService);
-    const first = catalog.find((e) => e.service === newService);
-    if (first) {
-      setProviderId(first.providerId);
-      setVersion(first.versions[0] ?? '');
-      setMode(first.modes[0] ?? 'std');
-      if (!first.durations.includes(duration)) setDuration(first.durations[0] ?? 5);
-      if (!first.aspectRatios.includes(aspectRatio)) setAspectRatio(first.aspectRatios[0] ?? '16:9');
-    }
-  }, [catalog, duration, aspectRatio]);
-
-  const handleProviderChange = useCallback((newId: string) => {
     setProviderId(newId);
-    const entry = catalog.find((e) => e.service === service && e.providerId === newId);
+    const entry = catalog.find((e) => e.service === newService && e.providerId === newId);
     if (entry) {
       setVersion(entry.versions[0] ?? '');
       if (!entry.modes.includes(mode)) setMode(entry.modes[0] ?? 'std');
       if (!entry.durations.includes(duration)) setDuration(entry.durations[0] ?? 5);
       if (!entry.aspectRatios.includes(aspectRatio)) setAspectRatio(entry.aspectRatios[0] ?? '16:9');
     }
-  }, [catalog, service, mode, duration, aspectRatio]);
+    setPopover(null);
+  }, [catalog, mode, duration, aspectRatio]);
 
   const handleGenerate = useCallback(() => {
     if (!board || !prompt.trim()) return;
@@ -78,9 +78,11 @@ export function FlashBoardComposer() {
     }
   }, [handleGenerate]);
 
-  if (!board) return null;
+  const togglePopover = useCallback((type: PopoverType) => {
+    setPopover((prev) => prev === type ? null : type);
+  }, []);
 
-  const providerShort = selectedEntry?.name?.replace(' (Kie.ai)', '') ?? providerId;
+  if (!board) return null;
 
   return (
     <div className="fb-bubble" onKeyDown={handleKeyDown}>
@@ -92,55 +94,116 @@ export function FlashBoardComposer() {
           placeholder="Describe what to generate..."
           rows={1}
         />
+        <button className="fb-bubble-close" onClick={() => setPrompt('')} title="Clear">&times;</button>
+      </div>
+
+      <div className="fb-bubble-bar">
+        <div className="fb-pill-group" ref={popoverRef}>
+          <button className="fb-pill" onClick={() => togglePopover('model')} title="Model">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          </button>
+          <button className={`fb-pill ${popover === 'aspect' ? 'active' : ''}`} onClick={() => togglePopover('aspect')}>
+            {aspectRatio}
+          </button>
+          {selectedEntry && selectedEntry.durations.length > 0 && (
+            <button className={`fb-pill ${popover === 'duration' ? 'active' : ''}`} onClick={() => togglePopover('duration')}>
+              {duration}s
+            </button>
+          )}
+          {selectedEntry && selectedEntry.modes.length > 1 && (
+            <button className={`fb-pill ${popover === 'mode' ? 'active' : ''}`} onClick={() => togglePopover('mode')}>
+              {mode}
+            </button>
+          )}
+
+          {/* Popovers */}
+          {popover === 'model' && (
+            <div className="fb-popover fb-popover-model">
+              <div className="fb-popover-title">Model</div>
+              {['kieai', 'piapi', 'cloud'].map((svc) => {
+                const providers = catalog.filter((e) => e.service === svc);
+                if (providers.length === 0) return null;
+                return (
+                  <div key={svc} className="fb-popover-group">
+                    <div className="fb-popover-label">{svc === 'kieai' ? 'Kie.ai' : svc === 'piapi' ? 'PiAPI' : 'Cloud'}</div>
+                    <div className="fb-popover-pills">
+                      {providers.map((p) => (
+                        <button
+                          key={p.providerId}
+                          className={`fb-popover-pill ${service === svc && providerId === p.providerId ? 'active' : ''}`}
+                          onClick={() => handleProviderChange(svc as CatalogEntry['service'], p.providerId)}
+                        >
+                          {p.name.replace(' (Kie.ai)', '')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {popover === 'aspect' && selectedEntry && (
+            <div className="fb-popover">
+              <div className="fb-popover-title">Aspect Ratio</div>
+              <div className="fb-popover-pills">
+                {selectedEntry.aspectRatios.map((ar) => (
+                  <button
+                    key={ar}
+                    className={`fb-popover-pill ${aspectRatio === ar ? 'active' : ''}`}
+                    onClick={() => { setAspectRatio(ar); setPopover(null); }}
+                  >
+                    {ar}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {popover === 'duration' && selectedEntry && (
+            <div className="fb-popover">
+              <div className="fb-popover-title">Duration</div>
+              <div className="fb-popover-pills">
+                {selectedEntry.durations.map((d) => (
+                  <button
+                    key={d}
+                    className={`fb-popover-pill ${duration === d ? 'active' : ''}`}
+                    onClick={() => { setDuration(d); setPopover(null); }}
+                  >
+                    {d}s
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {popover === 'mode' && selectedEntry && (
+            <div className="fb-popover">
+              <div className="fb-popover-title">Mode</div>
+              <div className="fb-popover-pills">
+                {selectedEntry.modes.map((m) => (
+                  <button
+                    key={m}
+                    className={`fb-popover-pill ${mode === m ? 'active' : ''}`}
+                    onClick={() => { setMode(m); setPopover(null); }}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         <button
-          className="fb-bubble-go"
+          className="fb-generate"
           disabled={!prompt.trim()}
           onClick={handleGenerate}
           title="Generate (Ctrl+Enter)"
         >
-          &#9654;
+          &#9654; Generate
         </button>
       </div>
-      <div className="fb-bubble-bar">
-        <button
-          className="fb-chip"
-          onClick={() => setShowSettings((v) => !v)}
-        >
-          {providerShort}
-        </button>
-        {selectedEntry && selectedEntry.aspectRatios.length > 1 && (
-          <select className="fb-chip-sel" value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
-            {selectedEntry.aspectRatios.map((ar) => <option key={ar} value={ar}>{ar}</option>)}
-          </select>
-        )}
-        {selectedEntry && selectedEntry.durations.length > 0 && (
-          <select className="fb-chip-sel" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-            {selectedEntry.durations.map((d) => <option key={d} value={d}>{d}s</option>)}
-          </select>
-        )}
-        {selectedEntry && selectedEntry.modes.length > 1 && (
-          <select className="fb-chip-sel" value={mode} onChange={(e) => setMode(e.target.value)}>
-            {selectedEntry.modes.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        )}
-      </div>
-      {showSettings && (
-        <div className="fb-settings" ref={settingsRef}>
-          <select className="fb-settings-sel" value={service} onChange={(e) => handleServiceChange(e.target.value as CatalogEntry['service'])}>
-            <option value="kieai">Kie.ai</option>
-            <option value="piapi">PiAPI</option>
-            <option value="cloud">Cloud</option>
-          </select>
-          <select className="fb-settings-sel" value={providerId} onChange={(e) => handleProviderChange(e.target.value)}>
-            {serviceProviders.map((e) => <option key={e.providerId} value={e.providerId}>{e.name}</option>)}
-          </select>
-          {selectedEntry && selectedEntry.versions.length > 1 && (
-            <select className="fb-settings-sel" value={version} onChange={(e) => setVersion(e.target.value)}>
-              {selectedEntry.versions.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-          )}
-        </div>
-      )}
     </div>
   );
 }

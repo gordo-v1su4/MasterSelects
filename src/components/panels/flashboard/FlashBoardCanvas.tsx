@@ -67,9 +67,11 @@ export function FlashBoardCanvas() {
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Right-click: don't interfere, let contextmenu handle it
+    if (e.button === 2) return;
+    // Close context menu on any left/middle click
     if (contextMenu) {
       setContextMenu(null);
-      return;
     }
     if (e.button === 0) {
       clearSelection();
