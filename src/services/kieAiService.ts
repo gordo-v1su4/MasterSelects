@@ -1,5 +1,5 @@
 // Kie.ai Service - Unified API for AI video generation via kie.ai
-// Currently supports: Kling 3.0 (text-to-video, image-to-video)
+// Currently supports: Kling 3.0, Seedance 1.5 Pro (video), Nano Banana 2/Pro (image)
 // Docs: https://kie.ai
 
 import { Logger } from './logger';
@@ -17,7 +17,7 @@ const log = Logger.create('KieAI');
 const BASE_URL = 'https://api.kie.ai';
 const UPLOAD_URL = 'https://kieai.redpandaai.co/api/file-stream-upload';
 
-// Kie.ai providers (Kling 3.0 only for now)
+// Kie.ai providers
 const KIEAI_PROVIDERS: VideoProvider[] = [
   {
     id: 'kling-3.0',
@@ -29,6 +29,39 @@ const KIEAI_PROVIDERS: VideoProvider[] = [
     supportedAspectRatios: ['16:9', '9:16', '1:1'],
     supportsImageToVideo: true,
     supportsTextToVideo: true,
+  },
+  {
+    id: 'seedance-1.5-pro',
+    name: 'Seedance 1.5 Pro',
+    description: 'ByteDance video generation via Kie.ai',
+    versions: ['1.5'],
+    supportedModes: ['std'],
+    supportedDurations: [5, 10],
+    supportedAspectRatios: ['16:9', '9:16', '1:1'],
+    supportsImageToVideo: true,
+    supportsTextToVideo: true,
+  },
+  {
+    id: 'nano-banana-2',
+    name: 'Nano Banana 2',
+    description: 'Gemini 3.1 Flash image gen via Kie.ai',
+    versions: ['2.0'],
+    supportedModes: ['std'],
+    supportedDurations: [],
+    supportedAspectRatios: ['1:1', '16:9', '9:16'],
+    supportsImageToVideo: false,
+    supportsTextToVideo: false,
+  },
+  {
+    id: 'nano-banana-pro',
+    name: 'Nano Banana Pro',
+    description: 'Gemini 3 Pro image gen via Kie.ai',
+    versions: ['1.0'],
+    supportedModes: ['std'],
+    supportedDurations: [],
+    supportedAspectRatios: ['1:1', '16:9', '9:16'],
+    supportsImageToVideo: false,
+    supportsTextToVideo: false,
   },
 ];
 
@@ -43,6 +76,9 @@ const KIEAI_CREDITS_PER_SECOND: Record<string, Record<string, { normal: number; 
   'kling-3.0': {
     'std': { normal: 20, audio: 30 },
     'pro': { normal: 27, audio: 40 },
+  },
+  'seedance-1.5-pro': {
+    'std': { normal: 20, audio: 30 },
   },
 };
 

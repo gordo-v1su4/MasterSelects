@@ -21,6 +21,7 @@ export function getCatalogEntries(): CatalogEntry[] {
   }
 
   for (const p of getKieAiProviders()) {
+    const isImageOnly = !p.supportsTextToVideo && !p.supportsImageToVideo;
     entries.push({
       service: 'kieai',
       providerId: p.id,
@@ -32,6 +33,7 @@ export function getCatalogEntries(): CatalogEntry[] {
       aspectRatios: p.supportedAspectRatios,
       supportsTextToVideo: p.supportsTextToVideo,
       supportsImageToVideo: p.supportsImageToVideo,
+      ...(isImageOnly ? { supportsTextToImage: true } : {}),
     });
   }
 

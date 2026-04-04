@@ -43,4 +43,5 @@ export interface CatalogEntry {
   aspectRatios: string[];
   supportsTextToVideo: boolean;
   supportsImageToVideo: boolean;
+  supportsTextToImage?: boolean;
 }
