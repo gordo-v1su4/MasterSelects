@@ -82,6 +82,7 @@ export function FlashBoardContextMenu({ x, y, node, boardId, canvasPosition, onC
       ref={menuRef}
       className="flashboard-context-menu"
       style={{ left: x, top: y }}
+      onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
       {!node && (

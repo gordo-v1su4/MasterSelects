@@ -85,7 +85,7 @@ export function FlashBoardComposer() {
   if (!board) return null;
 
   return (
-    <div className="fb-bubble" onKeyDown={handleKeyDown}>
+    <div className="fb-bubble" onKeyDown={handleKeyDown} onMouseDown={(e) => e.stopPropagation()}>
       <div className="fb-bubble-row">
         <textarea
           className="fb-bubble-input"
