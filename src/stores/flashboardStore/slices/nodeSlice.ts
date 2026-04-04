@@ -5,6 +5,7 @@ type Get = () => FlashBoardStoreState;
 
 export interface NodeSliceActions {
   createDraftNode: (boardId: string, position?: { x: number; y: number }) => FlashBoardNode;
+  createReferenceNode: (boardId: string, mediaFileId: string, position?: { x: number; y: number }) => FlashBoardNode;
   updateNodeRequest: (nodeId: string, patch: Partial<FlashBoardGenerationRequest>) => void;
   queueNode: (nodeId: string) => void;
   updateNodeJob: (nodeId: string, patch: Partial<FlashBoardJobState>) => void;
@@ -43,6 +44,27 @@ export const createNodeSlice = (set: Set, get: Get): NodeSliceActions => ({
       position: position ?? { x: 0, y: 0 },
       size: { width: 280, height: 320 },
       job: { status: 'draft' },
+    };
+    set((state) => ({
+      boards: state.boards.map((b) =>
+        b.id === boardId
+          ? { ...b, nodes: [...b.nodes, node], updatedAt: now }
+          : b
+      ),
+    }));
+    return node;
+  },
+
+  createReferenceNode: (boardId: string, mediaFileId: string, position?: { x: number; y: number }): FlashBoardNode => {
+    const now = Date.now();
+    const node: FlashBoardNode = {
+      id: crypto.randomUUID(),
+      kind: 'reference',
+      createdAt: now,
+      updatedAt: now,
+      position: position ?? { x: 0, y: 0 },
+      size: { width: 200, height: 160 },
+      result: { mediaFileId, mediaType: 'video' },
     };
     set((state) => ({
       boards: state.boards.map((b) =>

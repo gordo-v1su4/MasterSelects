@@ -3,7 +3,6 @@ import { useFlashBoardStore } from '../../../stores/flashboardStore';
 import { selectNodeById } from '../../../stores/flashboardStore/selectors';
 import { getCatalogEntries } from '../../../services/flashboard/FlashBoardModelCatalog';
 import type { CatalogEntry } from '../../../services/flashboard/types';
-import { FlashBoardReferenceTray } from './FlashBoardReferenceTray';
 
 export function FlashBoardComposer() {
   const composerState = useFlashBoardStore((s) => s.composer);
@@ -15,8 +14,8 @@ export function FlashBoardComposer() {
   );
 
   const catalog = useMemo(() => getCatalogEntries(), []);
+  const [showSettings, setShowSettings] = useState(false);
 
-  // Local form state derived from node request or defaults
   const req = node?.request;
   const [service, setService] = useState<CatalogEntry['service']>(req?.service ?? 'kieai');
   const [providerId, setProviderId] = useState(req?.providerId ?? catalog[0]?.providerId ?? '');
@@ -26,15 +25,12 @@ export function FlashBoardComposer() {
   const [negativePrompt, setNegativePrompt] = useState(req?.negativePrompt ?? '');
   const [duration, setDuration] = useState(req?.duration ?? 5);
   const [aspectRatio, setAspectRatio] = useState(req?.aspectRatio ?? '16:9');
-  const [showNegative, setShowNegative] = useState(false);
 
-  // Get the selected catalog entry
   const selectedEntry = useMemo(
     () => catalog.find((e) => e.service === service && e.providerId === providerId),
     [catalog, service, providerId]
   );
 
-  // Filter providers by service
   const serviceProviders = useMemo(
     () => catalog.filter((e) => e.service === service),
     [catalog, service]
@@ -47,12 +43,8 @@ export function FlashBoardComposer() {
       setProviderId(first.providerId);
       setVersion(first.versions[0] ?? '');
       setMode(first.modes[0] ?? 'std');
-      if (!first.durations.includes(duration)) {
-        setDuration(first.durations[0] ?? 5);
-      }
-      if (!first.aspectRatios.includes(aspectRatio)) {
-        setAspectRatio(first.aspectRatios[0] ?? '16:9');
-      }
+      if (!first.durations.includes(duration)) setDuration(first.durations[0] ?? 5);
+      if (!first.aspectRatios.includes(aspectRatio)) setAspectRatio(first.aspectRatios[0] ?? '16:9');
     }
   }, [catalog, duration, aspectRatio]);
 
@@ -84,133 +76,127 @@ export function FlashBoardComposer() {
     closeComposer();
   }, [node, service, providerId, version, mode, prompt, negativePrompt, duration, aspectRatio, updateNodeRequest, queueNode, closeComposer]);
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      handleGenerate();
+    }
+    if (e.key === 'Escape') {
+      closeComposer();
+    }
+  }, [handleGenerate, closeComposer]);
+
   if (!composerState.isOpen || !node) return null;
 
-  const services: CatalogEntry['service'][] = ['kieai', 'piapi', 'cloud'];
+  const providerLabel = selectedEntry?.name ?? providerId;
 
   return (
-    <div className="flashboard-composer">
-      <div className="flashboard-composer-header">
-        <span>Compose Generation</span>
-        <button className="flashboard-composer-close" onClick={closeComposer}>
-          &times;
-        </button>
-      </div>
+    <div className="flashboard-bubble" onKeyDown={handleKeyDown}>
+      <button className="flashboard-bubble-close" onClick={closeComposer}>&times;</button>
 
-      <div className="flashboard-composer-body">
-        <div className="flashboard-field">
-          <label>Service</label>
-          <select
-            value={service}
-            onChange={(e) => handleServiceChange(e.target.value as CatalogEntry['service'])}
-          >
-            {services.map((s) => (
-              <option key={s} value={s}>{s === 'kieai' ? 'Kie.ai' : s === 'piapi' ? 'PiAPI' : 'Cloud'}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flashboard-field">
-          <label>Provider</label>
-          <select
-            value={providerId}
-            onChange={(e) => handleProviderChange(e.target.value)}
-          >
-            {serviceProviders.map((e) => (
-              <option key={e.providerId} value={e.providerId}>{e.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {selectedEntry && selectedEntry.versions.length > 1 && (
-          <div className="flashboard-field">
-            <label>Version</label>
-            <select value={version} onChange={(e) => setVersion(e.target.value)}>
-              {selectedEntry.versions.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {selectedEntry && selectedEntry.modes.length > 1 && (
-          <div className="flashboard-field">
-            <label>Mode</label>
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
-              {selectedEntry.modes.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="flashboard-field">
-          <label>Prompt</label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe what to generate..."
-            rows={4}
-          />
-        </div>
-
-        <div>
-          <button
-            className="flashboard-collapsible-header"
-            onClick={() => setShowNegative(!showNegative)}
-          >
-            <span className={`flashboard-collapsible-arrow ${showNegative ? 'open' : ''}`}>
-              &#9654;
-            </span>
-            Negative Prompt
-          </button>
-          {showNegative && (
-            <div className="flashboard-field" style={{ marginTop: 4 }}>
-              <textarea
-                value={negativePrompt}
-                onChange={(e) => setNegativePrompt(e.target.value)}
-                placeholder="What to avoid..."
-                rows={2}
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="flashboard-field-row">
-          {selectedEntry && selectedEntry.durations.length > 1 && (
-            <div className="flashboard-field">
-              <label>Duration</label>
-              <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                {selectedEntry.durations.map((d) => (
-                  <option key={d} value={d}>{d}s</option>
-                ))}
-              </select>
-            </div>
-          )}
-          {selectedEntry && selectedEntry.aspectRatios.length > 1 && (
-            <div className="flashboard-field">
-              <label>Aspect Ratio</label>
-              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)}>
-                {selectedEntry.aspectRatios.map((ar) => (
-                  <option key={ar} value={ar}>{ar}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        <FlashBoardReferenceTray />
-      </div>
-
-      <div className="flashboard-composer-footer">
+      <div className="flashboard-bubble-prompt-row">
+        <textarea
+          className="flashboard-bubble-prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Describe what to generate..."
+          rows={2}
+          autoFocus
+        />
         <button
-          className="flashboard-generate-btn"
+          className="flashboard-bubble-generate"
           disabled={!prompt.trim()}
           onClick={handleGenerate}
+          title="Generate (Ctrl+Enter)"
         >
-          Generate
+          &#9654;
         </button>
       </div>
+
+      <div className="flashboard-bubble-chips">
+        <button
+          className="flashboard-bubble-chip"
+          onClick={() => setShowSettings(!showSettings)}
+          title={providerLabel}
+        >
+          {providerLabel}
+        </button>
+        {selectedEntry && selectedEntry.aspectRatios.length > 1 && (
+          <select
+            className="flashboard-bubble-chip-select"
+            value={aspectRatio}
+            onChange={(e) => setAspectRatio(e.target.value)}
+          >
+            {selectedEntry.aspectRatios.map((ar) => (
+              <option key={ar} value={ar}>{ar}</option>
+            ))}
+          </select>
+        )}
+        {selectedEntry && selectedEntry.durations.length > 0 && (
+          <select
+            className="flashboard-bubble-chip-select"
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+          >
+            {selectedEntry.durations.map((d) => (
+              <option key={d} value={d}>{d}s</option>
+            ))}
+          </select>
+        )}
+        {selectedEntry && selectedEntry.modes.length > 1 && (
+          <select
+            className="flashboard-bubble-chip-select"
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+          >
+            {selectedEntry.modes.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {showSettings && (
+        <div className="flashboard-bubble-settings">
+          <div className="flashboard-bubble-field">
+            <label>Service</label>
+            <select
+              value={service}
+              onChange={(e) => handleServiceChange(e.target.value as CatalogEntry['service'])}
+            >
+              <option value="kieai">Kie.ai</option>
+              <option value="piapi">PiAPI</option>
+              <option value="cloud">Cloud</option>
+            </select>
+          </div>
+          <div className="flashboard-bubble-field">
+            <label>Model</label>
+            <select value={providerId} onChange={(e) => handleProviderChange(e.target.value)}>
+              {serviceProviders.map((e) => (
+                <option key={e.providerId} value={e.providerId}>{e.name}</option>
+              ))}
+            </select>
+          </div>
+          {selectedEntry && selectedEntry.versions.length > 1 && (
+            <div className="flashboard-bubble-field">
+              <label>Version</label>
+              <select value={version} onChange={(e) => setVersion(e.target.value)}>
+                {selectedEntry.versions.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="flashboard-bubble-field">
+            <label>Negative Prompt</label>
+            <input
+              type="text"
+              value={negativePrompt}
+              onChange={(e) => setNegativePrompt(e.target.value)}
+              placeholder="What to avoid..."
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

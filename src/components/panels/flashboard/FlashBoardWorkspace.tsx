@@ -4,7 +4,6 @@ import { selectActiveBoard } from '../../../stores/flashboardStore/selectors';
 import { FlashBoardToolbar } from './FlashBoardToolbar';
 import { FlashBoardCanvas } from './FlashBoardCanvas';
 import { FlashBoardComposer } from './FlashBoardComposer';
-import { FlashBoardInspector } from './FlashBoardInspector';
 import './FlashBoard.css';
 
 export function FlashBoardWorkspace() {
@@ -12,10 +11,7 @@ export function FlashBoardWorkspace() {
   const boards = useFlashBoardStore((s) => s.boards);
   const createBoard = useFlashBoardStore((s) => s.createBoard);
   const setActiveBoard = useFlashBoardStore((s) => s.setActiveBoard);
-  const composerOpen = useFlashBoardStore((s) => s.composer.isOpen);
-  const hasSelection = useFlashBoardStore((s) => s.selectedNodeIds.length > 0);
 
-  // Create a default board if none exists
   useEffect(() => {
     if (boards.length === 0) {
       createBoard('FlashBoard 1');
@@ -29,8 +25,7 @@ export function FlashBoardWorkspace() {
       <FlashBoardToolbar />
       <div className="flashboard-canvas-area">
         <FlashBoardCanvas />
-        {composerOpen && <FlashBoardComposer />}
-        {hasSelection && !composerOpen && <FlashBoardInspector />}
+        <FlashBoardComposer />
       </div>
     </div>
   );

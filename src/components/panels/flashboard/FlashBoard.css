@@ -92,14 +92,14 @@
 /* ─── Canvas ─── */
 
 .flashboard-canvas-area {
-  display: flex;
   flex: 1;
   overflow: hidden;
   position: relative;
 }
 
 .flashboard-canvas {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   position: relative;
   cursor: grab;
@@ -110,6 +110,12 @@
 
 .flashboard-canvas:active {
   cursor: grabbing;
+}
+
+.flashboard-canvas.drag-over {
+  background-color: rgba(79, 195, 247, 0.04);
+  outline: 2px dashed rgba(79, 195, 247, 0.3);
+  outline-offset: -2px;
 }
 
 .flashboard-canvas-inner {
@@ -143,6 +149,10 @@
 .flashboard-node.selected {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+
+.flashboard-node.reference {
+  border-style: dashed;
 }
 
 .flashboard-node-status {
@@ -190,6 +200,15 @@
   min-height: 0;
 }
 
+.flashboard-node-thumbnail {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
 .flashboard-node-prompt {
   font-size: 11px;
   color: var(--text-primary);
@@ -225,13 +244,6 @@
   transition: width 0.3s ease;
 }
 
-.flashboard-node-thumbnail {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  display: block;
-}
-
 .flashboard-node-error {
   font-size: 10px;
   color: #ef5350;
@@ -240,368 +252,207 @@
   white-space: nowrap;
 }
 
-/* ─── Composer ─── */
+/* ─── Context Menu ─── */
 
-.flashboard-composer {
-  width: 320px;
-  min-width: 320px;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.flashboard-composer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.flashboard-composer-close {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 16px;
-  padding: 2px;
-  line-height: 1;
-}
-
-.flashboard-composer-close:hover {
-  color: var(--text-primary);
-}
-
-.flashboard-composer-body {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-}
-
-.flashboard-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.flashboard-field label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.flashboard-field select,
-.flashboard-field textarea,
-.flashboard-field input[type="text"] {
-  background: var(--bg-input);
+.flashboard-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 160px;
+  background: var(--bg-elevated, #2a2a3e);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 6px 8px;
-  outline: none;
-}
-
-.flashboard-field select:focus,
-.flashboard-field textarea:focus,
-.flashboard-field input[type="text"]:focus {
-  border-color: var(--accent);
-}
-
-.flashboard-field textarea {
-  resize: vertical;
-  min-height: 60px;
-  font-family: inherit;
-}
-
-.flashboard-field-row {
-  display: flex;
-  gap: 8px;
-}
-
-.flashboard-field-row .flashboard-field {
-  flex: 1;
-}
-
-.flashboard-collapsible-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  background: none;
-  border: none;
-  padding: 0;
-  font-weight: 500;
-}
-
-.flashboard-collapsible-header:hover {
-  color: var(--text-primary);
-}
-
-.flashboard-collapsible-arrow {
-  font-size: 8px;
-  transition: transform 0.15s;
-}
-
-.flashboard-collapsible-arrow.open {
-  transform: rotate(90deg);
-}
-
-.flashboard-composer-footer {
-  padding: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.flashboard-generate-btn {
-  width: 100%;
-  padding: 8px;
-  border: none;
   border-radius: 6px;
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-size: 13px;
-  font-weight: 600;
+  padding: 4px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.flashboard-context-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
   cursor: pointer;
 }
 
-.flashboard-generate-btn:hover {
-  background: var(--accent-hover);
+.flashboard-context-item:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
 }
 
-.flashboard-generate-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ─── Inspector ─── */
-
-.flashboard-inspector {
-  width: 260px;
-  min-width: 260px;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.flashboard-inspector-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.flashboard-inspector-body {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-}
-
-.flashboard-inspector-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.flashboard-inspector-section h4 {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-.flashboard-inspector-section p {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-primary);
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.flashboard-inspector-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  width: fit-content;
-}
-
-.flashboard-inspector-status.draft {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-secondary);
-}
-
-.flashboard-inspector-status.queued {
-  background: rgba(255, 183, 77, 0.15);
-  color: #ffb74d;
-}
-
-.flashboard-inspector-status.processing {
-  background: rgba(79, 195, 247, 0.15);
-  color: #4fc3f7;
-}
-
-.flashboard-inspector-status.completed {
-  background: rgba(129, 199, 132, 0.15);
-  color: #81c784;
-}
-
-.flashboard-inspector-status.failed {
-  background: rgba(239, 83, 80, 0.15);
+.flashboard-context-item.danger {
   color: #ef5350;
 }
 
-.flashboard-inspector-status.canceled {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-disabled);
-}
-
-.flashboard-inspector-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.flashboard-inspector-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.flashboard-inspector-btn:hover {
-  background: var(--bg-hover);
-}
-
-.flashboard-inspector-btn.danger {
-  color: #ef5350;
-  border-color: rgba(239, 83, 80, 0.3);
-}
-
-.flashboard-inspector-btn.danger:hover {
+.flashboard-context-item.danger:hover {
   background: rgba(239, 83, 80, 0.1);
 }
 
-.flashboard-inspector-btn.primary {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-color: transparent;
+.flashboard-context-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
 }
 
-.flashboard-inspector-btn.primary:hover {
+/* ─── Floating Prompt Bubble ─── */
+
+.flashboard-bubble {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 360px;
+  background: var(--bg-elevated, #2a2a3e);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flashboard-bubble-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px;
+  z-index: 1;
+}
+
+.flashboard-bubble-close:hover {
+  color: var(--text-primary);
+}
+
+.flashboard-bubble-prompt-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.flashboard-bubble-prompt {
+  flex: 1;
+  background: var(--bg-input, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 8px 10px;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  min-height: 40px;
+}
+
+.flashboard-bubble-prompt:focus {
+  border-color: var(--accent);
+}
+
+.flashboard-bubble-generate {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flashboard-bubble-generate:hover {
   background: var(--accent-hover);
 }
 
-/* ─── Reference Tray ─── */
+.flashboard-bubble-generate:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
-.flashboard-reference-tray {
+.flashboard-bubble-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.flashboard-bubble-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.flashboard-bubble-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.flashboard-bubble-chip-select {
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.flashboard-bubble-chip-select:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.flashboard-bubble-settings {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-color);
 }
 
-.flashboard-reference-tray h4 {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-secondary);
+.flashboard-bubble-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.flashboard-bubble-field label {
+  font-size: 10px;
+  color: var(--text-muted);
   font-weight: 500;
 }
 
-.flashboard-reference-slots {
-  display: flex;
-  gap: 8px;
-}
-
-.flashboard-reference-slot {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.flashboard-reference-slot label {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.flashboard-drop-zone {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border: 1px dashed var(--border-subtle);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  font-size: 10px;
-  cursor: pointer;
-  background: var(--bg-input);
-  transition: border-color 0.15s, background 0.15s;
-  overflow: hidden;
-  position: relative;
-}
-
-.flashboard-drop-zone:hover {
-  border-color: var(--accent);
-  background: var(--accent-subtle);
-}
-
-.flashboard-drop-zone.drag-over {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.flashboard-drop-zone img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.flashboard-drop-zone .remove-ref {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+.flashboard-bubble-field select,
+.flashboard-bubble-field input[type="text"] {
+  background: var(--bg-input, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
   color: var(--text-primary);
-  border: none;
-  cursor: pointer;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.15s;
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
 }
 
-.flashboard-drop-zone:hover .remove-ref {
-  opacity: 1;
+.flashboard-bubble-field select:focus,
+.flashboard-bubble-field input[type="text"]:focus {
+  border-color: var(--accent);
 }
 
 /* ─── Mode Toggle (in AIVideoPanel header) ─── */

@@ -1,23 +1,37 @@
 import { useCallback, useRef } from 'react';
 import { useFlashBoardStore } from '../../../stores/flashboardStore';
 import type { FlashBoardNode as FlashBoardNodeType } from '../../../stores/flashboardStore/types';
+import { useMediaStore } from '../../../stores/mediaStore';
 
 interface FlashBoardNodeProps {
   node: FlashBoardNodeType;
   isSelected: boolean;
   zoom: number;
+  onContextMenu: (e: React.MouseEvent, nodeId: string) => void;
 }
 
-export function FlashBoardNode({ node, isSelected, zoom }: FlashBoardNodeProps) {
+export function FlashBoardNode({ node, isSelected, zoom, onContextMenu }: FlashBoardNodeProps) {
   const moveNode = useFlashBoardStore((s) => s.moveNode);
   const setSelectedNodes = useFlashBoardStore((s) => s.setSelectedNodes);
   const openComposer = useFlashBoardStore((s) => s.openComposer);
 
   const dragRef = useRef<{ startX: number; startY: number; nodeX: number; nodeY: number } | null>(null);
 
-  const status = node.job?.status ?? 'draft';
+  const status = node.job?.status ?? (node.kind === 'reference' ? 'completed' : 'draft');
   const prompt = node.request?.prompt;
   const provider = node.request?.providerId;
+
+  // Get thumbnail for reference/completed nodes
+  const mediaFileId = node.result?.mediaFileId;
+  const thumbnailUrl = useMediaStore((s) => {
+    if (!mediaFileId) return undefined;
+    const file = s.files.find((f) => f.id === mediaFileId);
+    return file?.thumbnailUrl || file?.url;
+  });
+  const mediaName = useMediaStore((s) => {
+    if (!mediaFileId) return undefined;
+    return s.files.find((f) => f.id === mediaFileId)?.name;
+  });
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -54,12 +68,32 @@ export function FlashBoardNode({ node, isSelected, zoom }: FlashBoardNodeProps) 
 
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    openComposer(node.id);
-  }, [node.id, openComposer]);
+    if (node.kind === 'generation') {
+      openComposer(node.id);
+    }
+  }, [node.id, node.kind, openComposer]);
+
+  const handleRightClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedNodes([node.id]);
+    onContextMenu(e, node.id);
+  }, [node.id, setSelectedNodes, onContextMenu]);
+
+  // DnD: allow dragging completed/reference nodes to timeline
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    if (!mediaFileId) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.setData('application/x-media-file-id', mediaFileId);
+    e.dataTransfer.effectAllowed = 'copy';
+  }, [mediaFileId]);
+
+  const isReference = node.kind === 'reference';
 
   return (
     <div
-      className={`flashboard-node ${status} ${isSelected ? 'selected' : ''}`}
+      className={`flashboard-node ${status} ${isSelected ? 'selected' : ''} ${isReference ? 'reference' : ''}`}
       style={{
         left: node.position.x,
         top: node.position.y,
@@ -68,19 +102,27 @@ export function FlashBoardNode({ node, isSelected, zoom }: FlashBoardNodeProps) 
       }}
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
+      onContextMenu={handleRightClick}
+      draggable={!!mediaFileId}
+      onDragStart={handleDragStart}
     >
       <div className="flashboard-node-status" />
       <div className="flashboard-node-body">
-        {node.result && (
-          <div className="flashboard-node-preview">
-            {/* Thumbnail preview for completed nodes — media lookup handled by Agent D */}
-          </div>
+        {thumbnailUrl && (
+          <img className="flashboard-node-thumbnail" src={thumbnailUrl} alt="" />
         )}
-        <div className={`flashboard-node-prompt ${!prompt ? 'empty' : ''}`}>
-          {prompt || 'No prompt yet'}
-        </div>
-        {provider && (
-          <div className="flashboard-node-provider">{provider}</div>
+        {isReference && mediaName && (
+          <div className="flashboard-node-prompt">{mediaName}</div>
+        )}
+        {!isReference && (
+          <>
+            <div className={`flashboard-node-prompt ${!prompt ? 'empty' : ''}`}>
+              {prompt || 'No prompt yet'}
+            </div>
+            {provider && (
+              <div className="flashboard-node-provider">{provider}</div>
+            )}
+          </>
         )}
         {status === 'processing' && node.job?.progress != null && (
           <div className="flashboard-node-progress">
