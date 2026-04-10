@@ -64,6 +64,13 @@ export function generateMeshClipId(): string {
 }
 
 /**
+ * Generate a unique ID for camera clips.
+ */
+export function generateCameraClipId(): string {
+  return generateClipId('clip-camera');
+}
+
+/**
  * Generate a unique ID for composition clips.
  */
 export function generateCompClipId(): string {

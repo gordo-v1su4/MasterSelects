@@ -53,6 +53,7 @@ export interface GaussianLayerData {
 
 /** Render settings for a gaussian-splat clip */
 export interface GaussianSplatRenderSettings {
+  useNativeRenderer: boolean;
   maxSplats: number;
   splatScale: number;
   nearPlane: number;
@@ -84,6 +85,7 @@ export interface GaussianSplatSettings {
 
 export const DEFAULT_GAUSSIAN_SPLAT_SETTINGS: GaussianSplatSettings = {
   render: {
+    useNativeRenderer: false,
     maxSplats: 0,
     splatScale: 1.0,
     nearPlane: 1.0,

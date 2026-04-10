@@ -17,6 +17,7 @@ import type { PerformanceStats } from '../stats/PerformanceStats';
 import type { RenderLoop } from './RenderLoop';
 import { useRenderTargetStore } from '../../stores/renderTargetStore';
 import { useSliceStore } from '../../stores/sliceStore';
+import { useEngineStore } from '../../stores/engineStore';
 import { useTimelineStore } from '../../stores/timeline';
 import { reportRenderTime } from '../../services/performanceMonitor';
 import { Logger } from '../../services/logger';
@@ -27,9 +28,9 @@ import { flags } from '../featureFlags';
 import type { ThreeSceneRenderer } from '../three/ThreeSceneRenderer';
 import type { Layer3DData, CameraConfig } from '../three/types';
 import { DEFAULT_CAMERA_CONFIG } from '../three/types';
-import { useMediaStore } from '../../stores/mediaStore';
+import { useMediaStore, DEFAULT_SCENE_CAMERA_SETTINGS } from '../../stores/mediaStore';
 import { getGaussianSplatGpuRenderer } from '../gaussian/core/GaussianSplatGpuRenderer';
-import { buildSplatCamera } from '../gaussian/core/SplatCameraUtils';
+import { buildSplatCamera, resolveOrbitCameraPose } from '../gaussian/core/SplatCameraUtils';
 import { loadGaussianSplatAssetCached } from '../gaussian/loaders';
 import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../gaussian/types';
 
@@ -95,6 +96,212 @@ export class RenderDispatcher {
     this.deps = deps;
     // Legacy gaussian-avatar code stays on disk for migration/reference only.
     void this.processGaussianLayers;
+  }
+
+  private isNativeGaussianSplatSource(source: Layer['source'] | undefined): boolean {
+    if (source?.type !== 'gaussian-splat') return false;
+    return (
+      source.gaussianSplatSettings?.render.useNativeRenderer ??
+      DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.useNativeRenderer
+    ) === true;
+  }
+
+  private getApproximateSceneBounds(
+    layers3D: Layer3DData[],
+    width: number,
+    height: number,
+  ): { min: [number, number, number]; max: [number, number, number] } | undefined {
+    if (layers3D.length === 0) return undefined;
+
+    const outputAspect = width / Math.max(height, 1);
+    const worldHeight = 2;
+    const halfWorldW = (worldHeight * outputAspect) / 2;
+    const halfWorldH = worldHeight / 2;
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+
+    const includeBox = (
+      centerX: number,
+      centerY: number,
+      centerZ: number,
+      halfX: number,
+      halfY: number,
+      halfZ: number,
+    ) => {
+      minX = Math.min(minX, centerX - halfX);
+      minY = Math.min(minY, centerY - halfY);
+      minZ = Math.min(minZ, centerZ - halfZ);
+      maxX = Math.max(maxX, centerX + halfX);
+      maxY = Math.max(maxY, centerY + halfY);
+      maxZ = Math.max(maxZ, centerZ + halfZ);
+    };
+
+    for (const layer of layers3D) {
+      const centerX = layer.position.x * halfWorldW;
+      const centerY = -layer.position.y * halfWorldH;
+      const centerZ = layer.position.z;
+      const scaleX = Math.abs(layer.scale.x);
+      const scaleY = Math.abs(layer.scale.y);
+      const scaleZ = Math.abs(layer.scale.z ?? 1);
+
+      if (layer.gaussianSplatUrl) {
+        const splatBounds = this.splatSceneBounds.get(layer.clipId);
+        if (splatBounds) {
+          const localCenterX = (splatBounds.min[0] + splatBounds.max[0]) * 0.5;
+          const localCenterY = (splatBounds.min[1] + splatBounds.max[1]) * 0.5;
+          const localCenterZ = (splatBounds.min[2] + splatBounds.max[2]) * 0.5;
+          const halfX = ((splatBounds.max[0] - splatBounds.min[0]) * 0.5) * scaleX;
+          const halfY = ((splatBounds.max[1] - splatBounds.min[1]) * 0.5) * scaleY;
+          const halfZ = ((splatBounds.max[2] - splatBounds.min[2]) * 0.5) * scaleZ;
+          includeBox(
+            centerX + localCenterX * scaleX,
+            centerY + localCenterY * scaleY,
+            centerZ + localCenterZ * scaleZ,
+            Math.max(halfX, 0.01),
+            Math.max(halfY, 0.01),
+            Math.max(halfZ, 0.01),
+          );
+          continue;
+        }
+      }
+
+      if (layer.modelUrl || layer.meshType) {
+        includeBox(
+          centerX,
+          centerY,
+          centerZ,
+          Math.max(0.5 * scaleX, 0.05),
+          Math.max(0.5 * scaleY, 0.05),
+          Math.max(0.5 * scaleZ, 0.05),
+        );
+        continue;
+      }
+
+      const sourceAspect = layer.sourceWidth / Math.max(layer.sourceHeight, 1);
+      let planeW: number;
+      let planeH: number;
+      if (sourceAspect >= outputAspect) {
+        planeW = worldHeight * outputAspect;
+        planeH = planeW / sourceAspect;
+      } else {
+        planeH = worldHeight;
+        planeW = planeH * sourceAspect;
+      }
+
+      includeBox(
+        centerX,
+        centerY,
+        centerZ,
+        Math.max((planeW * scaleX) * 0.5, 0.01),
+        Math.max((planeH * scaleY) * 0.5, 0.01),
+        Math.max(0.01 * scaleZ, 0.01),
+      );
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+      return undefined;
+    }
+
+    return {
+      min: [minX, minY, minZ],
+      max: [maxX, maxY, maxZ],
+    };
+  }
+
+  private resolveSharedSceneCameraConfig(
+    layers3D: Layer3DData[],
+    width: number,
+    height: number,
+  ): CameraConfig {
+    const timelineStore = useTimelineStore.getState();
+    const buildCameraConfigFromClip = (
+      cameraClip: (typeof timelineStore.clips)[number],
+    ): CameraConfig | null => {
+      if (cameraClip.source?.type !== 'camera') {
+        return null;
+      }
+
+      const clipLocalTime = timelineStore.playheadPosition - cameraClip.startTime;
+      const transform = timelineStore.getInterpolatedTransform(cameraClip.id, clipLocalTime);
+      const cameraSettings = cameraClip.source.cameraSettings ?? DEFAULT_SCENE_CAMERA_SETTINGS;
+      const pose = resolveOrbitCameraPose(
+        {
+          position: transform.position,
+          scale: transform.scale,
+          rotation: transform.rotation,
+        },
+        {
+          nearPlane: cameraSettings.near,
+          farPlane: cameraSettings.far,
+          fov: cameraSettings.fov,
+        },
+        { width, height },
+        this.getApproximateSceneBounds(layers3D, width, height),
+      );
+
+      return {
+        position: pose.eye,
+        target: pose.target,
+        up: pose.up,
+        fov: pose.fovDegrees,
+        near: pose.near,
+        far: pose.far,
+        applyDefaultDistance: false,
+      };
+    };
+
+    const navClipId = useEngineStore.getState().gaussianSplatNavClipId;
+    const navCameraClip = navClipId
+      ? timelineStore.clips.find((clip) => clip.id === navClipId && clip.source?.type === 'camera')
+      : undefined;
+    const navCameraConfig = navCameraClip ? buildCameraConfigFromClip(navCameraClip) : null;
+    if (navCameraConfig) {
+      return navCameraConfig;
+    }
+
+    const videoTracks = timelineStore.tracks.filter(
+      (track) => track.type === 'video' && track.visible !== false,
+    );
+    const activeCameraTrack = [...videoTracks].reverse().find((track) =>
+      timelineStore.clips.some((clip) =>
+        clip.trackId === track.id &&
+        clip.source?.type === 'camera' &&
+        timelineStore.playheadPosition >= clip.startTime &&
+        timelineStore.playheadPosition < clip.startTime + clip.duration,
+      ),
+    );
+
+    if (activeCameraTrack) {
+      const activeCameraClip = timelineStore.clips.find((clip) =>
+        clip.trackId === activeCameraTrack.id &&
+        clip.source?.type === 'camera' &&
+        timelineStore.playheadPosition >= clip.startTime &&
+        timelineStore.playheadPosition < clip.startTime + clip.duration,
+      );
+
+      if (activeCameraClip?.source?.type === 'camera') {
+        const activeCameraConfig = buildCameraConfigFromClip(activeCameraClip);
+        if (activeCameraConfig) {
+          return activeCameraConfig;
+        }
+      }
+    }
+
+    const activeComp = useMediaStore.getState().getActiveComposition();
+    if (activeComp?.camera?.enabled) {
+      return {
+        ...DEFAULT_CAMERA_CONFIG,
+        ...activeComp.camera,
+        applyDefaultDistance: true,
+      };
+    }
+
+    return { ...DEFAULT_CAMERA_CONFIG };
   }
 
   async ensureGaussianSplatSceneLoaded(
@@ -302,7 +509,7 @@ export class RenderDispatcher {
       inputLayers: layers.length,
       collectedLayerData: layerData.length,
       after3DLayerData: layerData.length,
-      gaussianCandidates: layerData.filter((data) => data.layer.source?.type === 'gaussian-splat').length,
+      gaussianCandidates: layerData.filter((data) => this.isNativeGaussianSplatSource(data.layer.source)).length,
       gaussianRendered: 0,
       gaussianPendingLoad: 0,
       gaussianMissingUrl: 0,
@@ -483,10 +690,14 @@ export class RenderDispatcher {
     // Find 3D layers
     const indices3D: number[] = [];
     for (let i = 0; i < layerData.length; i++) {
+      const source = layerData[i].layer.source;
       if (
         layerData[i].layer.is3D &&
-        layerData[i].layer.source?.type !== 'gaussian-avatar' &&
-        layerData[i].layer.source?.type !== 'gaussian-splat'
+        source?.type !== 'gaussian-avatar' &&
+        (
+          source?.type !== 'gaussian-splat' ||
+          !this.isNativeGaussianSplatSource(source)
+        )
       ) {
         indices3D.push(i);
       }
@@ -546,14 +757,13 @@ export class RenderDispatcher {
         modelFileName: layer.name,  // Original filename for format detection
         meshType: src?.meshType ?? undefined,
         wireframe: layer.wireframe,
+        gaussianSplatUrl: src?.gaussianSplatUrl ?? undefined,
+        gaussianSplatFileName: src?.gaussianSplatFileName ?? undefined,
+        gaussianSplatSettings: src?.gaussianSplatSettings ?? undefined,
       });
     }
 
-    // Get camera config from active composition
-    const activeComp = useMediaStore.getState().getActiveComposition();
-    const cameraConfig: CameraConfig = activeComp?.camera
-      ? { ...DEFAULT_CAMERA_CONFIG, ...activeComp.camera }
-      : DEFAULT_CAMERA_CONFIG;
+    const cameraConfig = this.resolveSharedSceneCameraConfig(layers3D, width, height);
 
     // Render the 3D scene
     const canvas = renderer.renderScene(layers3D, cameraConfig, width, height);
@@ -792,7 +1002,7 @@ export class RenderDispatcher {
   } {
     let gaussianCandidates = 0;
     for (let i = 0; i < layerData.length; i++) {
-      if (layerData[i].layer.source?.type === 'gaussian-splat') {
+      if (this.isNativeGaussianSplatSource(layerData[i].layer.source)) {
         gaussianCandidates++;
       }
     }
@@ -817,11 +1027,12 @@ export class RenderDispatcher {
     // Process each gaussian-splat layer individually (reverse iteration for safe splice)
     for (let i = layerData.length - 1; i >= 0; i--) {
       const data = layerData[i];
-      if (data.layer.source?.type !== 'gaussian-splat') continue;
+      const source = data.layer.source;
+      if (source?.type !== 'gaussian-splat' || !this.isNativeGaussianSplatSource(source)) continue;
 
       const clipId = data.layer.sourceClipId || data.layer.id;
-      const splatUrl = data.layer.source.gaussianSplatUrl;
-      const settings = data.layer.source.gaussianSplatSettings;
+      const splatUrl = source.gaussianSplatUrl;
+      const settings = source.gaussianSplatSettings;
       const renderSettings = settings?.render ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render;
       const liveSortFrequency = isRealtimePlayback
         ? (renderSettings.sortFrequency === 0
@@ -841,7 +1052,7 @@ export class RenderDispatcher {
         this.loadAndUploadSplatScene(
           clipId,
           splatUrl,
-          data.layer.source.gaussianSplatFileName ?? data.layer.name,
+          source.gaussianSplatFileName ?? data.layer.name,
           renderer,
         );
         summary.pendingLoad++;
@@ -863,7 +1074,7 @@ export class RenderDispatcher {
       const textureView = renderer.renderToTexture(
         clipId, camera, { width, height }, gaussianCommandEncoder,
         {
-          clipLocalTime: data.layer.source.mediaTime,
+          clipLocalTime: source.mediaTime,
           backgroundColor: renderSettings.backgroundColor,
           maxSplats: renderSettings.maxSplats,
           particleSettings: settings?.particle,

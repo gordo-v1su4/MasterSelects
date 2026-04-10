@@ -9060,6 +9060,43 @@ input[type="checkbox"] {
   display: block;
 }
 
+/* Clip color submenu grid */
+.clip-color-submenu {
+  padding: 6px !important;
+  min-width: auto !important;
+}
+
+.clip-color-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+}
+
+.clip-color-grid .label-picker-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s;
+}
+
+.clip-color-grid .label-picker-swatch:hover {
+  transform: scale(1.25);
+  outline: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.clip-color-grid .label-picker-swatch.active {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.clip-color-grid .label-picker-swatch.none {
+  border: 1px solid var(--border-color, #555);
+}
+
 /* ========== MASK SECTION STYLES ========== */
 .masks-section .section-header-with-button {
   display: flex;

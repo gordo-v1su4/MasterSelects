@@ -125,8 +125,11 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         textProperties: clip.textProperties,
         // Solid clip support
         solidColor: clip.source?.type === 'solid' ? (clip.solidColor || clip.name.replace('Solid ', '')) : undefined,
+        // Clip label color
         // 3D layer support
         is3D: clip.is3D || undefined,
+        meshType: clip.meshType,
+        cameraSettings: clip.source?.type === 'camera' ? clip.source.cameraSettings : undefined,
         // Gaussian avatar blendshapes
         gaussianBlendshapes: clip.source?.type === 'gaussian-avatar' ? clip.source.gaussianBlendshapes : undefined,
         // Gaussian splat settings
@@ -898,6 +901,7 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
           trackId: serializedClip.trackId,
           name: serializedClip.name,
           file: new File([], 'text-clip.txt', { type: 'text/plain' }),
+          mediaFileId: serializedClip.mediaFileId || undefined,
           startTime: serializedClip.startTime,
           duration: serializedClip.duration,
           inPoint: serializedClip.inPoint,
@@ -905,6 +909,7 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
           source: {
             type: 'text',
             textCanvas,
+            mediaFileId: serializedClip.mediaFileId || undefined,
             naturalDuration: serializedClip.duration,
           },
           transform: serializedClip.transform,
@@ -944,6 +949,7 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
           trackId: serializedClip.trackId,
           name: serializedClip.name,
           file: new File([], 'solid-clip.dat', { type: 'application/octet-stream' }),
+          mediaFileId: serializedClip.mediaFileId || undefined,
           startTime: serializedClip.startTime,
           duration: serializedClip.duration,
           inPoint: serializedClip.inPoint,
@@ -951,6 +957,7 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
           source: {
             type: 'solid',
             textCanvas: canvas,
+            mediaFileId: serializedClip.mediaFileId || undefined,
             naturalDuration: serializedClip.duration,
           },
           transform: serializedClip.transform,
@@ -967,6 +974,79 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         }));
 
         log.debug('Restored solid clip', { clip: serializedClip.name, color });
+        continue;
+      }
+
+      // Camera clips - restore shared scene camera controls
+      if (serializedClip.sourceType === 'camera') {
+        const { DEFAULT_SCENE_CAMERA_SETTINGS } = await import('../mediaStore');
+
+        const cameraClip: TimelineClip = {
+          id: serializedClip.id,
+          trackId: serializedClip.trackId,
+          name: serializedClip.name || 'Camera',
+          file: new File([], 'camera-clip.dat', { type: 'application/octet-stream' }),
+          mediaFileId: serializedClip.mediaFileId || undefined,
+          startTime: serializedClip.startTime,
+          duration: serializedClip.duration,
+          inPoint: serializedClip.inPoint,
+          outPoint: serializedClip.outPoint,
+          source: {
+            type: 'camera',
+            cameraSettings: serializedClip.cameraSettings || { ...DEFAULT_SCENE_CAMERA_SETTINGS },
+            mediaFileId: serializedClip.mediaFileId || undefined,
+            naturalDuration: Number.MAX_SAFE_INTEGER,
+          },
+          transform: serializedClip.transform,
+          effects: serializedClip.effects || [],
+          masks: serializedClip.masks,
+          speed: serializedClip.speed,
+          preservesPitch: serializedClip.preservesPitch,
+          isLoading: false,
+        };
+
+        set(state => ({
+          clips: [...state.clips, cameraClip],
+        }));
+
+        log.debug('Restored camera clip', { clip: serializedClip.name });
+        continue;
+      }
+
+      // Primitive mesh clips - restore without a backing media file
+      if (serializedClip.sourceType === 'model' && serializedClip.meshType) {
+        const meshClip: TimelineClip = {
+          id: serializedClip.id,
+          trackId: serializedClip.trackId,
+          name: serializedClip.name || serializedClip.meshType,
+          file: new File([], `mesh-${serializedClip.meshType}.dat`, { type: 'application/octet-stream' }),
+          mediaFileId: serializedClip.mediaFileId || undefined,
+          startTime: serializedClip.startTime,
+          duration: serializedClip.duration,
+          inPoint: serializedClip.inPoint,
+          outPoint: serializedClip.outPoint,
+          source: {
+            type: 'model',
+            meshType: serializedClip.meshType,
+            mediaFileId: serializedClip.mediaFileId || undefined,
+            naturalDuration: Number.MAX_SAFE_INTEGER,
+          },
+          transform: serializedClip.transform,
+          effects: serializedClip.effects || [],
+          masks: serializedClip.masks,
+          speed: serializedClip.speed,
+          preservesPitch: serializedClip.preservesPitch,
+          is3D: serializedClip.is3D ?? true,
+          meshType: serializedClip.meshType,
+          wireframe: false,
+          isLoading: false,
+        };
+
+        set(state => ({
+          clips: [...state.clips, meshClip],
+        }));
+
+        log.debug('Restored mesh clip', { clip: serializedClip.name, meshType: serializedClip.meshType });
         continue;
       }
 
@@ -1023,6 +1103,7 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         preservesPitch: serializedClip.preservesPitch,
         // 3D layer support
         is3D: serializedClip.is3D,
+        meshType: serializedClip.meshType,
       };
 
       // Add clip to state

@@ -33,6 +33,7 @@ interface UseExternalDropProps {
   addTextClip: (trackId: string, startTime: number, duration?: number, skipMediaItem?: boolean) => Promise<string | null>;
   addSolidClip: (trackId: string, startTime: number, color?: string, duration?: number, skipMediaItem?: boolean) => string | null;
   addMeshClip: (trackId: string, startTime: number, meshType: import('../../../stores/mediaStore/types').MeshPrimitiveType, duration?: number, skipMediaItem?: boolean) => string | null;
+  addCameraClip: (trackId: string, startTime: number, duration?: number, skipMediaItem?: boolean) => string | null;
 }
 
 interface UseExternalDropReturn {
@@ -90,6 +91,7 @@ export function useExternalDrop({
   addTextClip,
   addSolidClip,
   addMeshClip,
+  addCameraClip,
 }: UseExternalDropProps): UseExternalDropReturn {
   const [externalDrag, setExternalDrag] = useState<ExternalDragState | null>(null);
   const dragCounterRef = useRef(0);
@@ -290,6 +292,26 @@ export function useExternalDrop({
       const meshItem = mediaStore.meshItems.find((m) => m.id === meshItemId);
       return {
         duration: meshItem?.duration ?? 10,
+        hasAudio: false,
+        isAudio: false,
+        isVideo: true,
+      };
+    }
+
+    if (e.dataTransfer.types.includes('application/x-camera-item-id')) {
+      if (dragPayload?.kind === 'camera') {
+        return {
+          duration: dragPayload.duration ?? 10,
+          hasAudio: false,
+          isAudio: false,
+          isVideo: true,
+        };
+      }
+
+      const cameraItemId = e.dataTransfer.getData('application/x-camera-item-id');
+      const cameraItem = mediaStore.cameraItems.find((c) => c.id === cameraItemId);
+      return {
+        duration: cameraItem?.duration ?? 10,
         hasAudio: false,
         isAudio: false,
         isVideo: true,
@@ -621,6 +643,43 @@ export function useExternalDrop({
         return;
       }
 
+      if (e.dataTransfer.types.includes('application/x-camera-item-id')) {
+        const cameraItemId = dragPayload?.kind === 'camera'
+          ? dragPayload.id
+          : e.dataTransfer.getData('application/x-camera-item-id');
+        const cameraItem = cameraItemId
+          ? mediaStore.cameraItems.find((c) => c.id === cameraItemId)
+          : null;
+        const duration = dragPayload?.kind === 'camera'
+          ? dragPayload.duration ?? 10
+          : cameraItem?.duration ?? 10;
+
+        if (isAudioTrack) {
+          setExternalDrag({
+            trackId: '',
+            startTime,
+            x: e.clientX,
+            y: e.clientY,
+            duration,
+            hasAudio: false,
+            isVideo: true,
+            isAudio: false,
+          });
+          return;
+        }
+        setExternalDrag(buildTrackPreviewState({
+          trackId,
+          desiredStartTime: startTime,
+          x: e.clientX,
+          y: e.clientY,
+          duration,
+          hasAudio: false,
+          isVideo: true,
+          isAudio: false,
+        }));
+        return;
+      }
+
       if (e.dataTransfer.types.includes('Files')) {
         let dur: number | undefined;
         let hasAudio: boolean | undefined;
@@ -697,9 +756,10 @@ export function useExternalDrop({
       const isMediaPanelDrag = e.dataTransfer.types.includes('application/x-media-file-id');
       const isTextDrag = e.dataTransfer.types.includes('application/x-text-item-id');
       const isSolidDrag = e.dataTransfer.types.includes('application/x-solid-item-id');
+      const isCameraDrag = e.dataTransfer.types.includes('application/x-camera-item-id');
       const isFileDrag = e.dataTransfer.types.includes('Files');
 
-      if (isCompDrag || isMediaPanelDrag || isTextDrag || isSolidDrag || isFileDrag) {
+      if (isCompDrag || isMediaPanelDrag || isTextDrag || isSolidDrag || isCameraDrag || isFileDrag) {
         const desiredStartTime = getDesiredStartTime(e.clientX);
         const preview = resolveImmediateDragPreview(e);
 
@@ -726,8 +786,8 @@ export function useExternalDrop({
           return;
         }
 
-        // Text, solid, composition items can only go on video tracks
-        if ((isTextDrag || isSolidDrag || isCompDrag) && isAudioTrack) {
+        // Text, solid, camera, and composition items can only go on video tracks
+        if ((isTextDrag || isSolidDrag || isCameraDrag || isCompDrag) && isAudioTrack) {
           e.dataTransfer.dropEffect = 'none';
           setExternalDrag((prev) => prev ? {
             ...prev,
@@ -966,6 +1026,17 @@ export function useExternalDrop({
         }
       }
 
+      // Handle camera item drag (skipMediaItem=true since it already exists in media panel)
+      const cameraItemId = e.dataTransfer.getData('application/x-camera-item-id');
+      if (cameraItemId) {
+        const mediaStore = useMediaStore.getState();
+        const cameraItem = mediaStore.cameraItems.find((c) => c.id === cameraItemId);
+        if (cameraItem) {
+          addCameraClip(newTrackId, startTime, cameraItem.duration, true);
+          return;
+        }
+      }
+
       // Handle media panel drag
       if (mediaFileId) {
         const mediaStore = useMediaStore.getState();
@@ -1020,7 +1091,7 @@ export function useExternalDrop({
         }
       }
     },
-    [scrollX, pixelToTime, addTrack, addCompClip, addClip, addTextClip, addSolidClip, addMeshClip, externalDrag, timelineRef]
+    [scrollX, pixelToTime, addTrack, addCompClip, addClip, addTextClip, addSolidClip, addMeshClip, addCameraClip, externalDrag, timelineRef]
   );
 
   // Handle external file drop on track
@@ -1082,6 +1153,17 @@ export function useExternalDrop({
         const meshItem = mediaStore.meshItems.find((m) => m.id === meshItemId);
         if (meshItem && isVideoTrack) {
           addMeshClip(trackId, resolveDropStartTime(meshItem.duration), meshItem.meshType, meshItem.duration, true);
+          return;
+        }
+      }
+
+      // Handle camera item drag from media panel (skipMediaItem=true since it already exists)
+      const cameraItemId = e.dataTransfer.getData('application/x-camera-item-id');
+      if (cameraItemId) {
+        const mediaStore = useMediaStore.getState();
+        const cameraItem = mediaStore.cameraItems.find((c) => c.id === cameraItemId);
+        if (cameraItem && isVideoTrack) {
+          addCameraClip(trackId, resolveDropStartTime(cameraItem.duration), cameraItem.duration, true);
           return;
         }
       }
@@ -1175,7 +1257,7 @@ export function useExternalDrop({
         }
       }
     },
-    [addCompClip, addClip, addTextClip, addSolidClip, addMeshClip, externalDrag, tracks, getDesiredStartTime, resolveTrackStartTime]
+    [addCompClip, addClip, addTextClip, addSolidClip, addMeshClip, addCameraClip, externalDrag, tracks, getDesiredStartTime, resolveTrackStartTime]
   );
 
   // Container-level drag leave: fully clear externalDrag when cursor leaves the timeline area

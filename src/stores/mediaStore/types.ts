@@ -3,7 +3,7 @@
 import type { CompositionTimelineData, TranscriptWord, TranscriptStatus, AnalysisStatus } from '../../types';
 
 // Media item types
-export type MediaType = 'video' | 'audio' | 'image' | 'composition' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
+export type MediaType = 'video' | 'audio' | 'image' | 'composition' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
 
 // Proxy status for video files
 export type ProxyStatus = 'none' | 'generating' | 'ready' | 'error';
@@ -114,6 +114,24 @@ export interface MeshItem extends MediaItem {
   duration: number;   // Default duration when added to timeline
 }
 
+export interface SceneCameraSettings {
+  fov: number;
+  near: number;
+  far: number;
+}
+
+export const DEFAULT_SCENE_CAMERA_SETTINGS: SceneCameraSettings = {
+  fov: 60,
+  near: 0.1,
+  far: 1000,
+};
+
+export interface CameraItem extends MediaItem {
+  type: 'camera';
+  duration: number;
+  cameraSettings: SceneCameraSettings;
+}
+
 // 3D camera configuration for compositions
 export interface CompositionCamera {
   enabled: boolean;
@@ -156,7 +174,7 @@ export interface MediaFolder {
 }
 
 // Union type for all items
-export type ProjectItem = MediaFile | Composition | MediaFolder | TextItem | SolidItem | MeshItem;
+export type ProjectItem = MediaFile | Composition | MediaFolder | TextItem | SolidItem | MeshItem | CameraItem;
 
 // Slice creator type for mediaStore
 export type MediaSliceCreator<T> = (
@@ -173,6 +191,7 @@ export interface MediaState {
   textItems: TextItem[];
   solidItems: SolidItem[];
   meshItems: MeshItem[];
+  cameraItems: CameraItem[];
 
   // Active composition
   activeCompositionId: string | null;

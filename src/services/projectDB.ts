@@ -112,6 +112,7 @@ export interface StoredProject {
     textItems?: unknown[];
     solidItems?: unknown[];
     meshItems?: unknown[];
+    cameraItems?: unknown[];
   };
 }
 

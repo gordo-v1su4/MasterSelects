@@ -197,6 +197,11 @@ export interface MeshClipActions {
   addMeshClip: (trackId: string, startTime: number, meshType: import('../mediaStore/types').MeshPrimitiveType, duration?: number, skipMediaItem?: boolean) => string | null;
 }
 
+// Camera clip actions (shared Three.js scene camera)
+export interface CameraClipActions {
+  addCameraClip: (trackId: string, startTime: number, duration?: number, skipMediaItem?: boolean) => string | null;
+}
+
 // Clip effect actions (extracted to clipEffectSlice)
 export interface ClipEffectActions {
   addClipEffect: (clipId: string, effectType: string) => void;
@@ -241,7 +246,7 @@ export interface CoreClipActions {
 }
 
 // Combined ClipActions = all sub-interfaces
-export type ClipActions = CoreClipActions & TextClipActions & SolidClipActions & MeshClipActions & ClipEffectActions & LinkedGroupActions & DownloadClipActions;
+export type ClipActions = CoreClipActions & TextClipActions & SolidClipActions & MeshClipActions & CameraClipActions & ClipEffectActions & LinkedGroupActions & DownloadClipActions;
 
 // Playback actions interface
 export interface PlaybackActions {
@@ -387,7 +392,7 @@ export interface ClipboardClipData {
   duration: number;
   inPoint: number;
   outPoint: number;
-  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
+  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
   naturalDuration?: number;
   transform: ClipTransform;
   effects: Effect[];
@@ -399,6 +404,7 @@ export interface ClipboardClipData {
   preservesPitch?: boolean;
   textProperties?: import('../../types').TextClipProperties;
   solidColor?: string;
+  cameraSettings?: import('../mediaStore/types').SceneCameraSettings;
   // Visual data (thumbnails, waveforms)
   thumbnails?: string[];
   waveform?: number[];

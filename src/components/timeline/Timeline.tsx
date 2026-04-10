@@ -105,7 +105,7 @@ export function Timeline() {
 
   // Clip actions
   const {
-    addClip, addCompClip, addTextClip, addSolidClip, addMeshClip, moveClip, trimClip,
+    addClip, addCompClip, addTextClip, addSolidClip, addMeshClip, addCameraClip, moveClip, trimClip,
     removeClip, selectClip, unlinkGroup, splitClip, splitClipAtPlayhead,
     toggleClipReverse, updateClipTransform, setClipParent, generateWaveformForClip,
     addClipEffect,
@@ -283,6 +283,7 @@ export function Timeline() {
     addTextClip,
     addSolidClip,
     addMeshClip,
+    addCameraClip,
   });
 
   // Transition drop handling for drag-and-drop transitions between clips

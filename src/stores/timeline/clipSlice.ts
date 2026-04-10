@@ -398,7 +398,7 @@ export const createClipSlice: SliceCreator<CoreClipActions> = (set, get) => ({
       const targetTrack = tracks.find(t => t.id === newTrackId);
       const sourceType = movingClip.source?.type;
       if (targetTrack && sourceType) {
-        if ((sourceType === 'video' || sourceType === 'image') && targetTrack.type !== 'video') return;
+        if ((sourceType === 'video' || sourceType === 'image' || sourceType === 'camera') && targetTrack.type !== 'video') return;
         if (sourceType === 'audio' && targetTrack.type !== 'audio') return;
       }
     }

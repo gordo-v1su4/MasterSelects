@@ -3,6 +3,15 @@
 
 import type { SplatCameraParams } from './GaussianSplatGpuRenderer';
 
+export interface OrbitCameraPose {
+  eye: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+  up: { x: number; y: number; z: number };
+  fovDegrees: number;
+  near: number;
+  far: number;
+}
+
 /**
  * Build view + projection matrices from a layer's transform properties.
  *
@@ -19,13 +28,48 @@ export function buildSplatCamera(
     scale: { x: number; y: number; z?: number };
     rotation: number | { x: number; y: number; z: number };
   },
-  settings: { nearPlane: number; farPlane: number },
+  settings: { nearPlane: number; farPlane: number; fov?: number },
   viewport: { width: number; height: number },
   sceneBounds?: {
     min: [number, number, number];
     max: [number, number, number];
   },
 ): SplatCameraParams {
+  const pose = resolveOrbitCameraPose(layer, settings, viewport, sceneBounds);
+  const fov = pose.fovDegrees * (Math.PI / 180);
+  const aspect = viewport.width / Math.max(1, viewport.height);
+
+  const viewMatrix = lookAt(
+    pose.eye.x, pose.eye.y, pose.eye.z,
+    pose.target.x, pose.target.y, pose.target.z,
+    pose.up.x, pose.up.y, pose.up.z,
+  );
+
+  const projectionMatrix = perspective(fov, aspect, pose.near, pose.far);
+
+  return {
+    viewMatrix,
+    projectionMatrix,
+    viewport,
+    fov,
+    near: pose.near,
+    far: pose.far,
+  };
+}
+
+export function resolveOrbitCameraPose(
+  layer: {
+    position: { x: number; y: number; z: number };
+    scale: { x: number; y: number; z?: number };
+    rotation: number | { x: number; y: number; z: number };
+  },
+  settings: { nearPlane: number; farPlane: number; fov?: number },
+  viewport: { width: number; height: number },
+  sceneBounds?: {
+    min: [number, number, number];
+    max: [number, number, number];
+  },
+): OrbitCameraPose {
   const DEG_TO_RAD = Math.PI / 180;
 
   // Extract orbit angles
@@ -61,13 +105,13 @@ export function buildSplatCamera(
   const distance = baseDistance / zoom;
 
   // Keep a stable field of view; "zoom" is handled as a dolly.
-  const fov = 60 * (Math.PI / 180);
+  const fovDegrees = settings.fov ?? 60;
+  const fov = fovDegrees * DEG_TO_RAD;
 
   const near = settings.nearPlane;
   const far = settings.farPlane;
-  const aspect = viewport.width / Math.max(1, viewport.height);
   const halfHeight = Math.tan(fov * 0.5) * distance;
-  const halfWidth = halfHeight * aspect;
+  const halfWidth = halfHeight * (viewport.width / Math.max(1, viewport.height));
 
   const eyeOffset = rotateOrbitVector(0, 0, distance, pitch, yaw, roll);
   const upVector = normalize(rotateOrbitVector(0, 1, 0, pitch, yaw, roll));
@@ -83,21 +127,11 @@ export function buildSplatCamera(
   const eyeY = targetY + eyeOffset[1];
   const eyeZ = targetZ + eyeOffset[2];
 
-  // Build view matrix (lookAt)
-  const viewMatrix = lookAt(
-    eyeX, eyeY, eyeZ,
-    targetX, targetY, targetZ,
-    cameraUpVector[0], cameraUpVector[1], cameraUpVector[2],
-  );
-
-  // Build projection matrix
-  const projectionMatrix = perspective(fov, aspect, near, far);
-
   return {
-    viewMatrix,
-    projectionMatrix,
-    viewport,
-    fov,
+    eye: { x: eyeX, y: eyeY, z: eyeZ },
+    target: { x: targetX, y: targetY, z: targetZ },
+    up: { x: cameraUpVector[0], y: cameraUpVector[1], z: cameraUpVector[2] },
+    fovDegrees,
     near,
     far,
   };

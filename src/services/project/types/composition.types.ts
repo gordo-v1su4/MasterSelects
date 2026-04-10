@@ -1,6 +1,8 @@
 // Composition-related types
 
 import type { ProjectKeyframe, ProjectMarker, ProjectEffect, ProjectMask, ProjectTransform } from './timeline.types';
+import type { MeshPrimitiveType, SceneCameraSettings } from '../../../stores/mediaStore/types';
+import type { GaussianSplatSettings } from '../../../engine/gaussian/types';
 
 export interface ProjectTrack {
   id: string;
@@ -56,12 +58,17 @@ export interface ProjectClip {
   compositionId?: string;
 
   // Additional clip metadata (for restoration)
-  sourceType?: 'video' | 'audio' | 'image' | 'text' | 'solid';
+  sourceType?: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
   naturalDuration?: number;
   linkedClipId?: string;
   linkedGroupId?: string;
   thumbnails?: string[];
   waveform?: number[];
+  meshType?: MeshPrimitiveType;
+  cameraSettings?: SceneCameraSettings;
+  gaussianBlendshapes?: Record<string, number>;
+  gaussianSplatSettings?: GaussianSplatSettings;
+  is3D?: boolean;
 
   // Text clip support
   textProperties?: any;

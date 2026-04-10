@@ -25,6 +25,7 @@ import { useLayerDrag } from './useLayerDrag';
 import { useSAM2Store } from '../../stores/sam2Store';
 import { renderScheduler } from '../../services/renderScheduler';
 import { engine } from '../../engine/WebGPUEngine';
+import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../../engine/gaussian/types';
 import type { PreviewPanelSource } from '../../types/dock';
 import {
   createPreviewPanelDataPatch,
@@ -302,13 +303,29 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     [clips, selectedClipId],
   );
 
-  const selectedGaussianSplatClip = useMemo(
-    () => (selectedClip?.source?.type === 'gaussian-splat' ? selectedClip : null),
+  const selectedCameraNavClip = useMemo(
+    () => {
+      if (!selectedClip?.source) return null;
+
+      if (selectedClip.source.type === 'camera') {
+        return selectedClip;
+      }
+
+      if (selectedClip.source.type !== 'gaussian-splat') {
+        return null;
+      }
+
+      const useNativeRenderer =
+        selectedClip.source.gaussianSplatSettings?.render.useNativeRenderer ??
+        DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.useNativeRenderer;
+
+      return useNativeRenderer ? selectedClip : null;
+    },
     [selectedClip],
   );
 
-  // Read fresh gaussian splat transform at call-site (avoids stale closure after keyframe edits)
-  const getFreshGaussianTransform = useCallback((clip: typeof selectedGaussianSplatClip) => {
+  // Read fresh nav transform at call-site to avoid stale closure after keyframe edits.
+  const getFreshCameraNavTransform = useCallback((clip: typeof selectedCameraNavClip) => {
     if (!clip) return null;
     const { playheadPosition: ph, getInterpolatedTransform } = useTimelineStore.getState();
     const clipLocalTime = ph - clip.startTime;
@@ -318,8 +335,8 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const gaussianNavEnabled = Boolean(
     isEditableSource &&
     !editMode &&
-    selectedGaussianSplatClip &&
-    gaussianSplatNavClipId === selectedGaussianSplatClip.id,
+    selectedCameraNavClip &&
+    gaussianSplatNavClipId === selectedCameraNavClip.id,
   );
 
   const isCanvasInteractionTarget = useCallback((target: EventTarget | null) => {
@@ -572,8 +589,8 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
 
   // Handle zoom with scroll wheel in edit mode
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (gaussianNavEnabled && selectedGaussianSplatClip && isCanvasInteractionTarget(e.target)) {
-      const freshTransform = getFreshGaussianTransform(selectedGaussianSplatClip);
+    if (gaussianNavEnabled && selectedCameraNavClip && isCanvasInteractionTarget(e.target)) {
+      const freshTransform = getFreshCameraNavTransform(selectedCameraNavClip);
       if (!freshTransform) return;
 
       e.preventDefault();
@@ -583,7 +600,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       const zoomFactor = Math.exp(-e.deltaY * 0.0025);
       const nextZoom = Math.max(0.05, Math.min(40, currentZoom * zoomFactor));
 
-      applyGaussianCameraValues(selectedGaussianSplatClip.id, {
+      applyGaussianCameraValues(selectedCameraNavClip.id, {
         scale: nextZoom,
       });
       return;
@@ -622,11 +639,11 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     containerSize,
     editMode,
     gaussianNavEnabled,
-    getFreshGaussianTransform,
+    getFreshCameraNavTransform,
     isCanvasInteractionTarget,
     scheduleGaussianWheelBatchEnd,
     applyGaussianCameraValues,
-    selectedGaussianSplatClip,
+    selectedCameraNavClip,
     viewPan,
     viewZoom,
   ]);
@@ -638,8 +655,8 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
 
   // Handle gaussian nav and edit-mode panning
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (gaussianNavEnabled && selectedGaussianSplatClip && isCanvasInteractionTarget(e.target)) {
-      const freshTransform = getFreshGaussianTransform(selectedGaussianSplatClip);
+    if (gaussianNavEnabled && selectedCameraNavClip && isCanvasInteractionTarget(e.target)) {
+      const freshTransform = getFreshCameraNavTransform(selectedCameraNavClip);
       if (!freshTransform) return;
 
       if (e.button === 0) {
@@ -648,7 +665,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
           endGaussianWheelBatch();
           startBatch('Gaussian pan');
           gaussianPanStart.current = {
-            clipId: selectedGaussianSplatClip.id,
+            clipId: selectedCameraNavClip.id,
             x: e.clientX,
             y: e.clientY,
             panX: freshTransform.position.x,
@@ -663,7 +680,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         endGaussianWheelBatch();
         startBatch('Gaussian orbit');
         gaussianOrbitStart.current = {
-          clipId: selectedGaussianSplatClip.id,
+          clipId: selectedCameraNavClip.id,
           x: e.clientX,
           y: e.clientY,
           pitch: freshTransform.rotation.x,
@@ -679,7 +696,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         endGaussianWheelBatch();
         startBatch('Gaussian pan');
         gaussianPanStart.current = {
-          clipId: selectedGaussianSplatClip.id,
+          clipId: selectedCameraNavClip.id,
           x: e.clientX,
           y: e.clientY,
           panX: freshTransform.position.x,
@@ -708,9 +725,9 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     editMode,
     endGaussianWheelBatch,
     gaussianNavEnabled,
-    getFreshGaussianTransform,
+    getFreshCameraNavTransform,
     isCanvasInteractionTarget,
-    selectedGaussianSplatClip,
+    selectedCameraNavClip,
     viewPan,
   ]);
 
@@ -923,7 +940,9 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         )}
         {gaussianNavEnabled && (
           <div className="preview-edit-hint">
-            Gaussian Nav: LMB orbit | MMB/RMB/Shift+LMB pan | Wheel zoom
+            {selectedCameraNavClip?.source?.type === 'camera'
+              ? 'Scene Camera Nav: LMB orbit | MMB/RMB/Shift+LMB pan | Wheel zoom'
+              : 'Gaussian Nav: LMB orbit | MMB/RMB/Shift+LMB pan | Wheel zoom'}
           </div>
         )}
 

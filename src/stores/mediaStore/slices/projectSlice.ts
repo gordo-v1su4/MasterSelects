@@ -1,6 +1,6 @@
 // Project persistence slice - save, load, init
 
-import type { Composition, MediaFile, MediaFolder, TextItem, SolidItem, MediaSliceCreator, ProxyStatus } from '../types';
+import type { Composition, MediaFile, MediaFolder, TextItem, SolidItem, CameraItem, MediaSliceCreator, ProxyStatus } from '../types';
 import { PROXY_FPS, DEFAULT_COMPOSITION } from '../constants';
 import { generateId } from '../helpers/importPipeline';
 import { projectDB, type StoredProject } from '../../../services/projectDB';
@@ -157,10 +157,11 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
         })
       );
 
-      // Restore textItems, solidItems, and meshItems from localStorage
+      // Restore generated media items from localStorage
       let restoredTextItems: TextItem[] = [];
       let restoredSolidItems: SolidItem[] = [];
       let restoredMeshItems: import('../types').MeshItem[] = [];
+      let restoredCameraItems: CameraItem[] = [];
       try {
         const storedText = localStorage.getItem('ms-textItems');
         if (storedText) restoredTextItems = JSON.parse(storedText);
@@ -173,6 +174,10 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
         const storedMesh = localStorage.getItem('ms-meshItems');
         if (storedMesh) restoredMeshItems = JSON.parse(storedMesh);
       } catch { /* ignore parse errors */ }
+      try {
+        const storedCamera = localStorage.getItem('ms-cameraItems');
+        if (storedCamera) restoredCameraItems = JSON.parse(storedCamera);
+      } catch { /* ignore parse errors */ }
 
       set({
         files: updatedFiles,
@@ -180,6 +185,7 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
         ...(restoredTextItems.length > 0 && { textItems: restoredTextItems }),
         ...(restoredSolidItems.length > 0 && { solidItems: restoredSolidItems }),
         ...(restoredMeshItems.length > 0 && { meshItems: restoredMeshItems }),
+        ...(restoredCameraItems.length > 0 && { cameraItems: restoredCameraItems }),
       });
       log.info(`Restored ${storedFiles.length} files from IndexedDB`);
     } catch (e) {
@@ -219,6 +225,7 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
         textItems: state.textItems,
         solidItems: state.solidItems,
         meshItems: state.meshItems,
+        cameraItems: state.cameraItems,
       },
     };
 
@@ -285,6 +292,7 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
         textItems: (project.data.textItems as TextItem[]) || [],
         solidItems: (project.data.solidItems as SolidItem[]) || [],
         meshItems: (project.data.meshItems as import('../types').MeshItem[]) || [],
+        cameraItems: (project.data.cameraItems as CameraItem[]) || [],
         activeCompositionId: null,
         openCompositionIds: (project.data.openCompositionIds as string[]) || [],
         expandedFolderIds: project.data.expandedFolderIds,
@@ -341,6 +349,7 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
       textItems: [],
       solidItems: [],
       meshItems: [],
+      cameraItems: [],
       activeCompositionId: newCompId,
       openCompositionIds: [newCompId],
       selectedIds: [],
@@ -360,6 +369,7 @@ export const createProjectSlice: MediaSliceCreator<ProjectActions> = (set, get) 
     localStorage.removeItem('ms-textItems');
     localStorage.removeItem('ms-solidItems');
     localStorage.removeItem('ms-meshItems');
+    localStorage.removeItem('ms-cameraItems');
 
     // Load empty timeline
     timelineStore.loadState(undefined);

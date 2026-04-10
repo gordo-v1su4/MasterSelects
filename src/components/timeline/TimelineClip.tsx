@@ -76,14 +76,30 @@ function TimelineClipComponent({
       const file = s.files.find(f => f.id === mediaFileId);
       if (file?.labelColor && file.labelColor !== 'none') return getLabelHex(file.labelColor);
     }
-    // Check solid items and text items by matching clip name as fallback
+    // Check special item types — by mediaFileId first, then fallback by name/type
     if (clip.source?.type === 'solid') {
-      const solid = s.solidItems.find(si => si.id === mediaFileId);
+      const solid = mediaFileId
+        ? s.solidItems.find(si => si.id === mediaFileId)
+        : s.solidItems.find(si => si.name === clip.name);
       if (solid?.labelColor && solid.labelColor !== 'none') return getLabelHex(solid.labelColor);
     }
     if (clip.source?.type === 'text') {
-      const text = s.textItems.find(ti => ti.id === mediaFileId);
+      const text = mediaFileId
+        ? s.textItems.find(ti => ti.id === mediaFileId)
+        : s.textItems.find(ti => ti.name === clip.name);
       if (text?.labelColor && text.labelColor !== 'none') return getLabelHex(text.labelColor);
+    }
+    if (clip.source?.type === 'model') {
+      const mesh = mediaFileId
+        ? (s.meshItems || []).find(m => m.id === mediaFileId)
+        : (s.meshItems || []).find(m => m.name === clip.name || m.meshType === clip.meshType);
+      if (mesh?.labelColor && mesh.labelColor !== 'none') return getLabelHex(mesh.labelColor);
+    }
+    if (clip.source?.type === 'camera') {
+      const cam = mediaFileId
+        ? (s.cameraItems || []).find(c => c.id === mediaFileId)
+        : (s.cameraItems || [])[0];
+      if (cam?.labelColor && cam.labelColor !== 'none') return getLabelHex(cam.labelColor);
     }
     return null;
   });
@@ -168,6 +184,7 @@ function TimelineClipComponent({
 
   // Determine if this is a solid clip
   const isSolidClip = clip.source?.type === 'solid';
+  const isCameraClip = clip.source?.type === 'camera';
 
   const isGeneratingProxy = proxyStatus === 'generating';
   const hasProxy = proxyStatus === 'ready';
@@ -190,7 +207,7 @@ function TimelineClipComponent({
     const deltaX = clipTrim.currentX - clipTrim.startX;
     const deltaTime = pixelToTime(deltaX);
     const sourceType = clip.source?.type;
-    const isInfiniteClip = sourceType === 'text' || sourceType === 'image' || sourceType === 'solid';
+    const isInfiniteClip = sourceType === 'text' || sourceType === 'image' || sourceType === 'solid' || sourceType === 'camera';
     const maxDuration = isInfiniteClip
       ? Number.MAX_SAFE_INTEGER
       : (clip.source?.naturalDuration || clip.duration);
@@ -295,7 +312,7 @@ function TimelineClipComponent({
   }
 
   // Determine clip type class (audio, video, text, or image)
-  const clipTypeClass = isSolidClip ? 'solid' : isTextClip ? 'text' : isAudioClip ? 'audio' : (clip.source?.type || 'video');
+  const clipTypeClass = isSolidClip ? 'solid' : isTextClip ? 'text' : isCameraClip ? 'camera' : isAudioClip ? 'audio' : (clip.source?.type || 'video');
 
   // Check if this clip is part of a multi-select drag
   const isInMultiSelectDrag = clipDrag?.multiSelectClipIds?.includes(clip.id) && clipDrag.multiSelectTimeDelta !== undefined;
@@ -710,6 +727,9 @@ function TimelineClipComponent({
           )}
           {isTextClip && (
             <span className="clip-text-icon" title="Text Clip">T</span>
+          )}
+          {isCameraClip && (
+            <span className="clip-text-icon" title="Camera Clip">C</span>
           )}
           <span className="clip-name">{isTextClip && clip.textProperties ? clip.textProperties.text.slice(0, 30) || 'Text' : clip.name}</span>
           {/* PickWhip disabled */}

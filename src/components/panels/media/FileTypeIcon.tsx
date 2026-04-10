@@ -74,6 +74,16 @@ export const FileTypeIcon = memo(({ type, large }: FileTypeIconProps) => {
           <path d="M8 4V13.5M4 6.5L12 11M12 6.5L4 11" stroke="#6ab8b8" strokeWidth="0.5" opacity="0.6"/>
         </svg>
       );
+    case 'camera':
+      return (
+        <svg style={style} viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="2" width="14" height="12" rx="1.5" fill="#5a4f3a" stroke="#b49a64" strokeWidth="0.7"/>
+          <rect x="4.2" y="5.2" width="7.6" height="5.6" rx="0.8" fill="#3d3526" stroke="#d5bf84" strokeWidth="0.7"/>
+          <circle cx="8" cy="8" r="1.7" fill="#d5bf84" opacity="0.9"/>
+          <circle cx="8" cy="8" r="0.7" fill="#6e5d39"/>
+          <path d="M5 5.2L6 4h4l1 1.2" stroke="#d5bf84" strokeWidth="0.7" strokeLinecap="round"/>
+        </svg>
+      );
     case 'gaussian-avatar':
       return (
         <svg style={style} viewBox="0 0 16 16" fill="none">
@@ -222,6 +232,17 @@ const LargeIcon = memo(({ type, style }: { type?: string; style: React.CSSProper
           <circle cx="36" cy="19" r="1.5" fill="#aaeaea"/>
           <circle cx="12" cy="19" r="1.5" fill="#aaeaea"/>
           <circle cx="24" cy="40" r="1.5" fill="#aaeaea"/>
+        </svg>
+      );
+    case 'camera':
+      return (
+        <svg style={style} viewBox="0 0 48 48" fill="none">
+          <rect x="4" y="8" width="40" height="32" rx="3" fill="#56492f"/>
+          <rect x="4" y="8" width="40" height="32" rx="3" stroke="#c7a86d" strokeWidth="1"/>
+          <path d="M14 16h6l2-3h4l2 3h6c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H14c-1.1 0-2-.9-2-2V18c0-1.1.9-2 2-2Z" fill="#30281b" stroke="#d8bc82" strokeWidth="1"/>
+          <circle cx="24" cy="24" r="6.5" fill="#d8bc82" opacity="0.9"/>
+          <circle cx="24" cy="24" r="3" fill="#6c5a36"/>
+          <circle cx="34" cy="19" r="1.5" fill="#d8bc82" opacity="0.85"/>
         </svg>
       );
     case 'gaussian-avatar':

@@ -90,6 +90,11 @@ function convertCompositions(compositions: Composition[]): ProjectComposition[] 
       linkedClipId: c.linkedClipId,
       linkedGroupId: c.linkedGroupId,
       waveform: c.waveform,
+      meshType: c.source?.meshType || c.meshType,
+      cameraSettings: c.source?.cameraSettings || c.cameraSettings,
+      gaussianBlendshapes: c.source?.gaussianBlendshapes || c.gaussianBlendshapes,
+      gaussianSplatSettings: c.source?.gaussianSplatSettings || c.gaussianSplatSettings,
+      is3D: c.is3D || undefined,
       startTime: c.startTime,
       duration: c.duration,
       inPoint: c.inPoint || 0,
@@ -270,10 +275,11 @@ export async function syncStoresToProject(): Promise<void> {
       lastSeenChangelogVersion: settingsState.lastSeenChangelogVersion,
     };
 
-    // Save text, solid, and mesh items
+    // Save generated media items
     (projectData as any).textItems = freshState.textItems;
     (projectData as any).solidItems = freshState.solidItems;
     (projectData as any).meshItems = freshState.meshItems;
+    (projectData as any).cameraItems = freshState.cameraItems;
   }
 
   log.info(' Synced stores to project');

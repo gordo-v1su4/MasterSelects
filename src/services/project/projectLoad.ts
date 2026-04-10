@@ -256,6 +256,10 @@ function convertProjectCompositionToStore(
         linkedClipId: c.linkedClipId,
         linkedGroupId: c.linkedGroupId,
         waveform: c.waveform,
+        meshType: c.meshType,
+        cameraSettings: c.cameraSettings,
+        gaussianBlendshapes: c.gaussianBlendshapes,
+        gaussianSplatSettings: c.gaussianSplatSettings,
         startTime: c.startTime,
         duration: c.duration,
         inPoint: c.inPoint,
@@ -277,6 +281,8 @@ function convertProjectCompositionToStore(
         textProperties: c.textProperties,
         // Solid clip support
         solidColor: c.solidColor,
+        // 3D layer support
+        is3D: c.is3D,
         // Transcript data
         transcript: c.transcript,
         transcriptStatus: c.transcriptStatus,
@@ -353,10 +359,11 @@ export async function loadProjectToStores(): Promise<void> {
   const timelineStore = useTimelineStore.getState();
   timelineStore.clearTimeline();
 
-  // Restore text, solid, and mesh items
+  // Restore generated media items
   const textItems = (projectData as any).textItems || [];
   const solidItems = (projectData as any).solidItems || [];
   const meshItems = (projectData as any).meshItems || [];
+  const cameraItems = (projectData as any).cameraItems || [];
 
   // Update media store
   useMediaStore.setState({
@@ -377,6 +384,7 @@ export async function loadProjectToStores(): Promise<void> {
     textItems,
     solidItems,
     meshItems,
+    cameraItems,
     activeCompositionId: projectData.activeCompositionId,
     openCompositionIds: projectData.openCompositionIds || [],
     expandedFolderIds: projectData.expandedFolderIds || [],

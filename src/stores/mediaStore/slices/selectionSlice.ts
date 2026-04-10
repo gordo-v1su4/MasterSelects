@@ -32,6 +32,9 @@ export const createSelectionSlice: MediaSliceCreator<SelectionActions> = (set) =
       meshItems: (state.meshItems || []).map((m) =>
         itemIds.includes(m.id) ? { ...m, parentId: folderId } : m
       ),
+      cameraItems: (state.cameraItems || []).map((c) =>
+        itemIds.includes(c.id) ? { ...c, parentId: folderId } : c
+      ),
     }));
   },
 
@@ -76,6 +79,9 @@ export const createSelectionSlice: MediaSliceCreator<SelectionActions> = (set) =
       ),
       meshItems: (state.meshItems || []).map((m) =>
         itemIds.includes(m.id) ? { ...m, labelColor: color } : m
+      ),
+      cameraItems: (state.cameraItems || []).map((c) =>
+        itemIds.includes(c.id) ? { ...c, labelColor: color } : c
       ),
     }));
   },

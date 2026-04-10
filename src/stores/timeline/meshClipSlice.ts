@@ -49,15 +49,17 @@ export const createMeshClipSlice: SliceCreator<MeshClipActions> = (set, get) => 
       isLoading: false,
     };
 
-    set({ clips: [...clips, meshClip] });
-    updateDuration();
-    invalidateCache();
-
     if (!skipMediaItem) {
       const mediaStore = useMediaStore.getState();
       const meshFolderId = mediaStore.getOrCreateMeshFolder();
-      mediaStore.createMeshItem(meshType, undefined, meshFolderId);
+      const mediaItemId = mediaStore.createMeshItem(meshType, undefined, meshFolderId);
+      meshClip.mediaFileId = mediaItemId;
+      meshClip.source = { ...meshClip.source!, mediaFileId: mediaItemId };
     }
+
+    set({ clips: [...clips, meshClip] });
+    updateDuration();
+    invalidateCache();
 
     log.debug('Created mesh clip', { clipId, meshType });
     return clipId;

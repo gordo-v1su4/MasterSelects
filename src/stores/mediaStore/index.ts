@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
 import type { MediaState, MediaFile, ProjectItem } from './types';
+import { DEFAULT_SCENE_CAMERA_SETTINGS } from './types';
 import { DEFAULT_COMPOSITION } from './constants';
 import { fileSystemService } from '../../services/fileSystemService';
 
@@ -19,7 +20,22 @@ import { createProxySlice, type ProxyActions } from './slices/proxySlice';
 import { createProjectSlice, type ProjectActions } from './slices/projectSlice';
 
 // Re-export types
-export type { MediaType, ProxyStatus, MediaItem, MediaFile, Composition, MediaFolder, TextItem, SolidItem, MeshItem, MeshPrimitiveType, ProjectItem } from './types';
+export type {
+  MediaType,
+  ProxyStatus,
+  MediaItem,
+  MediaFile,
+  Composition,
+  MediaFolder,
+  TextItem,
+  SolidItem,
+  MeshItem,
+  CameraItem,
+  MeshPrimitiveType,
+  SceneCameraSettings,
+  ProjectItem,
+} from './types';
+export { DEFAULT_SCENE_CAMERA_SETTINGS } from './types';
 
 // Combined store type with all actions
 type MediaStoreState = MediaState &
@@ -45,6 +61,9 @@ type MediaStoreState = MediaState &
     getOrCreateMeshFolder: () => string;
     createMeshItem: (meshType: import('./types').MeshPrimitiveType, name?: string, parentId?: string | null) => string;
     removeMeshItem: (id: string) => void;
+    getOrCreateCameraFolder: () => string;
+    createCameraItem: (name?: string, parentId?: string | null) => string;
+    removeCameraItem: (id: string) => void;
   };
 
 export const useMediaStore = create<MediaStoreState>()(
@@ -56,6 +75,7 @@ export const useMediaStore = create<MediaStoreState>()(
     textItems: [],
     solidItems: [],
     meshItems: [],
+    cameraItems: [],
     activeCompositionId: 'comp-1',
     openCompositionIds: ['comp-1'],
     slotAssignments: {},
@@ -77,26 +97,28 @@ export const useMediaStore = create<MediaStoreState>()(
 
     // Getters
     getItemsByFolder: (folderId: string | null) => {
-      const { files, compositions, folders, textItems, solidItems, meshItems } = get();
+      const { files, compositions, folders, textItems, solidItems, meshItems, cameraItems } = get();
       return [
         ...folders.filter((f) => f.parentId === folderId),
         ...compositions.filter((c) => c.parentId === folderId),
         ...textItems.filter((t) => t.parentId === folderId),
         ...solidItems.filter((s) => s.parentId === folderId),
         ...meshItems.filter((m) => m.parentId === folderId),
+        ...cameraItems.filter((c) => c.parentId === folderId),
         ...files.filter((f) => f.parentId === folderId),
       ];
     },
 
     getItemById: (id: string) => {
-      const { files, compositions, folders, textItems, solidItems, meshItems } = get();
+      const { files, compositions, folders, textItems, solidItems, meshItems, cameraItems } = get();
       return (
         files.find((f) => f.id === id) ||
         compositions.find((c) => c.id === id) ||
         folders.find((f) => f.id === id) ||
         textItems.find((t) => t.id === id) ||
         solidItems.find((s) => s.id === id) ||
-        meshItems.find((m) => m.id === id)
+        meshItems.find((m) => m.id === id) ||
+        cameraItems.find((c) => c.id === id)
       );
     },
 
@@ -224,6 +246,36 @@ export const useMediaStore = create<MediaStoreState>()(
 
     removeMeshItem: (id: string) => {
       set({ meshItems: get().meshItems.filter(m => m.id !== id) });
+    },
+
+    getOrCreateCameraFolder: () => {
+      const { folders, createFolder } = get();
+      const existingFolder = folders.find((f) => f.name === 'Cameras' && f.parentId === null);
+      if (existingFolder) {
+        return existingFolder.id;
+      }
+      const newFolder = createFolder('Cameras', null);
+      return newFolder.id;
+    },
+
+    createCameraItem: (name?: string, parentId?: string | null) => {
+      const { cameraItems } = get();
+      const id = `camera-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newCamera: import('./types').CameraItem = {
+        id,
+        name: name || `Camera ${cameraItems.length + 1}`,
+        type: 'camera',
+        parentId: parentId !== undefined ? parentId : null,
+        createdAt: Date.now(),
+        duration: 10,
+        cameraSettings: { ...DEFAULT_SCENE_CAMERA_SETTINGS },
+      };
+      set({ cameraItems: [...cameraItems, newCamera] });
+      return id;
+    },
+
+    removeCameraItem: (id: string) => {
+      set({ cameraItems: get().cameraItems.filter(c => c.id !== id) });
     },
 
     // Merge all slices
