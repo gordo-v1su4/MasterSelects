@@ -2,6 +2,7 @@
 // Extracted from Timeline.tsx for better maintainability
 
 import React, { useEffect, useCallback } from 'react';
+import { handleSubmenuHover, handleSubmenuLeave } from '../panels/media/submenuPosition';
 import type { TimelineClip } from '../../types';
 import type { MediaFile } from '../../stores/mediaStore';
 import type { ContextMenuState } from './types';
@@ -171,7 +172,7 @@ export function TimelineContextMenu({
       onClick={(e) => e.stopPropagation()}
     >
       {isVideo && (
-        <div className="context-menu-item has-submenu">
+        <div className="context-menu-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
           <span>Show in Explorer</span>
           <span className="submenu-arrow">{'\u25B6'}</span>
           <div className="context-submenu">

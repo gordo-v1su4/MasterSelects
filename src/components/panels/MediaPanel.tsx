@@ -7,10 +7,11 @@ import { LABEL_COLORS, getLabelHex } from './media/labelColors';
 import { CompositionSettingsDialog } from './media/CompositionSettingsDialog';
 import { SolidSettingsDialog } from './media/SolidSettingsDialog';
 import { LabelColorPicker } from './media/LabelColorPicker';
+import { handleSubmenuHover, handleSubmenuLeave } from './media/submenuPosition';
 
 const log = Logger.create('MediaPanel');
 import { useMediaStore } from '../../stores/mediaStore';
-import type { MediaFile, Composition, ProjectItem, SolidItem } from '../../stores/mediaStore';
+import type { MediaFile, Composition, ProjectItem, SolidItem, CameraItem } from '../../stores/mediaStore';
 import { useTimelineStore } from '../../stores/timeline';
 import { useDockStore } from '../../stores/dockStore';
 import { useContextMenuPosition } from '../../hooks/useContextMenuPosition';
@@ -74,6 +75,7 @@ export function MediaPanel() {
   const folders = useMediaStore(state => state.folders);
   const solidItems = useMediaStore(state => state.solidItems);
   const meshItems = useMediaStore(state => state.meshItems);
+  const cameraItems = useMediaStore(state => state.cameraItems);
   const selectedIds = useMediaStore(state => state.selectedIds);
   const expandedFolderIds = useMediaStore(state => state.expandedFolderIds);
   const fileSystemSupported = useMediaStore(state => state.fileSystemSupported);
@@ -111,6 +113,9 @@ export function MediaPanel() {
     createMeshItem,
     getOrCreateMeshFolder,
     removeMeshItem,
+    createCameraItem,
+    getOrCreateCameraFolder,
+    removeCameraItem,
     setLabelColor,
     importGaussianSplat,
   } = useMediaStore.getState();
@@ -215,7 +220,7 @@ export function MediaPanel() {
 
   // Sort items comparator
   const getSortValue = useCallback((item: ProjectItem, colId: ColumnId): string | number => {
-    const mediaFile = ('type' in item && item.type !== 'composition' && item.type !== 'text' && item.type !== 'solid') ? item as MediaFile : null;
+    const mediaFile = ('type' in item && item.type !== 'composition' && item.type !== 'text' && item.type !== 'solid' && item.type !== 'camera') ? item as MediaFile : null;
     switch (colId) {
       case 'name': return item.name.toLowerCase();
       case 'label': {
@@ -526,9 +531,10 @@ export function MediaPanel() {
       else if (compositions.find(c => c.id === id)) removeComposition(id);
       else if (folders.find(f => f.id === id)) removeFolder(id);
       else if (meshItems.find(m => m.id === id)) removeMeshItem(id);
+      else if (cameraItems.find(c => c.id === id)) removeCameraItem(id);
     });
     closeContextMenu();
-  }, [selectedIds, files, compositions, folders, meshItems, removeFile, removeComposition, removeFolder, removeMeshItem, closeContextMenu]);
+  }, [selectedIds, files, compositions, folders, meshItems, cameraItems, removeFile, removeComposition, removeFolder, removeMeshItem, removeCameraItem, closeContextMenu]);
 
   // Get the active parent folder (grid view: current open folder, list view: selected folder or null)
   const getActiveParentId = useCallback((): string | null => {
@@ -573,6 +579,12 @@ export function MediaPanel() {
     createMeshItem(meshType, undefined, meshFolderId);
     closeContextMenu();
   }, [createMeshItem, getOrCreateMeshFolder, closeContextMenu]);
+
+  const handleNewCamera = useCallback(() => {
+    const cameraFolderId = getOrCreateCameraFolder();
+    createCameraItem(undefined, cameraFolderId);
+    closeContextMenu();
+  }, [createCameraItem, getOrCreateCameraFolder, closeContextMenu]);
 
   // Import Gaussian Avatar (.zip) — opens file picker, imports with forced gaussian-avatar type
   const handleImportGaussianSplat = useCallback(() => {
@@ -714,6 +726,25 @@ export function MediaPanel() {
         meshType: meshItem.meshType,
       });
       e.dataTransfer.setData('application/x-mesh-item-id', item.id);
+      e.dataTransfer.effectAllowed = 'copyMove';
+      if (e.currentTarget instanceof HTMLElement) {
+        e.dataTransfer.setDragImage(e.currentTarget, 10, 10);
+      }
+      return;
+    }
+
+    // Handle camera item drag
+    if (item.type === 'camera') {
+      const cameraItem = item as CameraItem;
+      setExternalDragPayload({
+        kind: 'camera',
+        id: item.id,
+        duration: cameraItem.duration,
+        hasAudio: false,
+        isAudio: false,
+        isVideo: true,
+      });
+      e.dataTransfer.setData('application/x-camera-item-id', item.id);
       e.dataTransfer.effectAllowed = 'copyMove';
       if (e.currentTarget instanceof HTMLElement) {
         e.dataTransfer.setDragImage(e.currentTarget, 10, 10);
@@ -1338,7 +1369,11 @@ export function MediaPanel() {
                   <span className="add-dropdown-icon"><FileTypeIcon type="solid" /></span>
                   <span>Solid</span>
                 </div>
-                <div className="add-dropdown-item has-submenu">
+                <div className="add-dropdown-item" onClick={() => { handleNewCamera(); setAddDropdownOpen(false); }}>
+                  <span className="add-dropdown-icon"><FileTypeIcon type="camera" /></span>
+                  <span>Camera</span>
+                </div>
+                <div className="add-dropdown-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
                   <span className="add-dropdown-icon"><FileTypeIcon type="mesh" /></span>
                   <span>Mesh</span>
                   <span className="submenu-arrow">&#9654;</span>
@@ -1520,7 +1555,8 @@ export function MediaPanel() {
             compositions.find(c => c.id === contextMenu.itemId) ||
             folders.find(f => f.id === contextMenu.itemId) ||
             solidItems.find(s => s.id === contextMenu.itemId) ||
-            meshItems.find(m => m.id === contextMenu.itemId)
+            meshItems.find(m => m.id === contextMenu.itemId) ||
+            cameraItems.find(c => c.id === contextMenu.itemId)
           : null;
         const isVideoFile = selectedItem && 'type' in selectedItem && selectedItem.type === 'video';
         const isComposition = selectedItem && 'type' in selectedItem && selectedItem.type === 'composition';
@@ -1566,7 +1602,11 @@ export function MediaPanel() {
               <span className="context-menu-icon"><FileTypeIcon type="solid" /></span>
               Solid
             </div>
-            <div className="context-menu-item has-submenu">
+            <div className="context-menu-item" onClick={() => { handleNewCamera(); closeContextMenu(); }}>
+              <span className="context-menu-icon"><FileTypeIcon type="camera" /></span>
+              Camera
+            </div>
+            <div className="context-menu-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
               <span className="context-menu-icon"><FileTypeIcon type="mesh" /></span>
               <span>Mesh</span>
               <span className="submenu-arrow">&#9654;</span>
@@ -1603,7 +1643,7 @@ export function MediaPanel() {
 
                 {/* Move to Folder submenu */}
                 {availableFolders.length > 0 && (
-                  <div className="context-menu-item has-submenu">
+                  <div className="context-menu-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
                     <span>Move to Folder{multiSelect ? ` (${selectedIds.length})` : ''}</span>
                     <span className="submenu-arrow">▶</span>
                     <div className="context-submenu">
@@ -1689,7 +1729,7 @@ export function MediaPanel() {
 
                 {/* Show in Explorer submenu - only for single video with file */}
                 {!multiSelect && isVideoFile && mediaFile?.file && (
-                  <div className="context-menu-item has-submenu">
+                  <div className="context-menu-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
                     <span>Show in Explorer</span>
                     <span className="submenu-arrow">▶</span>
                     <div className="context-submenu">

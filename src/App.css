@@ -7657,6 +7657,10 @@ input[type="checkbox"] {
 }
 
 .add-dropdown-item.has-submenu:hover > .add-dropdown-submenu {
+  z-index: 10001;
+}
+
+.add-dropdown-item.has-submenu:hover > .add-dropdown-submenu {
   display: block;
 }
 
@@ -9046,6 +9050,10 @@ input[type="checkbox"] {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   min-width: 160px;
   padding: 4px 0;
+}
+
+.context-menu-item.has-submenu:hover > .context-submenu {
+  z-index: 10001;
 }
 
 .context-menu-item.has-submenu:hover .context-submenu {
