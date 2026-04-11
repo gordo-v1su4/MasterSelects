@@ -243,6 +243,7 @@ export class RenderDispatcher {
           nearPlane: cameraSettings.near,
           farPlane: cameraSettings.far,
           fov: cameraSettings.fov,
+          minimumDistance: 0.75,
         },
         { width, height },
         this.getApproximateSceneBounds(layers3D, width, height),

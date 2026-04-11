@@ -28,7 +28,7 @@ export function buildSplatCamera(
     scale: { x: number; y: number; z?: number };
     rotation: number | { x: number; y: number; z: number };
   },
-  settings: { nearPlane: number; farPlane: number; fov?: number },
+  settings: { nearPlane: number; farPlane: number; fov?: number; minimumDistance?: number },
   viewport: { width: number; height: number },
   sceneBounds?: {
     min: [number, number, number];
@@ -63,7 +63,7 @@ export function resolveOrbitCameraPose(
     scale: { x: number; y: number; z?: number };
     rotation: number | { x: number; y: number; z: number };
   },
-  settings: { nearPlane: number; farPlane: number; fov?: number },
+  settings: { nearPlane: number; farPlane: number; fov?: number; minimumDistance?: number },
   viewport: { width: number; height: number },
   sceneBounds?: {
     min: [number, number, number];
@@ -96,7 +96,8 @@ export function resolveOrbitCameraPose(
   );
 
   // Default camera distance frames the scene bounds when available.
-  const defaultDistance = Math.max(sceneRadius * 2.5, 5);
+  const minimumDistance = settings.minimumDistance ?? 5;
+  const defaultDistance = Math.max(sceneRadius * 2.5, minimumDistance);
   const baseDistance = layer.position.z !== 0 ? Math.abs(layer.position.z) : defaultDistance;
 
   // Zoom from scale.x (default 1). Higher zoom moves the camera closer,

@@ -16,6 +16,9 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
   const settings: GaussianSplatSettings = clip?.source?.gaussianSplatSettings ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS;
   const render = settings.render;
   const nativeRender = render.useNativeRenderer === true;
+  const maxSplatsSuffix = render.maxSplats === 0
+    ? (nativeRender ? ' (unlimited)' : ' (auto)')
+    : '';
 
   const updateRenderSetting = useCallback(<K extends keyof GaussianSplatRenderSettings>(key: K, value: GaussianSplatRenderSettings[K]) => {
     const { clips, updateDuration } = useTimelineStore.getState();
@@ -108,6 +111,36 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           />
         </div>
 
+        <div className="prop-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
+          <label style={{ width: '80px', color: '#999', flexShrink: 0 }}>Max Splats</label>
+          <DraggableNumber
+            value={render.maxSplats}
+            onChange={(value) => updateRenderSetting('maxSplats', Math.max(0, Math.round(value)))}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            min={0}
+            max={10000000}
+            sensitivity={500}
+            decimals={0}
+            suffix={maxSplatsSuffix}
+          />
+        </div>
+
+        <div className="prop-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
+          <label style={{ width: '80px', color: '#999', flexShrink: 0 }}>Sort Every</label>
+          <DraggableNumber
+            value={render.sortFrequency}
+            onChange={(value) => updateRenderSetting('sortFrequency', Math.max(0, Math.round(value)))}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            min={0}
+            max={240}
+            sensitivity={1}
+            decimals={0}
+            suffix={render.sortFrequency === 0 ? ' (off)' : ' frames'}
+          />
+        </div>
+
         <div style={nativeOnlyStyle}>
           <div className="prop-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
             <label style={{ width: '80px', color: '#999', flexShrink: 0 }}>Near Plane</label>
@@ -134,36 +167,6 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
               max={10000}
               sensitivity={20}
               decimals={0}
-            />
-          </div>
-
-          <div className="prop-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
-            <label style={{ width: '80px', color: '#999', flexShrink: 0 }}>Max Splats</label>
-            <DraggableNumber
-              value={render.maxSplats}
-              onChange={(value) => updateRenderSetting('maxSplats', Math.max(0, Math.round(value)))}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              min={0}
-              max={10000000}
-              sensitivity={200}
-              decimals={0}
-              suffix={render.maxSplats === 0 ? ' (unlimited)' : ''}
-            />
-          </div>
-
-          <div className="prop-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
-            <label style={{ width: '80px', color: '#999', flexShrink: 0 }}>Sort Every</label>
-            <DraggableNumber
-              value={render.sortFrequency}
-              onChange={(value) => updateRenderSetting('sortFrequency', Math.max(0, Math.round(value)))}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              min={0}
-              max={120}
-              sensitivity={1}
-              decimals={0}
-              suffix={render.sortFrequency === 0 ? ' (off)' : ' frames'}
             />
           </div>
         </div>
