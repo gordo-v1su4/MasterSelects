@@ -59,7 +59,7 @@ interface ManagedSplat {
 const modelCache = new Map<string, import('three').Group>();
 const modelLoading = new Set<string>();
 const splatAssetCache = new Map<string, Promise<GaussianSplatAsset>>();
-const AUTO_THREE_SPLAT_BUDGET = 120000;
+const AUTO_THREE_SPLAT_BUDGET = 2_000_000;
 const MAX_CPU_SORT_SPLATS = 100000;
 const THREE_SPLAT_RENDERER_REVISION = 10;
 
