@@ -74,6 +74,9 @@ export interface LayerSource {
   file?: File;
   videoElement?: HTMLVideoElement;
   mediaTime?: number;
+  mediaFileId?: string;
+  intrinsicWidth?: number;
+  intrinsicHeight?: number;
   imageElement?: HTMLImageElement;
   color?: string;
   texture?: GPUTexture;

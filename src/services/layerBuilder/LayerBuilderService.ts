@@ -53,6 +53,24 @@ export class LayerBuilderService {
     return !!source?.videoElement || !!source?.webCodecsPlayer?.isFullMode();
   }
 
+  private getPositiveDimension(value: number | undefined): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0
+      ? value
+      : undefined;
+  }
+
+  private getLayerSourceMetadata(
+    clip: TimelineClip,
+    mediaFile?: { id?: string; width?: number; height?: number },
+    fallback?: { width?: number; height?: number },
+  ): { mediaFileId?: string; intrinsicWidth?: number; intrinsicHeight?: number } {
+    return {
+      mediaFileId: mediaFile?.id ?? clip.mediaFileId ?? clip.source?.mediaFileId,
+      intrinsicWidth: this.getPositiveDimension(mediaFile?.width) ?? this.getPositiveDimension(fallback?.width),
+      intrinsicHeight: this.getPositiveDimension(mediaFile?.height) ?? this.getPositiveDimension(fallback?.height),
+    };
+  }
+
   private getPausedVisualProvider(
     source: TimelineClip['source'],
     runtimeProvider: ReturnType<typeof getRuntimeFrameProvider>,
@@ -448,6 +466,11 @@ export class LayerBuilderService {
    */
   private buildNativeDecoderLayer(clip: TimelineClip, layerIndex: number, ctx: FrameContext, opacityOverride?: number): Layer {
     const timeInfo = getClipTimeInfo(ctx, clip);
+    const mediaFile = getMediaFileForClip(ctx, clip);
+    const sourceMetadata = this.getLayerSourceMetadata(clip, mediaFile, {
+      width: clip.source?.videoElement?.videoWidth,
+      height: clip.source?.videoElement?.videoHeight,
+    });
     const transform = this.transformCache.getTransform(
       `${ctx.activeCompId}_${layerIndex}`,
       ctx.getInterpolatedTransform(clip.id, timeInfo.clipLocalTime)
@@ -466,7 +489,11 @@ export class LayerBuilderService {
       visible: true,
       opacity: finalOpacity,
       blendMode: transform.blendMode as BlendMode,
-      source: { type: 'video', nativeDecoder: clip.source!.nativeDecoder },
+      source: {
+        type: 'video',
+        nativeDecoder: clip.source!.nativeDecoder,
+        ...sourceMetadata,
+      },
       effects,
       position: transform.position,
       scale: transform.scale,
@@ -483,6 +510,10 @@ export class LayerBuilderService {
   private buildVideoLayer(clip: TimelineClip, layerIndex: number, ctx: FrameContext, opacityOverride?: number): Layer | null {
     const timeInfo = getClipTimeInfo(ctx, clip);
     const mediaFile = getMediaFileForClip(ctx, clip);
+    const sourceMetadata = this.getLayerSourceMetadata(clip, mediaFile, {
+      width: clip.source?.videoElement?.videoWidth,
+      height: clip.source?.videoElement?.videoHeight,
+    });
 
     // Check for proxy usage
     if (ctx.proxyEnabled && mediaFile?.proxyFps) {
@@ -557,6 +588,7 @@ export class LayerBuilderService {
         webCodecsPlayer: visualProvider ?? undefined,
         runtimeSourceId: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSourceId,
         runtimeSessionKey: preferHtmlScrubPreview ? undefined : previewRuntimeSource?.runtimeSessionKey,
+        ...sourceMetadata,
       },
       effects,
       position: transform.position,
@@ -664,6 +696,11 @@ export class LayerBuilderService {
     ctx: FrameContext,
     opacityOverride?: number
   ): Layer {
+    const mediaFile = getMediaFileForClip(ctx, clip);
+    const sourceMetadata = this.getLayerSourceMetadata(clip, mediaFile, {
+      width: imageElement.naturalWidth || imageElement.width,
+      height: imageElement.naturalHeight || imageElement.height,
+    });
     const transform = this.transformCache.getTransform(
       `${ctx.activeCompId}_${layerIndex}`,
       ctx.getInterpolatedTransform(clip.id, localTime)
@@ -682,7 +719,7 @@ export class LayerBuilderService {
       visible: true,
       opacity: finalOpacity,
       blendMode: transform.blendMode as BlendMode,
-      source: { type: 'image', imageElement },
+      source: { type: 'image', imageElement, ...sourceMetadata },
       effects,
       position: transform.position,
       scale: transform.scale,

@@ -100,6 +100,35 @@ export class RenderDispatcher {
     void this.processGaussianLayers;
   }
 
+  private resolveStable3DSourceDimensions(
+    data: LayerRenderData,
+    width: number,
+    height: number,
+  ): { sourceWidth: number; sourceHeight: number } {
+    const fallbackWidth =
+      typeof data.sourceWidth === 'number' && Number.isFinite(data.sourceWidth) && data.sourceWidth > 0
+        ? data.sourceWidth
+        : width;
+    const fallbackHeight =
+      typeof data.sourceHeight === 'number' && Number.isFinite(data.sourceHeight) && data.sourceHeight > 0
+        ? data.sourceHeight
+        : height;
+
+    const intrinsicWidth = data.layer.source?.intrinsicWidth;
+    const intrinsicHeight = data.layer.source?.intrinsicHeight;
+
+    return {
+      sourceWidth:
+        typeof intrinsicWidth === 'number' && Number.isFinite(intrinsicWidth) && intrinsicWidth > 0
+          ? intrinsicWidth
+          : fallbackWidth,
+      sourceHeight:
+        typeof intrinsicHeight === 'number' && Number.isFinite(intrinsicHeight) && intrinsicHeight > 0
+          ? intrinsicHeight
+          : fallbackHeight,
+    };
+  }
+
   private isNativeGaussianSplatSource(source: Layer['source'] | undefined): boolean {
     if (source?.type !== 'gaussian-splat') return false;
     return (
@@ -108,117 +137,14 @@ export class RenderDispatcher {
     ) === true;
   }
 
-  private getApproximateSceneBounds(
-    layers3D: Layer3DData[],
-    width: number,
-    height: number,
-  ): { min: [number, number, number]; max: [number, number, number] } | undefined {
-    if (layers3D.length === 0) return undefined;
-
-    const outputAspect = width / Math.max(height, 1);
-    const worldHeight = 2;
-    const halfWorldW = (worldHeight * outputAspect) / 2;
-    const halfWorldH = worldHeight / 2;
-
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let minZ = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    let maxZ = Number.NEGATIVE_INFINITY;
-
-    const includeBox = (
-      centerX: number,
-      centerY: number,
-      centerZ: number,
-      halfX: number,
-      halfY: number,
-      halfZ: number,
-    ) => {
-      minX = Math.min(minX, centerX - halfX);
-      minY = Math.min(minY, centerY - halfY);
-      minZ = Math.min(minZ, centerZ - halfZ);
-      maxX = Math.max(maxX, centerX + halfX);
-      maxY = Math.max(maxY, centerY + halfY);
-      maxZ = Math.max(maxZ, centerZ + halfZ);
-    };
-
-    for (const layer of layers3D) {
-      const centerX = layer.position.x * halfWorldW;
-      const centerY = -layer.position.y * halfWorldH;
-      const centerZ = layer.position.z;
-      const scaleX = Math.abs(layer.scale.x);
-      const scaleY = Math.abs(layer.scale.y);
-      const scaleZ = Math.abs(layer.scale.z ?? 1);
-
-      if (layer.gaussianSplatUrl) {
-        const splatBounds =
-          this.splatSceneBounds.get(layer.clipId) ??
-          this.deps.threeSceneRenderer?.getSplatBounds(layer.layerId);
-        if (splatBounds) {
-          const localCenterX = (splatBounds.min[0] + splatBounds.max[0]) * 0.5;
-          const localCenterY = (splatBounds.min[1] + splatBounds.max[1]) * 0.5;
-          const localCenterZ = (splatBounds.min[2] + splatBounds.max[2]) * 0.5;
-          const halfX = ((splatBounds.max[0] - splatBounds.min[0]) * 0.5) * scaleX;
-          const halfY = ((splatBounds.max[1] - splatBounds.min[1]) * 0.5) * scaleY;
-          const halfZ = ((splatBounds.max[2] - splatBounds.min[2]) * 0.5) * scaleZ;
-          includeBox(
-            centerX + localCenterX * scaleX,
-            centerY + localCenterY * scaleY,
-            centerZ + localCenterZ * scaleZ,
-            Math.max(halfX, 0.01),
-            Math.max(halfY, 0.01),
-            Math.max(halfZ, 0.01),
-          );
-          continue;
-        }
-      }
-
-      if (layer.modelUrl || layer.meshType) {
-        includeBox(
-          centerX,
-          centerY,
-          centerZ,
-          Math.max(0.5 * scaleX, 0.05),
-          Math.max(0.5 * scaleY, 0.05),
-          Math.max(0.5 * scaleZ, 0.05),
-        );
-        continue;
-      }
-
-      const sourceAspect = layer.sourceWidth / Math.max(layer.sourceHeight, 1);
-      let planeW: number;
-      let planeH: number;
-      if (sourceAspect >= outputAspect) {
-        planeW = worldHeight * outputAspect;
-        planeH = planeW / sourceAspect;
-      } else {
-        planeH = worldHeight;
-        planeW = planeH * sourceAspect;
-      }
-
-      includeBox(
-        centerX,
-        centerY,
-        centerZ,
-        Math.max((planeW * scaleX) * 0.5, 0.01),
-        Math.max((planeH * scaleY) * 0.5, 0.01),
-        Math.max(0.01 * scaleZ, 0.01),
-      );
-    }
-
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
-      return undefined;
-    }
-
-    return {
-      min: [minX, minY, minZ],
-      max: [maxX, maxY, maxZ],
-    };
+  private getSharedSceneDefaultCameraDistance(fovDegrees: number): number {
+    const worldHeight = 2.0;
+    const fovRadians = (Math.max(fovDegrees, 1) * Math.PI) / 180;
+    return worldHeight / (2 * Math.tan(fovRadians * 0.5));
   }
 
   private resolveSharedSceneCameraConfig(
-    layers3D: Layer3DData[],
+    _layers3D: Layer3DData[],
     width: number,
     height: number,
   ): CameraConfig {
@@ -233,6 +159,7 @@ export class RenderDispatcher {
       const clipLocalTime = timelineStore.playheadPosition - cameraClip.startTime;
       const transform = timelineStore.getInterpolatedTransform(cameraClip.id, clipLocalTime);
       const cameraSettings = cameraClip.source.cameraSettings ?? DEFAULT_SCENE_CAMERA_SETTINGS;
+      const defaultDistance = this.getSharedSceneDefaultCameraDistance(cameraSettings.fov);
       const pose = resolveOrbitCameraPose(
         {
           position: transform.position,
@@ -243,10 +170,9 @@ export class RenderDispatcher {
           nearPlane: cameraSettings.near,
           farPlane: cameraSettings.far,
           fov: cameraSettings.fov,
-          minimumDistance: 0.75,
+          minimumDistance: defaultDistance,
         },
         { width, height },
-        this.getApproximateSceneBounds(layers3D, width, height),
       );
 
       return {
@@ -765,6 +691,7 @@ export class RenderDispatcher {
       const data = layerData[idx];
       const layer = data.layer;
       const src = layer.source;
+      const stableSourceSize = this.resolveStable3DSourceDimensions(data, width, height);
       const rot = typeof layer.rotation === 'number'
         ? { x: 0, y: 0, z: layer.rotation }
         : layer.rotation;
@@ -777,8 +704,8 @@ export class RenderDispatcher {
         scale: { x: layer.scale.x, y: layer.scale.y, z: layer.scale.z ?? 1 },
         opacity: layer.opacity,
         blendMode: layer.blendMode,
-        sourceWidth: data.sourceWidth || width,
-        sourceHeight: data.sourceHeight || height,
+        sourceWidth: stableSourceSize.sourceWidth,
+        sourceHeight: stableSourceSize.sourceHeight,
         videoElement: src?.videoElement ?? undefined,
         imageElement: src?.imageElement ?? undefined,
         canvas: src?.textCanvas ?? undefined,
