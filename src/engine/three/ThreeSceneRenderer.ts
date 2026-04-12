@@ -94,7 +94,6 @@ const TEXT_3D_FONT_DATA: Record<'helvetiker' | 'optimer' | 'gentilis', Record<'r
   },
 };
 const MAX_EXACT_CPU_SORT_SPLATS = 100000;
-const APPROXIMATE_SPLAT_SORT_BUCKETS = 8192;
 const THREE_SPLAT_RENDERER_REVISION = 10;
 const MAX_SPLAT_EFFECTORS = 8;
 
@@ -771,7 +770,11 @@ export class ThreeSceneRenderer {
       return;
     }
 
-    const bucketCount = APPROXIMATE_SPLAT_SORT_BUCKETS;
+    const bucketCount = managed.splatCount <= 300000
+      ? 4096
+      : managed.splatCount <= 800000
+        ? 2048
+        : 1024;
     const bucketCounts = new Uint32Array(bucketCount);
     const bucketOffsets = new Uint32Array(bucketCount);
     const bucketScale = (bucketCount - 1) / depthRange;
@@ -823,12 +826,12 @@ export class ThreeSceneRenderer {
       : managed.splatCount <= 60000
           ? 4
         : managed.splatCount <= 200000
-            ? (useApproximateSort ? 6 : 8)
+            ? (useApproximateSort ? 8 : 8)
             : managed.splatCount <= 500000
               ? 16
               : managed.splatCount <= 1000000
-                ? 12
-                : 16;
+                ? 24
+                : 32;
     const requestedInterval = Math.max(0, managed.sortFrequency || 0);
     const interval = requestedInterval === 0 ? 0 : Math.max(baseInterval, requestedInterval);
 
@@ -844,14 +847,29 @@ export class ThreeSceneRenderer {
     const posTuple: [number, number, number] = [cameraPosition.x, cameraPosition.y, cameraPosition.z];
     const dirTuple: [number, number, number] = [cameraDirection.x, cameraDirection.y, cameraDirection.z];
 
+    const positionEpsilonSq = useApproximateSort
+      ? managed.splatCount <= 300000
+        ? 0.0004
+        : managed.splatCount <= 800000
+          ? 0.0016
+          : 0.0036
+      : 0.0001;
+    const directionDotThreshold = useApproximateSort
+      ? managed.splatCount <= 300000
+        ? 0.9985
+        : managed.splatCount <= 800000
+          ? 0.9965
+          : 0.994
+      : 0.9995;
+
     const movedEnough = !managed.lastSortCameraPosition ||
       ((managed.lastSortCameraPosition[0] - posTuple[0]) ** 2 +
        (managed.lastSortCameraPosition[1] - posTuple[1]) ** 2 +
-       (managed.lastSortCameraPosition[2] - posTuple[2]) ** 2) > 0.0001;
+       (managed.lastSortCameraPosition[2] - posTuple[2]) ** 2) > positionEpsilonSq;
     const rotatedEnough = !managed.lastSortCameraDirection ||
       (managed.lastSortCameraDirection[0] * dirTuple[0] +
        managed.lastSortCameraDirection[1] * dirTuple[1] +
-       managed.lastSortCameraDirection[2] * dirTuple[2]) < 0.9995;
+       managed.lastSortCameraDirection[2] * dirTuple[2]) < directionDotThreshold;
 
     if (!force) {
       if (!movedEnough && !rotatedEnough) {
@@ -1641,6 +1659,9 @@ export class ThreeSceneRenderer {
   private updateTextureSource(T: THREE, managed: ManagedMesh, layer: Layer3DData): void {
     const mesh = managed.mesh as import('three').Mesh;
     const material = mesh.material as import('three').MeshBasicMaterial;
+    if (!managed.texture) {
+      managed.texture = new T.Texture();
+    }
 
     if (layer.videoElement) {
       if (managed.lastSourceType !== 'video' || (managed.texture as { image?: unknown }).image !== layer.videoElement) {
