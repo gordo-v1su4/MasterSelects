@@ -11,6 +11,7 @@ import { VideoSyncManager } from './VideoSyncManager';
 import { AudioTrackSyncManager } from './AudioTrackSyncManager';
 import { proxyFrameCache } from '../proxyFrameCache';
 import { layerPlaybackManager } from '../layerPlaybackManager';
+import { DEFAULT_TEXT_3D_PROPERTIES } from '../../stores/timeline/constants';
 import {
   canUseSharedPreviewRuntimeSession,
   getPreviewRuntimeSource,
@@ -778,6 +779,10 @@ export class LayerBuilderService {
       ctx.getInterpolatedTransform(clip.id, timeInfo.clipLocalTime)
     );
     const effects = ctx.getInterpolatedEffects(clip.id, timeInfo.clipLocalTime);
+    const meshType = clip.meshType ?? clip.source?.meshType;
+    const text3DProperties = meshType === 'text3d'
+      ? (clip.text3DProperties ?? clip.source?.text3DProperties ?? DEFAULT_TEXT_3D_PROPERTIES)
+      : (clip.text3DProperties ?? clip.source?.text3DProperties);
 
     const finalOpacity = opacityOverride !== undefined
       ? transform.opacity * opacityOverride
@@ -793,8 +798,8 @@ export class LayerBuilderService {
       source: {
         type: 'model',
         modelUrl: clip.source?.modelUrl,
-        meshType: clip.meshType,
-        text3DProperties: clip.text3DProperties,
+        meshType,
+        text3DProperties,
       },
       effects,
       position: transform.position,
@@ -1167,8 +1172,10 @@ export class LayerBuilderService {
         source: {
           type: 'model',
           modelUrl: nestedClip.source.modelUrl,
-          meshType: nestedClip.meshType,
-          text3DProperties: nestedClip.text3DProperties,
+          meshType: nestedClip.meshType ?? nestedClip.source?.meshType,
+          text3DProperties: (nestedClip.meshType ?? nestedClip.source?.meshType) === 'text3d'
+            ? (nestedClip.text3DProperties ?? nestedClip.source?.text3DProperties ?? DEFAULT_TEXT_3D_PROPERTIES)
+            : (nestedClip.text3DProperties ?? nestedClip.source?.text3DProperties),
         },
         is3D: true,
       } as Layer;

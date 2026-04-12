@@ -94,6 +94,7 @@ function convertCompositions(compositions: Composition[]): ProjectComposition[] 
       linkedGroupId: c.linkedGroupId,
       waveform: c.waveform,
       meshType: c.source?.meshType || c.meshType,
+      text3DProperties: c.source?.text3DProperties || c.text3DProperties,
       cameraSettings: c.source?.cameraSettings || c.cameraSettings,
       splatEffectorSettings: c.source?.splatEffectorSettings || c.splatEffectorSettings,
       gaussianBlendshapes: c.source?.gaussianBlendshapes || c.gaussianBlendshapes,

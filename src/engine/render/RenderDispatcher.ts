@@ -787,7 +787,16 @@ export class RenderDispatcher {
     const activeSplatEffectors = this.collectActiveSplatEffectors(width, height);
 
     // Render the 3D scene
-    const canvas = renderer.renderScene(layers3D, cameraConfig, width, height, activeSplatEffectors);
+    const isRealtimePlayback = (this.deps.renderLoop?.getIsPlaying() ?? false)
+      && !this.deps.exportCanvasManager.getIsExporting();
+    const canvas = renderer.renderScene(
+      layers3D,
+      cameraConfig,
+      width,
+      height,
+      activeSplatEffectors,
+      isRealtimePlayback,
+    );
     if (!canvas) return;
 
     // Import the OffscreenCanvas as a GPU texture

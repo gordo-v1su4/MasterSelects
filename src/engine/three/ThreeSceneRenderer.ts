@@ -15,6 +15,7 @@ import type { Layer3DData, CameraConfig, SplatEffectorRuntimeData } from './type
 import { DEFAULT_CAMERA_CONFIG } from './types';
 import { loadGaussianSplatAsset } from '../gaussian/loaders';
 import type { GaussianSplatAsset, GaussianSplatFormat } from '../gaussian/loaders';
+import { resolveSplatSortPolicy } from './splatSortPolicy';
 
 const log = Logger.create('ThreeSceneRenderer');
 
@@ -27,6 +28,12 @@ type SplatShaderMaterial = import('three').ShaderMaterial & {
     uOpacity: { value: number };
     uSplatScale: { value: number };
     uViewportSize: { value: Vector2Like };
+    uCenterOpacityTex: { value: import('three').DataTexture };
+    uColorTex: { value: import('three').DataTexture };
+    uAxisXTex: { value: import('three').DataTexture };
+    uAxisYTex: { value: import('three').DataTexture };
+    uAxisZTex: { value: import('three').DataTexture };
+    uOrderTexture: { value: import('three').DataTexture };
     uEffectorCount: { value: number };
     uEffectorPosRadius: { value: Vector4Like[] };
     uEffectorAxisStrength: { value: Vector4Like[] };
@@ -67,11 +74,19 @@ interface ManagedSplat {
   lastSortCameraDirection: [number, number, number] | null;
   sortFrame: number;
   sortFrequency: number;
+  lastSortTimeMs: number;
   bounds: { min: [number, number, number]; max: [number, number, number] } | null;
   normalizationScale: number;
   rendererRevision: number;
   didLogVisibilityProbe: boolean;
   requestedMaxSplats: number;
+  centerOpacityTexture: import('three').DataTexture;
+  colorTexture: import('three').DataTexture;
+  axisXTexture: import('three').DataTexture;
+  axisYTexture: import('three').DataTexture;
+  axisZTexture: import('three').DataTexture;
+  orderTexture: import('three').DataTexture;
+  orderTextureData: Float32Array;
 }
 
 const modelCache = new Map<string, import('three').Group>();
@@ -94,7 +109,7 @@ const TEXT_3D_FONT_DATA: Record<'helvetiker' | 'optimer' | 'gentilis', Record<'r
   },
 };
 const MAX_EXACT_CPU_SORT_SPLATS = 100000;
-const THREE_SPLAT_RENDERER_REVISION = 10;
+const THREE_SPLAT_RENDERER_REVISION = 11;
 const MAX_SPLAT_EFFECTORS = 8;
 
 export class ThreeSceneRenderer {
@@ -116,6 +131,41 @@ export class ThreeSceneRenderer {
 
   private getFiniteNumber(value: number | undefined, fallback: number): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
+  private getSplatTextureDimensions(texelCount: number): { width: number; height: number } {
+    const safeCount = Math.max(1, Math.ceil(texelCount));
+    const maxTextureSize = this.renderer?.capabilities.maxTextureSize ?? 4096;
+    const width = Math.min(maxTextureSize, Math.max(1, Math.ceil(Math.sqrt(safeCount))));
+    const height = Math.max(1, Math.ceil(safeCount / width));
+
+    if (height > maxTextureSize) {
+      throw new Error(`Gaussian splat texture exceeds GPU max texture size (${safeCount} texels > ${maxTextureSize}x${maxTextureSize})`);
+    }
+
+    return { width, height };
+  }
+
+  private createFloatDataTexture(
+    T: THREE,
+    data: Float32Array,
+    width: number,
+    height: number,
+  ): import('three').DataTexture {
+    const texture = new T.DataTexture(data, width, height, T.RGBAFormat, T.FloatType);
+    texture.magFilter = T.NearestFilter;
+    texture.minFilter = T.NearestFilter;
+    texture.wrapS = T.ClampToEdgeWrapping;
+    texture.wrapT = T.ClampToEdgeWrapping;
+    texture.generateMipmaps = false;
+    texture.flipY = false;
+    texture.unpackAlignment = 1;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private createZeroFloatDataTexture(T: THREE): import('three').DataTexture {
+    return this.createFloatDataTexture(T, new Float32Array(4), 1, 1);
   }
 
   private getLayerPosition(layer: Layer3DData): { x: number; y: number; z: number } {
@@ -249,7 +299,9 @@ export class ThreeSceneRenderer {
 
   private createSplatMaterial(T: THREE): SplatShaderMaterial {
     const zeroVec4s = this.getZeroEffectorVector4s(T);
+    const zeroTexture = this.createZeroFloatDataTexture(T);
     return new T.ShaderMaterial({
+      glslVersion: T.GLSL3,
       transparent: true,
       premultipliedAlpha: true,
       depthTest: true,
@@ -260,6 +312,12 @@ export class ThreeSceneRenderer {
         uOpacity: { value: 1 },
         uSplatScale: { value: 1 },
         uViewportSize: { value: new T.Vector2(Math.max(this.width, 1), Math.max(this.height, 1)) },
+        uCenterOpacityTex: { value: zeroTexture },
+        uColorTex: { value: zeroTexture },
+        uAxisXTex: { value: zeroTexture },
+        uAxisYTex: { value: zeroTexture },
+        uAxisZTex: { value: zeroTexture },
+        uOrderTexture: { value: zeroTexture },
         uEffectorCount: { value: 0 },
         uEffectorPosRadius: { value: zeroVec4s.map((v) => v.clone()) },
         uEffectorAxisStrength: { value: zeroVec4s.map((v) => v.clone()) },
@@ -267,28 +325,41 @@ export class ThreeSceneRenderer {
         uEffectorParamsB: { value: zeroVec4s.map((v) => v.clone()) },
       },
       vertexShader: `
+        precision highp float;
+        precision highp int;
+
         #define MAX_SPLAT_EFFECTORS ${MAX_SPLAT_EFFECTORS}
 
-        attribute vec3 instanceCenter;
-        attribute vec3 instanceColor;
-        attribute float instanceOpacity;
-        attribute vec3 instanceAxisX;
-        attribute vec3 instanceAxisY;
-        attribute vec3 instanceAxisZ;
-
-        varying vec3 vColor;
-        varying float vOpacity;
-        varying vec3 vConic;
-        varying vec2 vOffsetPx;
+        out vec3 vColor;
+        out float vOpacity;
+        out vec3 vConic;
+        out vec2 vOffsetPx;
 
         uniform float uOpacity;
         uniform float uSplatScale;
         uniform vec2 uViewportSize;
+        uniform sampler2D uCenterOpacityTex;
+        uniform sampler2D uColorTex;
+        uniform sampler2D uAxisXTex;
+        uniform sampler2D uAxisYTex;
+        uniform sampler2D uAxisZTex;
+        uniform sampler2D uOrderTexture;
         uniform int uEffectorCount;
         uniform vec4 uEffectorPosRadius[MAX_SPLAT_EFFECTORS];
         uniform vec4 uEffectorAxisStrength[MAX_SPLAT_EFFECTORS];
         uniform vec4 uEffectorParamsA[MAX_SPLAT_EFFECTORS];
         uniform vec4 uEffectorParamsB[MAX_SPLAT_EFFECTORS];
+
+        ivec2 getTextureTexelCoord(int index, ivec2 size) {
+          int x = index % size.x;
+          int y = index / size.x;
+          return ivec2(x, y);
+        }
+
+        int getSortedSourceIndex() {
+          ivec2 orderSize = textureSize(uOrderTexture, 0);
+          return int(round(texelFetch(uOrderTexture, getTextureTexelCoord(gl_InstanceID, orderSize), 0).x));
+        }
 
         vec3 hash33(vec3 p) {
           p = vec3(
@@ -372,13 +443,24 @@ export class ThreeSceneRenderer {
         }
 
         void main() {
-          float composedOpacity = clamp(instanceOpacity * uOpacity, 0.0, 1.0);
-          vColor = max(instanceColor, vec3(0.0));
+          int sourceIndex = getSortedSourceIndex();
+          ivec2 splatSize = textureSize(uCenterOpacityTex, 0);
+          vec4 centerOpacity = texelFetch(uCenterOpacityTex, getTextureTexelCoord(sourceIndex, splatSize), 0);
+          vec4 colorTexel = texelFetch(uColorTex, getTextureTexelCoord(sourceIndex, splatSize), 0);
+          vec3 baseCenter = centerOpacity.xyz;
+          vec3 baseColor = colorTexel.xyz;
+          float baseOpacity = centerOpacity.w;
+          vec3 axisX = texelFetch(uAxisXTex, getTextureTexelCoord(sourceIndex, splatSize), 0).xyz;
+          vec3 axisY = texelFetch(uAxisYTex, getTextureTexelCoord(sourceIndex, splatSize), 0).xyz;
+          vec3 axisZ = texelFetch(uAxisZTex, getTextureTexelCoord(sourceIndex, splatSize), 0).xyz;
+
+          float composedOpacity = clamp(baseOpacity * uOpacity, 0.0, 1.0);
+          vColor = max(baseColor, vec3(0.0));
           vOpacity = composedOpacity;
           vConic = vec3(0.0);
           vOffsetPx = vec2(0.0);
 
-          vec3 displacedCenter = applySplatEffectors(instanceCenter);
+          vec3 displacedCenter = applySplatEffectors(baseCenter);
           vec4 centerView4 = modelViewMatrix * vec4(displacedCenter, 1.0);
           vec3 centerView = centerView4.xyz;
           float viewDepth = -centerView.z;
@@ -392,9 +474,9 @@ export class ThreeSceneRenderer {
             modelViewMatrix[1].xyz,
             modelViewMatrix[2].xyz
           );
-          vec3 axisViewX = modelViewLinear * instanceAxisX;
-          vec3 axisViewY = modelViewLinear * instanceAxisY;
-          vec3 axisViewZ = modelViewLinear * instanceAxisZ;
+          vec3 axisViewX = modelViewLinear * axisX;
+          vec3 axisViewY = modelViewLinear * axisY;
+          vec3 axisViewZ = modelViewLinear * axisZ;
 
           vec2 focal = vec2(
             abs(projectionMatrix[0][0]) * uViewportSize.x * 0.5,
@@ -432,10 +514,15 @@ export class ThreeSceneRenderer {
         }
       `,
       fragmentShader: `
-        varying vec3 vColor;
-        varying float vOpacity;
-        varying vec3 vConic;
-        varying vec2 vOffsetPx;
+        precision highp float;
+        precision highp int;
+
+        in vec3 vColor;
+        in float vOpacity;
+        in vec3 vConic;
+        in vec2 vOffsetPx;
+
+        out vec4 fragColor;
 
         void main() {
           float power = -0.5 * (
@@ -448,7 +535,7 @@ export class ThreeSceneRenderer {
           float alpha = min(0.99, vOpacity * exp(power));
           if (alpha < (1.0 / 255.0)) discard;
 
-          gl_FragColor = vec4(vColor * alpha, alpha);
+          fragColor = vec4(vColor * alpha, alpha);
         }
       `,
     }) as SplatShaderMaterial;
@@ -490,11 +577,19 @@ export class ThreeSceneRenderer {
       lastSortCameraDirection: null,
       sortFrame: 0,
       sortFrequency: 1,
+      lastSortTimeMs: 0,
       bounds: null,
       normalizationScale: 1,
       rendererRevision: THREE_SPLAT_RENDERER_REVISION,
       didLogVisibilityProbe: false,
       requestedMaxSplats: 0,
+      centerOpacityTexture: material.uniforms.uCenterOpacityTex.value,
+      colorTexture: material.uniforms.uColorTex.value,
+      axisXTexture: material.uniforms.uAxisXTex.value,
+      axisYTexture: material.uniforms.uAxisYTex.value,
+      axisZTexture: material.uniforms.uAxisZTex.value,
+      orderTexture: material.uniforms.uOrderTexture.value,
+      orderTextureData: new Float32Array(4),
     };
   }
 
@@ -643,30 +738,70 @@ export class ThreeSceneRenderer {
     managed.lastSortCameraPosition = null;
     managed.lastSortCameraDirection = null;
     managed.sortFrame = 0;
+    managed.lastSortTimeMs = 0;
     managed.bounds = normalizedBounds;
     managed.normalizationScale = normalizationScale;
     managed.requestedMaxSplats = requestedMaxSplats;
+    const { width: textureWidth, height: textureHeight } = this.getSplatTextureDimensions(splatCount);
+    const texelCount = textureWidth * textureHeight;
+    const centerOpacityTextureData = new Float32Array(texelCount * 4);
+    const colorTextureData = new Float32Array(texelCount * 4);
+    const axisXTextureData = new Float32Array(texelCount * 4);
+    const axisYTextureData = new Float32Array(texelCount * 4);
+    const axisZTextureData = new Float32Array(texelCount * 4);
+    const orderTextureData = new Float32Array(texelCount * 4);
 
-    const instanceCenters = new T.InstancedBufferAttribute(new Float32Array(centers.length), 3);
-    const instanceColors = new T.InstancedBufferAttribute(new Float32Array(colors.length), 3);
-    const instanceOpacities = new T.InstancedBufferAttribute(new Float32Array(opacities.length), 1);
-    const instanceAxisX = new T.InstancedBufferAttribute(new Float32Array(axisX.length), 3);
-    const instanceAxisY = new T.InstancedBufferAttribute(new Float32Array(axisY.length), 3);
-    const instanceAxisZ = new T.InstancedBufferAttribute(new Float32Array(axisZ.length), 3);
+    for (let splatIndex = 0; splatIndex < splatCount; splatIndex += 1) {
+      const sourceBase = splatIndex * 3;
+      const texelBase = splatIndex * 4;
 
-    instanceCenters.setUsage(T.DynamicDrawUsage);
-    instanceColors.setUsage(T.DynamicDrawUsage);
-    instanceOpacities.setUsage(T.DynamicDrawUsage);
-    instanceAxisX.setUsage(T.DynamicDrawUsage);
-    instanceAxisY.setUsage(T.DynamicDrawUsage);
-    instanceAxisZ.setUsage(T.DynamicDrawUsage);
+      centerOpacityTextureData[texelBase + 0] = centers[sourceBase + 0];
+      centerOpacityTextureData[texelBase + 1] = centers[sourceBase + 1];
+      centerOpacityTextureData[texelBase + 2] = centers[sourceBase + 2];
+      centerOpacityTextureData[texelBase + 3] = opacities[splatIndex];
 
-    managed.geometry.setAttribute('instanceCenter', instanceCenters);
-    managed.geometry.setAttribute('instanceColor', instanceColors);
-    managed.geometry.setAttribute('instanceOpacity', instanceOpacities);
-    managed.geometry.setAttribute('instanceAxisX', instanceAxisX);
-    managed.geometry.setAttribute('instanceAxisY', instanceAxisY);
-    managed.geometry.setAttribute('instanceAxisZ', instanceAxisZ);
+      colorTextureData[texelBase + 0] = colors[sourceBase + 0];
+      colorTextureData[texelBase + 1] = colors[sourceBase + 1];
+      colorTextureData[texelBase + 2] = colors[sourceBase + 2];
+      colorTextureData[texelBase + 3] = 1;
+
+      axisXTextureData[texelBase + 0] = axisX[sourceBase + 0];
+      axisXTextureData[texelBase + 1] = axisX[sourceBase + 1];
+      axisXTextureData[texelBase + 2] = axisX[sourceBase + 2];
+
+      axisYTextureData[texelBase + 0] = axisY[sourceBase + 0];
+      axisYTextureData[texelBase + 1] = axisY[sourceBase + 1];
+      axisYTextureData[texelBase + 2] = axisY[sourceBase + 2];
+
+      axisZTextureData[texelBase + 0] = axisZ[sourceBase + 0];
+      axisZTextureData[texelBase + 1] = axisZ[sourceBase + 1];
+      axisZTextureData[texelBase + 2] = axisZ[sourceBase + 2];
+
+      orderTextureData[texelBase + 0] = splatIndex;
+    }
+
+    managed.centerOpacityTexture.dispose();
+    managed.colorTexture.dispose();
+    managed.axisXTexture.dispose();
+    managed.axisYTexture.dispose();
+    managed.axisZTexture.dispose();
+    managed.orderTexture.dispose();
+
+    managed.centerOpacityTexture = this.createFloatDataTexture(T, centerOpacityTextureData, textureWidth, textureHeight);
+    managed.colorTexture = this.createFloatDataTexture(T, colorTextureData, textureWidth, textureHeight);
+    managed.axisXTexture = this.createFloatDataTexture(T, axisXTextureData, textureWidth, textureHeight);
+    managed.axisYTexture = this.createFloatDataTexture(T, axisYTextureData, textureWidth, textureHeight);
+    managed.axisZTexture = this.createFloatDataTexture(T, axisZTextureData, textureWidth, textureHeight);
+    managed.orderTexture = this.createFloatDataTexture(T, orderTextureData, textureWidth, textureHeight);
+    managed.orderTextureData = orderTextureData;
+
+    managed.material.uniforms.uCenterOpacityTex.value = managed.centerOpacityTexture;
+    managed.material.uniforms.uColorTex.value = managed.colorTexture;
+    managed.material.uniforms.uAxisXTex.value = managed.axisXTexture;
+    managed.material.uniforms.uAxisYTex.value = managed.axisYTexture;
+    managed.material.uniforms.uAxisZTex.value = managed.axisZTexture;
+    managed.material.uniforms.uOrderTexture.value = managed.orderTexture;
+
     managed.geometry.instanceCount = splatCount;
     managed.geometry.boundingSphere = new T.Sphere(
       new T.Vector3(0, 0, 0),
@@ -708,53 +843,15 @@ export class ThreeSceneRenderer {
   }
 
   private applySplatOrder(managed: ManagedSplat): void {
-    const centerAttr = managed.geometry.getAttribute('instanceCenter') as import('three').BufferAttribute;
-    const colorAttr = managed.geometry.getAttribute('instanceColor') as import('three').BufferAttribute;
-    const opacityAttr = managed.geometry.getAttribute('instanceOpacity') as import('three').BufferAttribute;
-    const axisXAttr = managed.geometry.getAttribute('instanceAxisX') as import('three').BufferAttribute;
-    const axisYAttr = managed.geometry.getAttribute('instanceAxisY') as import('three').BufferAttribute;
-    const axisZAttr = managed.geometry.getAttribute('instanceAxisZ') as import('three').BufferAttribute;
-
-    const centerArray = centerAttr.array as Float32Array;
-    const colorArray = colorAttr.array as Float32Array;
-    const opacityArray = opacityAttr.array as Float32Array;
-    const axisXArray = axisXAttr.array as Float32Array;
-    const axisYArray = axisYAttr.array as Float32Array;
-    const axisZArray = axisZAttr.array as Float32Array;
-
-    for (let outIndex = 0; outIndex < managed.splatCount; outIndex += 1) {
-      const sourceIndex = managed.sortIndices[outIndex];
-      const sourceBase = sourceIndex * 3;
-      const targetBase = outIndex * 3;
-
-      centerArray[targetBase + 0] = managed.centers[sourceBase + 0];
-      centerArray[targetBase + 1] = managed.centers[sourceBase + 1];
-      centerArray[targetBase + 2] = managed.centers[sourceBase + 2];
-
-      colorArray[targetBase + 0] = managed.colors[sourceBase + 0];
-      colorArray[targetBase + 1] = managed.colors[sourceBase + 1];
-      colorArray[targetBase + 2] = managed.colors[sourceBase + 2];
-      opacityArray[outIndex] = managed.opacities[sourceIndex];
-
-      axisXArray[targetBase + 0] = managed.axisX[sourceBase + 0];
-      axisXArray[targetBase + 1] = managed.axisX[sourceBase + 1];
-      axisXArray[targetBase + 2] = managed.axisX[sourceBase + 2];
-
-      axisYArray[targetBase + 0] = managed.axisY[sourceBase + 0];
-      axisYArray[targetBase + 1] = managed.axisY[sourceBase + 1];
-      axisYArray[targetBase + 2] = managed.axisY[sourceBase + 2];
-
-      axisZArray[targetBase + 0] = managed.axisZ[sourceBase + 0];
-      axisZArray[targetBase + 1] = managed.axisZ[sourceBase + 1];
-      axisZArray[targetBase + 2] = managed.axisZ[sourceBase + 2];
+    if (!managed.orderTexture || managed.orderTextureData.length === 0) {
+      return;
     }
 
-    centerAttr.needsUpdate = true;
-    colorAttr.needsUpdate = true;
-    opacityAttr.needsUpdate = true;
-    axisXAttr.needsUpdate = true;
-    axisYAttr.needsUpdate = true;
-    axisZAttr.needsUpdate = true;
+    for (let outIndex = 0; outIndex < managed.splatCount; outIndex += 1) {
+      managed.orderTextureData[outIndex * 4] = managed.sortIndices[outIndex];
+    }
+
+    managed.orderTexture.needsUpdate = true;
   }
 
   private applyApproximateSplatOrder(
@@ -810,7 +907,7 @@ export class ThreeSceneRenderer {
     }
   }
 
-  private updateSplatSort(managed: ManagedSplat, force = false): void {
+  private updateSplatSort(managed: ManagedSplat, force = false, realtimePlayback = false): void {
     if (!this.camera || managed.splatCount === 0) {
       return;
     }
@@ -818,22 +915,12 @@ export class ThreeSceneRenderer {
     managed.sortFrame += 1;
     const canExactCpuSort = managed.splatCount <= MAX_EXACT_CPU_SORT_SPLATS;
     const useApproximateSort = !canExactCpuSort;
-
-    const baseInterval = managed.splatCount <= 12000
-      ? 1
-      : managed.splatCount <= 30000
-        ? 2
-      : managed.splatCount <= 60000
-          ? 4
-        : managed.splatCount <= 200000
-            ? (useApproximateSort ? 8 : 8)
-            : managed.splatCount <= 500000
-              ? 16
-              : managed.splatCount <= 1000000
-                ? 24
-                : 32;
-    const requestedInterval = Math.max(0, managed.sortFrequency || 0);
-    const interval = requestedInterval === 0 ? 0 : Math.max(baseInterval, requestedInterval);
+    const policy = resolveSplatSortPolicy(
+      managed.splatCount,
+      Math.max(0, managed.sortFrequency || 0),
+      useApproximateSort,
+      realtimePlayback,
+    );
 
     const cameraPosition = new this.THREE!.Vector3();
     const cameraDirection = new this.THREE!.Vector3();
@@ -847,35 +934,30 @@ export class ThreeSceneRenderer {
     const posTuple: [number, number, number] = [cameraPosition.x, cameraPosition.y, cameraPosition.z];
     const dirTuple: [number, number, number] = [cameraDirection.x, cameraDirection.y, cameraDirection.z];
 
-    const positionEpsilonSq = useApproximateSort
-      ? managed.splatCount <= 300000
-        ? 0.0004
-        : managed.splatCount <= 800000
-          ? 0.0016
-          : 0.0036
-      : 0.0001;
-    const directionDotThreshold = useApproximateSort
-      ? managed.splatCount <= 300000
-        ? 0.9985
-        : managed.splatCount <= 800000
-          ? 0.9965
-          : 0.994
-      : 0.9995;
-
     const movedEnough = !managed.lastSortCameraPosition ||
       ((managed.lastSortCameraPosition[0] - posTuple[0]) ** 2 +
        (managed.lastSortCameraPosition[1] - posTuple[1]) ** 2 +
-       (managed.lastSortCameraPosition[2] - posTuple[2]) ** 2) > positionEpsilonSq;
+       (managed.lastSortCameraPosition[2] - posTuple[2]) ** 2) > policy.positionEpsilonSq;
     const rotatedEnough = !managed.lastSortCameraDirection ||
       (managed.lastSortCameraDirection[0] * dirTuple[0] +
        managed.lastSortCameraDirection[1] * dirTuple[1] +
-       managed.lastSortCameraDirection[2] * dirTuple[2]) < directionDotThreshold;
+       managed.lastSortCameraDirection[2] * dirTuple[2]) < policy.directionDotThreshold;
 
     if (!force) {
       if (!movedEnough && !rotatedEnough) {
         return;
       }
-      if (interval > 1 && (managed.sortFrame % interval !== 0)) {
+      if (!policy.allowDynamicResort) {
+        return;
+      }
+      if (policy.useFrameModulo && policy.intervalFrames > 1 && (managed.sortFrame % policy.intervalFrames !== 0)) {
+        return;
+      }
+      if (
+        policy.minElapsedMs > 0 &&
+        managed.lastSortTimeMs > 0 &&
+        performance.now() - managed.lastSortTimeMs < policy.minElapsedMs
+      ) {
         return;
       }
     }
@@ -924,6 +1006,7 @@ export class ThreeSceneRenderer {
     }
     managed.lastSortCameraPosition = posTuple;
     managed.lastSortCameraDirection = dirTuple;
+    managed.lastSortTimeMs = performance.now();
     if (!managed.didLogVisibilityProbe) {
       const centerProbe = new this.THREE!.Vector3(0, 0, 0)
         .applyMatrix4(managed.mesh.matrixWorld)
@@ -950,6 +1033,7 @@ export class ThreeSceneRenderer {
     width: number,
     height: number,
     effectors: SplatEffectorRuntimeData[] = [],
+    realtimePlayback = false,
   ): HTMLCanvasElement | OffscreenCanvas | null {
     if (!this.initialized || !this.THREE || !this.renderer || !this.scene || !this.camera) {
       return null;
@@ -1011,7 +1095,7 @@ export class ThreeSceneRenderer {
 
       if (layer.gaussianSplatUrl) {
         this.disposeManagedMeshById(layer.layerId);
-        this.syncSplatLayer(layer, outputAspect, worldHeight, effectors);
+        this.syncSplatLayer(layer, outputAspect, worldHeight, effectors, realtimePlayback);
         continue;
       }
 
@@ -1318,6 +1402,7 @@ export class ThreeSceneRenderer {
     outputAspect: number,
     worldHeight: number,
     effectors: SplatEffectorRuntimeData[],
+    realtimePlayback: boolean,
   ): void {
     if (!this.scene || !this.THREE) return;
 
@@ -1406,7 +1491,7 @@ export class ThreeSceneRenderer {
     this.applySplatEffectors(managed, effectors);
     managed.sortFrequency = Math.max(0, layer.gaussianSplatSettings?.render?.sortFrequency ?? 1);
     if (managed.splatCount > 0) {
-      this.updateSplatSort(managed);
+      this.updateSplatSort(managed, false, realtimePlayback);
     }
   }
 
@@ -1729,6 +1814,12 @@ export class ThreeSceneRenderer {
 
   private disposeManagedSplat(managed: ManagedSplat): void {
     this.scene?.remove(managed.mesh);
+    managed.centerOpacityTexture.dispose();
+    managed.colorTexture.dispose();
+    managed.axisXTexture.dispose();
+    managed.axisYTexture.dispose();
+    managed.axisZTexture.dispose();
+    managed.orderTexture.dispose();
     managed.material.dispose();
     managed.geometry.dispose();
   }

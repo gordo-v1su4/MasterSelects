@@ -4,6 +4,7 @@ import type { ProjectKeyframe, ProjectMarker, ProjectEffect, ProjectMask, Projec
 import type { MeshPrimitiveType, SceneCameraSettings } from '../../../stores/mediaStore/types';
 import type { GaussianSplatSettings } from '../../../engine/gaussian/types';
 import type { SplatEffectorSettings } from '../../../types/splatEffector';
+import type { Text3DProperties } from '../../../types';
 
 export interface ProjectTrack {
   id: string;
@@ -74,6 +75,7 @@ export interface ProjectClip {
 
   // Text clip support
   textProperties?: any;
+  text3DProperties?: Text3DProperties;
 
   // Solid clip support
   solidColor?: string;

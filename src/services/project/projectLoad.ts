@@ -282,6 +282,7 @@ function convertProjectCompositionToStore(
         compositionId: c.compositionId,
         // Text clip support
         textProperties: c.textProperties,
+        text3DProperties: c.text3DProperties,
         // Solid clip support
         solidColor: c.solidColor,
         // 3D layer support

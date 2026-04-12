@@ -87,9 +87,13 @@ export const createMeshClipSlice: SliceCreator<MeshClipActions> = (set, get) => 
   updateText3DProperties: (clipId, props) => {
     const { clips, invalidateCache } = get();
     const clip = clips.find(c => c.id === clipId);
-    if (!clip || clip.meshType !== 'text3d' || !clip.text3DProperties) return;
+    const meshType = clip?.meshType ?? clip?.source?.meshType;
+    const currentProps = meshType === 'text3d'
+      ? (clip?.text3DProperties ?? clip?.source?.text3DProperties ?? DEFAULT_TEXT_3D_PROPERTIES)
+      : (clip?.text3DProperties ?? clip?.source?.text3DProperties);
+    if (!clip || meshType !== 'text3d' || !currentProps) return;
 
-    const nextProps: Text3DProperties = { ...clip.text3DProperties, ...props };
+    const nextProps: Text3DProperties = { ...currentProps, ...props };
 
     set({
       clips: clips.map(c => c.id !== clipId ? c : {
