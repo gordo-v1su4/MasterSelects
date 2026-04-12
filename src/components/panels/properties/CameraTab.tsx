@@ -71,6 +71,7 @@ export function CameraTab({ clipId }: CameraTabProps) {
         <DraggableNumber
           value={cameraSettings.fov}
           onChange={(v) => updateCameraSetting('fov', Math.max(10, Math.min(140, v)))}
+          persistenceKey="camera.fov"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={10}
@@ -86,6 +87,7 @@ export function CameraTab({ clipId }: CameraTabProps) {
         <DraggableNumber
           value={cameraSettings.near}
           onChange={(v) => updateCameraSetting('near', Math.max(0.001, v))}
+          persistenceKey="camera.near"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={0.001}
@@ -100,6 +102,7 @@ export function CameraTab({ clipId }: CameraTabProps) {
         <DraggableNumber
           value={cameraSettings.far}
           onChange={(v) => updateCameraSetting('far', Math.max(cameraSettings.near + 0.1, v))}
+          persistenceKey="camera.far"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={1}

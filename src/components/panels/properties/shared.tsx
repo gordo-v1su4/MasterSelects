@@ -3,6 +3,10 @@ import { useRef, useCallback } from 'react';
 import { useTimelineStore } from '../../../stores/timeline';
 import type { AnimatableProperty, BlendMode } from '../../../types';
 import { createEffectProperty } from '../../../types';
+export {
+  EditableDraggableNumber as DraggableNumber,
+  type EditableDraggableNumberProps as DraggableNumberProps,
+} from '../../common/EditableDraggableNumber';
 
 // EQ band parameter names
 export const EQ_BAND_PARAMS = ['band31', 'band62', 'band125', 'band250', 'band500', 'band1k', 'band2k', 'band4k', 'band8k', 'band16k'];
@@ -174,6 +178,52 @@ export function PositionKeyframeToggle({ clipId, x, y, z }: { clipId: string; x:
   );
 }
 
+// Master keyframe toggle for camera move X, Y and forward Z (stored in scale.z)
+export function CameraPositionKeyframeToggle({ clipId, x, y, z }: { clipId: string; x: number; y: number; z: number }) {
+  const { isRecording, toggleKeyframeRecording, hasKeyframes, addKeyframe, disablePropertyKeyframes } = useTimelineStore.getState();
+
+  const xRec = isRecording(clipId, 'position.x');
+  const yRec = isRecording(clipId, 'position.y');
+  const zRec = isRecording(clipId, 'scale.z');
+  const xKfs = hasKeyframes(clipId, 'position.x');
+  const yKfs = hasKeyframes(clipId, 'position.y');
+  const zKfs = hasKeyframes(clipId, 'scale.z');
+
+  const anyRecording = xRec || yRec || zRec;
+  const anyHasKfs = xKfs || yKfs || zKfs;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (anyRecording || anyHasKfs) {
+      disablePropertyKeyframes(clipId, 'position.x', x);
+      disablePropertyKeyframes(clipId, 'position.y', y);
+      disablePropertyKeyframes(clipId, 'scale.z', z);
+    } else {
+      addKeyframe(clipId, 'position.x', x);
+      addKeyframe(clipId, 'position.y', y);
+      addKeyframe(clipId, 'scale.z', z);
+      toggleKeyframeRecording(clipId, 'position.x');
+      toggleKeyframeRecording(clipId, 'position.y');
+      toggleKeyframeRecording(clipId, 'scale.z');
+    }
+  };
+
+  return (
+    <button
+      className={`keyframe-toggle ${anyRecording ? 'recording' : ''} ${anyHasKfs ? 'has-keyframes' : ''}`}
+      onClick={handleClick}
+      title={anyRecording ? 'Stop recording camera position keyframes' : anyHasKfs ? 'Enable camera position keyframe recording' : 'Add camera position keyframes'}
+    >
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="13" r="7" />
+        <line x1="12" y1="13" x2="12" y2="9" />
+        <line x1="12" y1="2" x2="12" y2="5" />
+        <line x1="9" y1="3" x2="15" y2="3" />
+      </svg>
+    </button>
+  );
+}
+
 // Master keyframe toggle for Rotation X, Y, Z together
 export function RotationKeyframeToggle({ clipId, x, y, z }: { clipId: string; x: number; y: number; z: number }) {
   const { isRecording, toggleKeyframeRecording, hasKeyframes, addKeyframe, disablePropertyKeyframes } = useTimelineStore.getState();
@@ -300,7 +350,7 @@ export function PrecisionSlider({ min, max, step, value, onChange, defaultValue,
 }
 
 // Draggable number input
-interface DraggableNumberProps {
+interface LegacyDraggableNumberProps {
   value: number;
   onChange: (value: number) => void;
   defaultValue?: number;
@@ -313,7 +363,7 @@ interface DraggableNumberProps {
   onDragEnd?: () => void;
 }
 
-export function DraggableNumber({ value, onChange, defaultValue, sensitivity = 2, decimals = 2, suffix = '', min, max, onDragStart, onDragEnd }: DraggableNumberProps) {
+export function LegacyDraggableNumber({ value, onChange, defaultValue, sensitivity = 2, decimals = 2, suffix = '', min, max, onDragStart, onDragEnd }: LegacyDraggableNumberProps) {
   const inputRef = useRef<HTMLSpanElement>(null);
   const accumulatedDelta = useRef(0);
   const startValue = useRef(0);

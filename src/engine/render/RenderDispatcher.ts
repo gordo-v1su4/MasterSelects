@@ -1190,6 +1190,10 @@ export class RenderDispatcher {
     }
   }
 
+  getGaussianSplatSceneBounds(clipId: string): { min: [number, number, number]; max: [number, number, number] } | undefined {
+    return this.splatSceneBounds.get(clipId);
+  }
+
   renderEmptyFrame(device: GPUDevice): void {
     const d = this.deps;
     const commandEncoder = device.createCommandEncoder();

@@ -14,6 +14,7 @@ interface EngineState {
   gpuInfo: { vendor: string; device: string; description: string } | null;
   linuxVulkanWarning: boolean;
   gaussianSplatNavClipId: string | null;
+  gaussianSplatNavFpsMode: boolean;
 
   // Actions
   setEngineReady: (ready: boolean) => void;
@@ -23,6 +24,7 @@ interface EngineState {
   setLinuxVulkanWarning: (show: boolean) => void;
   dismissLinuxVulkanWarning: () => void;
   setGaussianSplatNavClipId: (clipId: string | null) => void;
+  setGaussianSplatNavFpsMode: (enabled: boolean) => void;
 }
 
 // Check if Linux Vulkan warning was already dismissed
@@ -37,6 +39,7 @@ export const useEngineStore = create<EngineState>()(
     gpuInfo: null,
     linuxVulkanWarning: false,
     gaussianSplatNavClipId: null,
+    gaussianSplatNavFpsMode: false,
     engineStats: {
       fps: 0,
       frameTime: 0,
@@ -82,6 +85,10 @@ export const useEngineStore = create<EngineState>()(
 
     setGaussianSplatNavClipId: (clipId: string | null) => {
       set({ gaussianSplatNavClipId: clipId });
+    },
+
+    setGaussianSplatNavFpsMode: (enabled: boolean) => {
+      set({ gaussianSplatNavFpsMode: enabled });
     },
   }))
 );

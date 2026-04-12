@@ -92,6 +92,7 @@ export function SplatEffectorTab({ clipId }: SplatEffectorTabProps) {
         <DraggableNumber
           value={settings.strength}
           onChange={(v) => updateSetting('strength', Math.max(0, v))}
+          persistenceKey="splatEffector.strength"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={0}
@@ -107,6 +108,7 @@ export function SplatEffectorTab({ clipId }: SplatEffectorTabProps) {
         <DraggableNumber
           value={settings.falloff}
           onChange={(v) => updateSetting('falloff', Math.max(0.1, v))}
+          persistenceKey="splatEffector.falloff"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={0.1}
@@ -121,6 +123,7 @@ export function SplatEffectorTab({ clipId }: SplatEffectorTabProps) {
         <DraggableNumber
           value={settings.speed}
           onChange={(v) => updateSetting('speed', Math.max(0, v))}
+          persistenceKey="splatEffector.speed"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={0}
@@ -135,6 +138,7 @@ export function SplatEffectorTab({ clipId }: SplatEffectorTabProps) {
         <DraggableNumber
           value={settings.seed}
           onChange={(v) => updateSetting('seed', v)}
+          persistenceKey="splatEffector.seed"
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           min={-10000}

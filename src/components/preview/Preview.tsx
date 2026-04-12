@@ -26,6 +26,7 @@ import { useSAM2Store } from '../../stores/sam2Store';
 import { renderScheduler } from '../../services/renderScheduler';
 import { engine } from '../../engine/WebGPUEngine';
 import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../../engine/gaussian/types';
+import { resolveOrbitCameraTranslationForFixedEye } from '../../engine/gaussian/core/SplatCameraUtils';
 import type { PreviewPanelSource } from '../../types/dock';
 import {
   createPreviewPanelDataPatch,
@@ -49,6 +50,11 @@ function getSharedSceneDefaultCameraDistance(fovDegrees: number): number {
   return worldHeight / (2 * Math.tan(fovRadians * 0.5));
 }
 
+const DEFAULT_NATIVE_GAUSSIAN_CAMERA_FOV = 60;
+const DEFAULT_NATIVE_GAUSSIAN_MIN_DISTANCE = 5;
+const CAMERA_NAV_FPS_LOOK_SPEED = 0.18;
+const CAMERA_NAV_FPS_PITCH_LIMIT = 89.5;
+
 interface PreviewProps {
   panelId: string;
   source: PreviewPanelSource;
@@ -64,6 +70,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const engineInitError = useEngineStore((s) => s.engineInitError);
   const engineStats = useEngineStore(s => s.engineStats);
   const gaussianSplatNavClipId = useEngineStore((s) => s.gaussianSplatNavClipId);
+  const gaussianSplatNavFpsMode = useEngineStore((s) => s.gaussianSplatNavFpsMode);
   const { clips, selectedClipIds, primarySelectedClipId, selectClip, updateClipTransform, maskEditMode, layers, selectedLayerId, selectLayer, updateLayer, tracks } = useTimelineStore(useShallow(s => ({
     clips: s.clips,
     selectedClipIds: s.selectedClipIds,
@@ -288,6 +295,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   const [isPanning, setIsPanning] = useState(false);
   const [isGaussianOrbiting, setIsGaussianOrbiting] = useState(false);
   const [isGaussianPanning, setIsGaussianPanning] = useState(false);
+  const [isGaussianFpsLooking, setIsGaussianFpsLooking] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const gaussianOrbitStart = useRef({
     clipId: null as string | null,
@@ -305,6 +313,11 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     panY: 0,
     panZ: 0,
     zoom: 1,
+  });
+  const gaussianFpsLookStart = useRef({
+    clipId: null as string | null,
+    x: 0,
+    y: 0,
   });
   const gaussianWheelBatchTimerRef = useRef<number | null>(null);
   const gaussianKeyboardMoveCodesRef = useRef<Set<'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'KeyQ' | 'KeyE'>>(new Set());
@@ -358,6 +371,10 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     selectedCameraNavClip &&
     gaussianSplatNavClipId === selectedCameraNavClip.id,
   );
+
+  const getGaussianPointerLockTarget = useCallback(() => {
+    return canvasWrapperRef.current ?? containerRef.current;
+  }, []);
 
   const isCanvasInteractionTarget = useCallback((target: EventTarget | null) => {
     if (!(target instanceof Node)) return false;
@@ -414,6 +431,15 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     } else {
       const currentClip = useTimelineStore.getState().clips.find((clip) => clip.id === clipId);
       const currentTransform = currentClip?.transform;
+      const nextScale = values.scale !== undefined || values.forwardOffset !== undefined
+        ? {
+            x: values.scale ?? currentTransform?.scale.x ?? 1,
+            y: values.scale ?? currentTransform?.scale.y ?? 1,
+            ...(values.forwardOffset !== undefined || currentTransform?.scale.z !== undefined
+              ? { z: values.forwardOffset ?? currentTransform?.scale.z ?? 0 }
+              : {}),
+          }
+        : undefined;
       updateClipTransform(clipId, {
         ...(values.positionX !== undefined || values.positionY !== undefined
           ? {
@@ -424,15 +450,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
               },
             }
           : {}),
-        ...(values.scale !== undefined
-          || values.forwardOffset !== undefined
-          ? {
-              scale: {
-                ...(values.scale !== undefined ? { x: values.scale, y: values.scale } : {}),
-                ...(values.forwardOffset !== undefined ? { z: values.forwardOffset } : {}),
-              },
-            }
-          : {}),
+        ...(nextScale ? { scale: nextScale } : {}),
         ...(values.rotationX !== undefined || values.rotationY !== undefined
           ? {
               rotation: {
@@ -460,6 +478,38 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     }, 180);
   }, []);
 
+  const getCameraNavSolveSettings = useCallback((clip: typeof selectedCameraNavClip) => {
+    if (!clip?.source) return null;
+
+    if (clip.source.type === 'camera') {
+      const cameraSettings = clip.source.cameraSettings ?? DEFAULT_SCENE_CAMERA_SETTINGS;
+      return {
+        settings: {
+          nearPlane: cameraSettings.near,
+          farPlane: cameraSettings.far,
+          fov: cameraSettings.fov,
+          minimumDistance: getSharedSceneDefaultCameraDistance(cameraSettings.fov),
+        },
+        sceneBounds: undefined,
+      };
+    }
+
+    if (clip.source.type === 'gaussian-splat') {
+      const renderSettings = clip.source.gaussianSplatSettings?.render ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render;
+      return {
+        settings: {
+          nearPlane: renderSettings.nearPlane,
+          farPlane: renderSettings.farPlane,
+          fov: DEFAULT_NATIVE_GAUSSIAN_CAMERA_FOV,
+          minimumDistance: DEFAULT_NATIVE_GAUSSIAN_MIN_DISTANCE,
+        },
+        sceneBounds: engine.getGaussianSplatSceneBounds(clip.id),
+      };
+    }
+
+    return null;
+  }, []);
+
   const finishGaussianKeyboardBatch = useCallback(() => {
     if (!gaussianKeyboardBatchActiveRef.current) return;
     gaussianKeyboardBatchActiveRef.current = false;
@@ -479,6 +529,25 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     stopGaussianKeyboardLoop();
     finishGaussianKeyboardBatch();
   }, [finishGaussianKeyboardBatch, stopGaussianKeyboardLoop]);
+
+  const stopGaussianFpsLook = useCallback((exitPointerLock = true) => {
+    const activeClipId = gaussianFpsLookStart.current.clipId;
+    gaussianFpsLookStart.current.clipId = null;
+    gaussianFpsLookStart.current.x = 0;
+    gaussianFpsLookStart.current.y = 0;
+    setIsGaussianFpsLooking(false);
+
+    if (exitPointerLock) {
+      const pointerLockTarget = getGaussianPointerLockTarget();
+      if (pointerLockTarget && document.pointerLockElement === pointerLockTarget) {
+        document.exitPointerLock();
+      }
+    }
+
+    if (activeClipId) {
+      endBatch();
+    }
+  }, [getGaussianPointerLockTarget]);
 
   const tickGaussianKeyboardMovement = useCallback((timestamp: number) => {
     gaussianKeyboardFrameRef.current = null;
@@ -521,10 +590,10 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     const clipSource = selectedCameraNavClip.source;
     const fovDegrees = clipSource?.type === 'camera'
       ? clipSource.cameraSettings?.fov ?? DEFAULT_SCENE_CAMERA_SETTINGS.fov
-      : clipSource?.gaussianSplatSettings?.render?.fov ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.fov;
+      : DEFAULT_NATIVE_GAUSSIAN_CAMERA_FOV;
     const minimumDistance = clipSource?.type === 'camera'
       ? getSharedSceneDefaultCameraDistance(fovDegrees)
-      : clipSource?.gaussianSplatSettings?.render?.minimumDistance ?? 5;
+      : DEFAULT_NATIVE_GAUSSIAN_MIN_DISTANCE;
     const baseDistance = freshTransform.position.z !== 0 ? Math.abs(freshTransform.position.z) : minimumDistance;
     const currentDistance = baseDistance / zoom;
     const panStep = 0.9 * zoomDamping * dt;
@@ -583,8 +652,9 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   }, [finishGaussianKeyboardBatch, stopGaussianKeyboardLoop]);
 
   const handleGaussianNavBlur = useCallback(() => {
+    stopGaussianFpsLook();
     stopGaussianKeyboardMovement();
-  }, [stopGaussianKeyboardMovement]);
+  }, [stopGaussianFpsLook, stopGaussianKeyboardMovement]);
 
   useEffect(() => {
     return () => {
@@ -601,12 +671,14 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         gaussianPanStart.current.clipId = null;
         endBatch();
       }
+      stopGaussianFpsLook();
       stopGaussianKeyboardMovement();
     };
-  }, [stopGaussianKeyboardMovement]);
+  }, [stopGaussianFpsLook, stopGaussianKeyboardMovement]);
 
   useEffect(() => {
     if (gaussianNavEnabled) return;
+    stopGaussianFpsLook();
     stopGaussianKeyboardMovement();
     if (isGaussianOrbiting) {
       gaussianOrbitStart.current.clipId = null;
@@ -618,7 +690,22 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       setIsGaussianPanning(false);
       endBatch();
     }
-  }, [gaussianNavEnabled, isGaussianOrbiting, isGaussianPanning, stopGaussianKeyboardMovement]);
+  }, [gaussianNavEnabled, isGaussianOrbiting, isGaussianPanning, stopGaussianFpsLook, stopGaussianKeyboardMovement]);
+
+  useEffect(() => {
+    if (gaussianSplatNavFpsMode) {
+      if (isGaussianOrbiting) {
+        gaussianOrbitStart.current.clipId = null;
+        setIsGaussianOrbiting(false);
+        endBatch();
+      }
+      return;
+    }
+
+    if (isGaussianFpsLooking) {
+      stopGaussianFpsLook();
+    }
+  }, [gaussianSplatNavFpsMode, isGaussianFpsLooking, isGaussianOrbiting, stopGaussianFpsLook]);
 
   useEffect(() => {
     if (!isGaussianOrbiting) return;
@@ -630,7 +717,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       const dx = e.clientX - x;
       const dy = e.clientY - y;
       const nextPitch = pitch + dy * 0.25;
-      const nextYaw = yaw + dx * 0.25;
+      const nextYaw = yaw - dx * 0.25;
 
       applyGaussianCameraValues(clipId, {
         rotationX: nextPitch,
@@ -652,6 +739,88 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       window.removeEventListener('mouseup', finishGaussianOrbit);
     };
   }, [applyGaussianCameraValues, isGaussianOrbiting]);
+
+  useEffect(() => {
+    if (!isGaussianFpsLooking || !selectedCameraNavClip) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      const { clipId, x, y } = gaussianFpsLookStart.current;
+      if (!clipId) return;
+
+      const freshTransform = getFreshCameraNavTransform(selectedCameraNavClip);
+      const solveSettings = getCameraNavSolveSettings(selectedCameraNavClip);
+      if (!freshTransform || !solveSettings) return;
+
+      const pointerLockTarget = getGaussianPointerLockTarget();
+      const pointerLockActive = pointerLockTarget !== null && document.pointerLockElement === pointerLockTarget;
+      const deltaX = pointerLockActive ? e.movementX : e.clientX - x;
+      const deltaY = pointerLockActive ? e.movementY : e.clientY - y;
+
+      if (!pointerLockActive) {
+        gaussianFpsLookStart.current.x = e.clientX;
+        gaussianFpsLookStart.current.y = e.clientY;
+      }
+
+      if (deltaX === 0 && deltaY === 0) return;
+
+      const nextPitch = Math.max(
+        -CAMERA_NAV_FPS_PITCH_LIMIT,
+        Math.min(CAMERA_NAV_FPS_PITCH_LIMIT, freshTransform.rotation.x + deltaY * CAMERA_NAV_FPS_LOOK_SPEED),
+      );
+      const nextYaw = freshTransform.rotation.y - deltaX * CAMERA_NAV_FPS_LOOK_SPEED;
+      const nextTranslation = resolveOrbitCameraTranslationForFixedEye(
+        freshTransform,
+        {
+          x: nextPitch,
+          y: nextYaw,
+          z: freshTransform.rotation.z,
+        },
+        solveSettings.settings,
+        { width: effectiveResolution.width, height: effectiveResolution.height },
+        solveSettings.sceneBounds,
+      );
+
+      applyGaussianCameraValues(clipId, {
+        positionX: nextTranslation.positionX,
+        positionY: nextTranslation.positionY,
+        forwardOffset: nextTranslation.forwardOffset,
+        rotationX: nextPitch,
+        rotationY: nextYaw,
+      });
+    };
+
+    const finishGaussianFpsLook = () => {
+      stopGaussianFpsLook();
+    };
+
+    const handlePointerLockChange = () => {
+      const pointerLockTarget = getGaussianPointerLockTarget();
+      const pointerLockActive = pointerLockTarget !== null && document.pointerLockElement === pointerLockTarget;
+      if (!pointerLockActive && gaussianFpsLookStart.current.clipId) {
+        stopGaussianFpsLook(false);
+      }
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', finishGaussianFpsLook);
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', finishGaussianFpsLook);
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+    };
+  }, [
+    applyGaussianCameraValues,
+    effectiveResolution.height,
+    effectiveResolution.width,
+    getCameraNavSolveSettings,
+    getFreshCameraNavTransform,
+    getGaussianPointerLockTarget,
+    isGaussianFpsLooking,
+    selectedCameraNavClip,
+    stopGaussianFpsLook,
+  ]);
 
   useEffect(() => {
     if (!isGaussianPanning) return;
@@ -837,16 +1006,27 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         }
         e.preventDefault();
         endGaussianWheelBatch();
-        startBatch('Gaussian orbit');
-        gaussianOrbitStart.current = {
-          clipId: selectedCameraNavClip.id,
-          x: e.clientX,
-          y: e.clientY,
-          pitch: freshTransform.rotation.x,
-          yaw: freshTransform.rotation.y,
-          roll: freshTransform.rotation.z,
-        };
-        setIsGaussianOrbiting(true);
+        if (gaussianSplatNavFpsMode) {
+          startBatch('Gaussian look');
+          gaussianFpsLookStart.current = {
+            clipId: selectedCameraNavClip.id,
+            x: e.clientX,
+            y: e.clientY,
+          };
+          getGaussianPointerLockTarget()?.requestPointerLock?.();
+          setIsGaussianFpsLooking(true);
+        } else {
+          startBatch('Gaussian orbit');
+          gaussianOrbitStart.current = {
+            clipId: selectedCameraNavClip.id,
+            x: e.clientX,
+            y: e.clientY,
+            pitch: freshTransform.rotation.x,
+            yaw: freshTransform.rotation.y,
+            roll: freshTransform.rotation.z,
+          };
+          setIsGaussianOrbiting(true);
+        }
         return;
       }
 
@@ -884,7 +1064,9 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     editMode,
     endGaussianWheelBatch,
     gaussianNavEnabled,
+    gaussianSplatNavFpsMode,
     getFreshCameraNavTransform,
+    getGaussianPointerLockTarget,
     isCanvasInteractionTarget,
     selectedCameraNavClip,
     viewPan,
@@ -975,10 +1157,12 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       style={{
         cursor: isGaussianOrbiting || isGaussianPanning
           ? 'grabbing'
+          : isGaussianFpsLooking
+            ? 'crosshair'
           : isPanning
             ? 'grabbing'
             : gaussianNavEnabled
-              ? 'grab'
+              ? (gaussianSplatNavFpsMode ? 'crosshair' : 'grab')
               : editMode
                 ? 'crosshair'
                 : 'default',
@@ -1104,8 +1288,16 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         {gaussianNavEnabled && (
           <div className="preview-edit-hint">
             {selectedCameraNavClip?.source?.type === 'camera'
-              ? 'Scene Camera Nav: click preview, WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom'
-              : 'Gaussian Nav: click preview, WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom'}
+              ? (
+                  gaussianSplatNavFpsMode
+                    ? 'Scene Camera Nav: click preview, hold LMB to look, WASD move, Q/E up-down, MMB/RMB/Shift+LMB pan, wheel zoom'
+                    : 'Scene Camera Nav: click preview, WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom'
+                )
+              : (
+                  gaussianSplatNavFpsMode
+                    ? 'Gaussian Nav: click preview, hold LMB to look, WASD move, Q/E up-down, MMB/RMB/Shift+LMB pan, wheel zoom'
+                    : 'Gaussian Nav: click preview, WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom'
+                )}
           </div>
         )}
 

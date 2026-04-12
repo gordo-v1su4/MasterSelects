@@ -661,6 +661,10 @@ export class WebGPUEngine {
     return this.renderDispatcher?.renderCachedFrame(time) ?? false;
   }
 
+  getGaussianSplatSceneBounds(clipId: string): { min: [number, number, number]; max: [number, number, number] } | undefined {
+    return this.renderDispatcher?.getGaussianSplatSceneBounds(clipId);
+  }
+
   // === NESTED COMPOSITION HELPERS ===
 
   hasNestedCompTexture(compositionId: string): boolean {

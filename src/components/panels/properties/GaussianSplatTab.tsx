@@ -102,6 +102,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           <DraggableNumber
             value={render.splatScale}
             onChange={(value) => updateRenderSetting('splatScale', Math.max(0.01, value))}
+            persistenceKey="gaussian.render.splatScale"
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             min={0.01}
@@ -116,6 +117,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           <DraggableNumber
             value={render.maxSplats}
             onChange={(value) => updateRenderSetting('maxSplats', Math.max(0, Math.round(value)))}
+            persistenceKey="gaussian.render.maxSplats"
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             min={0}
@@ -131,6 +133,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           <DraggableNumber
             value={render.sortFrequency}
             onChange={(value) => updateRenderSetting('sortFrequency', Math.max(0, Math.round(value)))}
+            persistenceKey="gaussian.render.sortFrequency"
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             min={0}
@@ -147,6 +150,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
             <DraggableNumber
               value={render.nearPlane}
               onChange={(value) => updateRenderSetting('nearPlane', value)}
+              persistenceKey="gaussian.render.nearPlane"
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               min={0.01}
@@ -161,6 +165,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
             <DraggableNumber
               value={render.farPlane}
               onChange={(value) => updateRenderSetting('farPlane', value)}
+              persistenceKey="gaussian.render.farPlane"
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               min={10}

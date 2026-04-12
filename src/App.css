@@ -7776,9 +7776,24 @@ input[type="checkbox"] {
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
+.draggable-number-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 /* When used as primary input in control-row (replacing slider + value) */
-.control-row > .draggable-number {
+.control-row > .draggable-number,
+.control-row > .draggable-number-anchor {
   flex: 1;
+}
+
+.control-row > .draggable-number-anchor {
+  justify-content: flex-end;
+}
+
+.control-row > .draggable-number-anchor > .draggable-number,
+.control-row > .draggable-number-anchor > .draggable-number-input {
   text-align: right;
 }
 
@@ -7791,6 +7806,83 @@ input[type="checkbox"] {
 .draggable-number:active {
   color: #9cc4f0;
   cursor: grabbing;
+}
+
+.draggable-number.editing,
+.draggable-number-input {
+  cursor: text;
+  user-select: text;
+}
+
+.draggable-number-input {
+  outline: none;
+  box-sizing: border-box;
+  text-align: right;
+  color: #d7e7fb;
+  background: var(--bg-secondary);
+  border-color: #2d5a8e;
+}
+
+.draggable-number-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(45, 140, 235, 0.35);
+}
+
+.draggable-number-bounds-popover {
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  padding: 8px;
+  background: rgba(20, 24, 30, 0.98);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+.draggable-number-bounds-title {
+  margin-bottom: 6px;
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.draggable-number-bounds-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.draggable-number-bounds-row label {
+  width: 26px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.draggable-number-bounds-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.draggable-number-bounds-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.draggable-number-bounds-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 /* ========== KEYFRAME TOGGLE ========== */

@@ -12,6 +12,42 @@ export interface OrbitCameraPose {
   far: number;
 }
 
+type OrbitCameraLayerInput = {
+  position: { x: number; y: number; z: number };
+  scale: { x: number; y: number; z?: number };
+  rotation: number | { x: number; y: number; z: number };
+};
+
+type OrbitCameraSettingsInput = {
+  nearPlane: number;
+  farPlane: number;
+  fov?: number;
+  minimumDistance?: number;
+};
+
+type OrbitCameraViewportInput = {
+  width: number;
+  height: number;
+};
+
+type OrbitCameraSceneBounds = {
+  min: [number, number, number];
+  max: [number, number, number];
+};
+
+export interface OrbitCameraFrame extends OrbitCameraPose {
+  center: { x: number; y: number; z: number };
+  right: { x: number; y: number; z: number };
+  cameraUp: { x: number; y: number; z: number };
+  forward: { x: number; y: number; z: number };
+  orbitOffset: { x: number; y: number; z: number };
+  halfWidth: number;
+  halfHeight: number;
+  distance: number;
+  zoom: number;
+  forwardOffset: number;
+}
+
 /**
  * Build view + projection matrices from a layer's transform properties.
  *
@@ -24,17 +60,10 @@ export interface OrbitCameraPose {
  *  - settings.nearPlane / farPlane  -> clipping planes
  */
 export function buildSplatCamera(
-  layer: {
-    position: { x: number; y: number; z: number };
-    scale: { x: number; y: number; z?: number };
-    rotation: number | { x: number; y: number; z: number };
-  },
-  settings: { nearPlane: number; farPlane: number; fov?: number; minimumDistance?: number },
-  viewport: { width: number; height: number },
-  sceneBounds?: {
-    min: [number, number, number];
-    max: [number, number, number];
-  },
+  layer: OrbitCameraLayerInput,
+  settings: OrbitCameraSettingsInput,
+  viewport: OrbitCameraViewportInput,
+  sceneBounds?: OrbitCameraSceneBounds,
 ): SplatCameraParams {
   const pose = resolveOrbitCameraPose(layer, settings, viewport, sceneBounds);
   const fov = pose.fovDegrees * (Math.PI / 180);
@@ -59,18 +88,29 @@ export function buildSplatCamera(
 }
 
 export function resolveOrbitCameraPose(
-  layer: {
-    position: { x: number; y: number; z: number };
-    scale: { x: number; y: number; z?: number };
-    rotation: number | { x: number; y: number; z: number };
-  },
-  settings: { nearPlane: number; farPlane: number; fov?: number; minimumDistance?: number },
-  viewport: { width: number; height: number },
-  sceneBounds?: {
-    min: [number, number, number];
-    max: [number, number, number];
-  },
+  layer: OrbitCameraLayerInput,
+  settings: OrbitCameraSettingsInput,
+  viewport: OrbitCameraViewportInput,
+  sceneBounds?: OrbitCameraSceneBounds,
 ): OrbitCameraPose {
+  const frame = resolveOrbitCameraFrame(layer, settings, viewport, sceneBounds);
+
+  return {
+    eye: frame.eye,
+    target: frame.target,
+    up: frame.up,
+    fovDegrees: frame.fovDegrees,
+    near: frame.near,
+    far: frame.far,
+  };
+}
+
+export function resolveOrbitCameraFrame(
+  layer: OrbitCameraLayerInput,
+  settings: OrbitCameraSettingsInput,
+  viewport: OrbitCameraViewportInput,
+  sceneBounds?: OrbitCameraSceneBounds,
+): OrbitCameraFrame {
   const DEG_TO_RAD = Math.PI / 180;
 
   // Extract orbit angles
@@ -151,9 +191,68 @@ export function resolveOrbitCameraPose(
     eye: { x: eyeX, y: eyeY, z: eyeZ },
     target: { x: targetX, y: targetY, z: targetZ },
     up: { x: cameraUpVector[0], y: cameraUpVector[1], z: cameraUpVector[2] },
+    center: { x: centerX, y: centerY, z: centerZ },
+    right: { x: rightVector[0], y: rightVector[1], z: rightVector[2] },
+    cameraUp: { x: cameraUpVector[0], y: cameraUpVector[1], z: cameraUpVector[2] },
+    forward: { x: cameraForwardVector[0], y: cameraForwardVector[1], z: cameraForwardVector[2] },
+    orbitOffset: { x: eyeOffset[0], y: eyeOffset[1], z: eyeOffset[2] },
+    halfWidth,
+    halfHeight,
+    distance,
+    zoom,
+    forwardOffset,
     fovDegrees,
     near,
     far,
+  };
+}
+
+export function resolveOrbitCameraTranslationForFixedEye(
+  layer: OrbitCameraLayerInput,
+  nextRotation: { x: number; y: number; z: number },
+  settings: OrbitCameraSettingsInput,
+  viewport: OrbitCameraViewportInput,
+  sceneBounds?: OrbitCameraSceneBounds,
+): { positionX: number; positionY: number; forwardOffset: number } {
+  const currentFrame = resolveOrbitCameraFrame(layer, settings, viewport, sceneBounds);
+  const nextFrame = resolveOrbitCameraFrame(
+    {
+      ...layer,
+      rotation: nextRotation,
+    },
+    settings,
+    viewport,
+    sceneBounds,
+  );
+
+  const desiredTargetX = currentFrame.eye.x - nextFrame.orbitOffset.x;
+  const desiredTargetY = currentFrame.eye.y - nextFrame.orbitOffset.y;
+  const desiredTargetZ = currentFrame.eye.z - nextFrame.orbitOffset.z;
+  const offsetFromCenter: [number, number, number] = [
+    desiredTargetX - nextFrame.center.x,
+    desiredTargetY - nextFrame.center.y,
+    desiredTargetZ - nextFrame.center.z,
+  ];
+  const panWorldX = dot(offsetFromCenter, [
+    nextFrame.right.x,
+    nextFrame.right.y,
+    nextFrame.right.z,
+  ]);
+  const panWorldY = dot(offsetFromCenter, [
+    nextFrame.cameraUp.x,
+    nextFrame.cameraUp.y,
+    nextFrame.cameraUp.z,
+  ]);
+  const forwardOffset = dot(offsetFromCenter, [
+    nextFrame.forward.x,
+    nextFrame.forward.y,
+    nextFrame.forward.z,
+  ]);
+
+  return {
+    positionX: Math.abs(nextFrame.halfWidth) > 1e-8 ? panWorldX / nextFrame.halfWidth : 0,
+    positionY: Math.abs(nextFrame.halfHeight) > 1e-8 ? panWorldY / nextFrame.halfHeight : 0,
+    forwardOffset,
   };
 }
 
@@ -199,6 +298,13 @@ function cross(
     a[2] * b[0] - a[0] * b[2],
     a[0] * b[1] - a[1] * b[0],
   ];
+}
+
+function dot(
+  a: [number, number, number],
+  b: [number, number, number],
+): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 function normalize(v: [number, number, number]): [number, number, number] {
