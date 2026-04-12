@@ -635,12 +635,18 @@ export default defineConfig(({ command }) => {
     },
     build: {
       target: 'esnext',
+      chunkSizeWarningLimit: 6000,
       rollupOptions: {
+        onwarn(warning, warn) {
+          if (warning.message.includes('dynamic import will not move module into another chunk')) {
+            return;
+          }
+          warn(warning);
+        },
         output: {
           manualChunks: {
             // Force heavy libs into separate chunks (loaded on demand)
             'mp4box': ['mp4box'],
-            'onnxruntime': ['onnxruntime-web'],
           },
         },
       },

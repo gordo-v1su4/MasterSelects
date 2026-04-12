@@ -25,6 +25,7 @@ import { getInterpolatedClipTransform } from '../../utils/keyframeInterpolation'
 import { useTimelineStore } from '../../stores/timeline';
 import { useMediaStore } from '../../stores/mediaStore';
 import { DEFAULT_TRANSFORM, MAX_NESTING_DEPTH } from '../../stores/timeline/constants';
+import { prewarmGaussianSplatRuntime } from '../../engine/three/splatRuntimeCache';
 
 const log = Logger.create('LayerBuilder');
 
@@ -44,6 +45,7 @@ export class LayerBuilderService {
 
   // Lookahead preloading
   private lastLookaheadTime = 0;
+  private lastSplatLookaheadTime = 0;
 
   constructor() {
     // Legacy gaussian-avatar path stays on disk for migration/reference only.
@@ -182,6 +184,8 @@ export class LayerBuilderService {
       this.layerCache.invalidate();
       return this.mergeBackgroundLayers([], ctx.playheadPosition);
     }
+
+    this.prewarmGaussianSplatClips(ctx);
 
     // Check cache (only for primary layers — background layers are cheap to rebuild)
     const cacheResult = this.layerCache.checkCache(ctx);
@@ -856,6 +860,7 @@ export class LayerBuilderService {
    */
   private buildGaussianSplatLayer(clip: TimelineClip, layerIndex: number, ctx: FrameContext, opacityOverride?: number): Layer {
     const timeInfo = getClipTimeInfo(ctx, clip);
+    const mediaFile = getMediaFileForClip(ctx, clip);
     const renderSettings = clip.source?.gaussianSplatSettings?.render;
     const useNativeRenderer = renderSettings?.useNativeRenderer === true;
     const transform = useNativeRenderer
@@ -903,8 +908,10 @@ export class LayerBuilderService {
       blendMode: transform.blendMode as BlendMode,
       source: {
         type: 'gaussian-splat',
+        mediaFileId: mediaFile?.id ?? clip.mediaFileId ?? clip.source?.mediaFileId,
         gaussianSplatUrl: clip.source?.gaussianSplatUrl,
         gaussianSplatFileName: clip.file?.name ?? clip.name,
+        gaussianSplatFileHash: mediaFile?.fileHash,
         gaussianSplatSettings: clip.source?.gaussianSplatSettings,
         mediaTime: timeInfo.clipLocalTime,
       },
@@ -917,6 +924,42 @@ export class LayerBuilderService {
 
     this.addMaskProperties(layer, clip);
     return layer;
+  }
+
+  private prewarmGaussianSplatClips(ctx: FrameContext): void {
+    if (ctx.now - this.lastSplatLookaheadTime < LAYER_BUILDER_CONSTANTS.LOOKAHEAD_INTERVAL) {
+      return;
+    }
+    this.lastSplatLookaheadTime = ctx.now;
+
+    const lookBehind = ctx.isDraggingPlayhead ? 1.25 : 0.1;
+    const lookAhead = ctx.isPlaying ? LAYER_BUILDER_CONSTANTS.LOOKAHEAD_SECONDS : 1.25;
+    const rangeStart = Math.max(0, ctx.playheadPosition - lookBehind);
+    const rangeEnd = ctx.playheadPosition + lookAhead;
+
+    for (const clip of ctx.clips) {
+      if (clip.source?.type !== 'gaussian-splat') continue;
+      if (!isVideoTrackVisible(ctx, clip.trackId)) continue;
+      if ((clip.source.gaussianSplatSettings?.render.useNativeRenderer ?? false) === true) continue;
+      if (clip.startTime > rangeEnd || clip.startTime + clip.duration < rangeStart) continue;
+
+      const mediaFile = getMediaFileForClip(ctx, clip);
+      const file = mediaFile?.file ?? clip.file;
+      if (!file) continue;
+
+      prewarmGaussianSplatRuntime({
+        cacheKey:
+          mediaFile?.fileHash ??
+          mediaFile?.id ??
+          clip.source?.mediaFileId ??
+          clip.id,
+        fileHash: mediaFile?.fileHash,
+        file,
+        url: clip.source?.gaussianSplatUrl,
+        fileName: file.name || clip.name,
+        requestedMaxSplats: clip.source?.gaussianSplatSettings?.render.maxSplats ?? 0,
+      });
+    }
   }
 
   /**

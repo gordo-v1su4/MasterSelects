@@ -13,9 +13,14 @@ import gentilisBold from 'three/examples/fonts/gentilis_bold.typeface.json';
 import { Logger } from '../../services/logger';
 import type { Layer3DData, CameraConfig, SplatEffectorRuntimeData } from './types';
 import { DEFAULT_CAMERA_CONFIG } from './types';
-import { loadGaussianSplatAsset } from '../gaussian/loaders';
-import type { GaussianSplatAsset, GaussianSplatFormat } from '../gaussian/loaders';
 import { resolveSplatSortPolicy } from './splatSortPolicy';
+import {
+  DEFAULT_SPLAT_BASE_LOD_MAX_SPLATS,
+  prewarmGaussianSplatRuntime,
+  resolvePreparedSplatRuntime,
+  waitForTargetPreparedSplatRuntime,
+  type PreparedSplatRuntime,
+} from './splatRuntimeCache';
 
 const log = Logger.create('ThreeSceneRenderer');
 
@@ -86,12 +91,19 @@ interface ManagedSplat {
   axisYTexture: import('three').DataTexture;
   axisZTexture: import('three').DataTexture;
   orderTexture: import('three').DataTexture;
+  centerOpacityTextureData: Float32Array;
+  colorTextureData: Float32Array;
+  axisXTextureData: Float32Array;
+  axisYTextureData: Float32Array;
+  axisZTextureData: Float32Array;
   orderTextureData: Float32Array;
+  appliedRuntimeKey?: string;
+  stagedTargetRuntime: PreparedSplatRuntime | null;
+  stagedLastStepMs: number;
 }
 
 const modelCache = new Map<string, import('three').Group>();
 const modelLoading = new Set<string>();
-const splatAssetCache = new Map<string, Promise<GaussianSplatAsset>>();
 const text3DFontLoader = new FontLoader();
 const text3DFontCache = new Map<string, ParsedText3DFont>();
 const TEXT_3D_FONT_DATA: Record<'helvetiker' | 'optimer' | 'gentilis', Record<'regular' | 'bold', object>> = {
@@ -131,19 +143,6 @@ export class ThreeSceneRenderer {
 
   private getFiniteNumber(value: number | undefined, fallback: number): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-  }
-
-  private getSplatTextureDimensions(texelCount: number): { width: number; height: number } {
-    const safeCount = Math.max(1, Math.ceil(texelCount));
-    const maxTextureSize = this.renderer?.capabilities.maxTextureSize ?? 4096;
-    const width = Math.min(maxTextureSize, Math.max(1, Math.ceil(Math.sqrt(safeCount))));
-    const height = Math.max(1, Math.ceil(safeCount / width));
-
-    if (height > maxTextureSize) {
-      throw new Error(`Gaussian splat texture exceeds GPU max texture size (${safeCount} texels > ${maxTextureSize}x${maxTextureSize})`);
-    }
-
-    return { width, height };
   }
 
   private createFloatDataTexture(
@@ -286,15 +285,6 @@ export class ThreeSceneRenderer {
 
   private getCameraZForFill(fovDeg: number, planeH: number): number {
     return planeH / (2 * Math.tan((fovDeg * Math.PI / 180) / 2));
-  }
-
-  private resolveGaussianSplatFormat(fileName?: string, url?: string): GaussianSplatFormat | undefined {
-    const candidate = (fileName || url || '').toLowerCase();
-    if (candidate.endsWith('.ply')) return 'ply';
-    if (candidate.endsWith('.splat')) return 'splat';
-    if (candidate.endsWith('.ksplat')) return 'ksplat';
-
-    return undefined;
   }
 
   private createSplatMaterial(T: THREE): SplatShaderMaterial {
@@ -589,196 +579,75 @@ export class ThreeSceneRenderer {
       axisYTexture: material.uniforms.uAxisYTex.value,
       axisZTexture: material.uniforms.uAxisZTex.value,
       orderTexture: material.uniforms.uOrderTexture.value,
+      centerOpacityTextureData: new Float32Array(4),
+      colorTextureData: new Float32Array(4),
+      axisXTextureData: new Float32Array(4),
+      axisYTextureData: new Float32Array(4),
+      axisZTextureData: new Float32Array(4),
       orderTextureData: new Float32Array(4),
+      appliedRuntimeKey: undefined,
+      stagedTargetRuntime: null,
+      stagedLastStepMs: 0,
     };
   }
 
-  private async loadGaussianSplatAssetForLayer(layer: Layer3DData): Promise<GaussianSplatAsset> {
-    if (!layer.gaussianSplatUrl) {
-      throw new Error('Gaussian splat layer is missing a source URL');
-    }
+  private getSplatRuntimeSourceOptions(layer: Layer3DData): {
+    cacheKey: string;
+    fileHash?: string;
+    url?: string;
+    fileName?: string;
+    requestedMaxSplats: number;
+  } {
+    const requestedMaxSplats = layer.gaussianSplatSettings?.render.maxSplats ?? 0;
+    const cacheKey =
+      layer.gaussianSplatFileHash ??
+      `${layer.gaussianSplatFileName || layer.gaussianSplatUrl || layer.clipId}|${layer.gaussianSplatUrl || layer.clipId}`;
 
-    const cacheKey = `${layer.gaussianSplatFileName || layer.gaussianSplatUrl}|${layer.gaussianSplatUrl}`;
-    const cached = splatAssetCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const promise = (async () => {
-      const response = await fetch(layer.gaussianSplatUrl!);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch gaussian splat asset: HTTP ${response.status}`);
-      }
-
-      const blob = await response.blob();
-      const fileName = layer.gaussianSplatFileName || 'scene.ply';
-      const file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
-      const format = this.resolveGaussianSplatFormat(fileName, layer.gaussianSplatUrl);
-      return await loadGaussianSplatAsset(file, format);
-    })();
-
-    splatAssetCache.set(cacheKey, promise);
-    return promise;
+    return {
+      cacheKey,
+      fileHash: layer.gaussianSplatFileHash,
+      url: layer.gaussianSplatUrl,
+      fileName: layer.gaussianSplatFileName,
+      requestedMaxSplats,
+    };
   }
 
-  private async populateSplatGeometry(
+  private applyPreparedSplatRuntime(
     T: THREE,
     managed: ManagedSplat,
     layer: Layer3DData,
-  ): Promise<void> {
-    const asset = await this.loadGaussianSplatAssetForLayer(layer);
-    const frame = asset.frames[0];
-    if (!frame) {
-      throw new Error('Gaussian splat asset has no frames');
+    runtime: PreparedSplatRuntime,
+  ): void {
+    if (managed.appliedRuntimeKey === runtime.runtimeKey) {
+      return;
     }
 
-    const canonical = frame.buffer.data;
-    const totalSplats = frame.buffer.splatCount;
-    const rawBounds = asset.metadata.boundingBox;
-    const rawCenterX = (rawBounds.min[0] + rawBounds.max[0]) * 0.5;
-    const rawCenterY = (rawBounds.min[1] + rawBounds.max[1]) * 0.5;
-    const rawCenterZ = (rawBounds.min[2] + rawBounds.max[2]) * 0.5;
-    const extentX = rawBounds.max[0] - rawBounds.min[0];
-    const extentY = rawBounds.max[1] - rawBounds.min[1];
-    const extentZ = rawBounds.max[2] - rawBounds.min[2];
-    const maxExtent = Math.max(extentX, extentY, extentZ, 1e-5);
-    const normalizationScale = 1 / maxExtent;
-    const normalizedBounds = {
-      min: [
-        (rawBounds.min[0] - rawCenterX) * normalizationScale,
-        (rawBounds.min[1] - rawCenterY) * normalizationScale,
-        (rawBounds.min[2] - rawCenterZ) * normalizationScale,
-      ] as [number, number, number],
-      max: [
-        (rawBounds.max[0] - rawCenterX) * normalizationScale,
-        (rawBounds.max[1] - rawCenterY) * normalizationScale,
-        (rawBounds.max[2] - rawCenterZ) * normalizationScale,
-      ] as [number, number, number],
-    };
-    const requestedMaxSplats = layer.gaussianSplatSettings?.render.maxSplats ?? 0;
-    const targetMaxSplats = requestedMaxSplats > 0
-      ? Math.min(requestedMaxSplats, totalSplats)
-      : totalSplats;
-    const stride = totalSplats > targetMaxSplats
-      ? Math.ceil(totalSplats / targetMaxSplats)
-      : 1;
-    const splatCount = Math.ceil(totalSplats / stride);
-
-    const centers = new Float32Array(splatCount * 3);
-    const colors = new Float32Array(splatCount * 3);
-    const opacities = new Float32Array(splatCount);
-    const sizes = new Float32Array(splatCount);
-    const axisX = new Float32Array(splatCount * 3);
-    const axisY = new Float32Array(splatCount * 3);
-    const axisZ = new Float32Array(splatCount * 3);
-
-    let outIndex = 0;
-    for (let splatIndex = 0; splatIndex < totalSplats; splatIndex += stride) {
-      const base = splatIndex * 14;
-      const target = outIndex * 3;
-      const px = canonical[base + 0];
-      const py = canonical[base + 1];
-      const pz = canonical[base + 2];
-      const sx = Math.max(canonical[base + 3], 0.0005);
-      const sy = Math.max(canonical[base + 4], 0.0005);
-      const sz = Math.max(canonical[base + 5], 0.0005);
-      const qw = canonical[base + 6];
-      const qx = canonical[base + 7];
-      const qy = canonical[base + 8];
-      const qz = canonical[base + 9];
-
-      const xx = 1 - 2 * (qy * qy + qz * qz);
-      const xy = 2 * (qx * qy - qz * qw);
-      const xz = 2 * (qx * qz + qy * qw);
-      const yx = 2 * (qx * qy + qz * qw);
-      const yy = 1 - 2 * (qx * qx + qz * qz);
-      const yz = 2 * (qy * qz - qx * qw);
-      const zx = 2 * (qx * qz - qy * qw);
-      const zy = 2 * (qy * qz + qx * qw);
-      const zz = 1 - 2 * (qx * qx + qy * qy);
-
-      centers[target + 0] = (px - rawCenterX) * normalizationScale;
-      centers[target + 1] = (py - rawCenterY) * normalizationScale;
-      centers[target + 2] = (pz - rawCenterZ) * normalizationScale;
-
-      colors[target + 0] = Math.max(0, Math.min(1, canonical[base + 10]));
-      colors[target + 1] = Math.max(0, Math.min(1, canonical[base + 11]));
-      colors[target + 2] = Math.max(0, Math.min(1, canonical[base + 12]));
-      opacities[outIndex] = Math.max(0, Math.min(1, canonical[base + 13]));
-
-      axisX[target + 0] = xx * sx * normalizationScale;
-      axisX[target + 1] = yx * sx * normalizationScale;
-      axisX[target + 2] = zx * sx * normalizationScale;
-      axisY[target + 0] = xy * sy * normalizationScale;
-      axisY[target + 1] = yy * sy * normalizationScale;
-      axisY[target + 2] = zy * sy * normalizationScale;
-      axisZ[target + 0] = xz * sz * normalizationScale;
-      axisZ[target + 1] = yz * sz * normalizationScale;
-      axisZ[target + 2] = zz * sz * normalizationScale;
-      sizes[outIndex] = Math.max(
-        Math.hypot(axisX[target + 0], axisX[target + 1], axisX[target + 2]),
-        Math.hypot(axisY[target + 0], axisY[target + 1], axisY[target + 2]),
-        Math.hypot(axisZ[target + 0], axisZ[target + 1], axisZ[target + 2]),
-        0.002,
-      );
-
-      outIndex += 1;
-    }
-
-    managed.centers = centers;
-    managed.colors = colors;
-    managed.opacities = opacities;
-    managed.sizes = sizes;
-    managed.axisX = axisX;
-    managed.axisY = axisY;
-    managed.axisZ = axisZ;
-    managed.splatCount = splatCount;
-    managed.sortIndices = Array.from({ length: splatCount }, (_, index) => index);
-    managed.sortDepths = new Float32Array(splatCount);
+    managed.centers = runtime.centers;
+    managed.colors = new Float32Array();
+    managed.opacities = new Float32Array();
+    managed.sizes = new Float32Array();
+    managed.axisX = new Float32Array();
+    managed.axisY = new Float32Array();
+    managed.axisZ = new Float32Array();
+    managed.splatCount = runtime.splatCount;
+    managed.sortIndices = Array.from({ length: runtime.splatCount }, (_, index) => index);
+    managed.sortDepths = new Float32Array(runtime.splatCount);
     managed.lastSortCameraPosition = null;
     managed.lastSortCameraDirection = null;
     managed.sortFrame = 0;
     managed.lastSortTimeMs = 0;
-    managed.bounds = normalizedBounds;
-    managed.normalizationScale = normalizationScale;
-    managed.requestedMaxSplats = requestedMaxSplats;
-    const { width: textureWidth, height: textureHeight } = this.getSplatTextureDimensions(splatCount);
-    const texelCount = textureWidth * textureHeight;
-    const centerOpacityTextureData = new Float32Array(texelCount * 4);
-    const colorTextureData = new Float32Array(texelCount * 4);
-    const axisXTextureData = new Float32Array(texelCount * 4);
-    const axisYTextureData = new Float32Array(texelCount * 4);
-    const axisZTextureData = new Float32Array(texelCount * 4);
-    const orderTextureData = new Float32Array(texelCount * 4);
-
-    for (let splatIndex = 0; splatIndex < splatCount; splatIndex += 1) {
-      const sourceBase = splatIndex * 3;
-      const texelBase = splatIndex * 4;
-
-      centerOpacityTextureData[texelBase + 0] = centers[sourceBase + 0];
-      centerOpacityTextureData[texelBase + 1] = centers[sourceBase + 1];
-      centerOpacityTextureData[texelBase + 2] = centers[sourceBase + 2];
-      centerOpacityTextureData[texelBase + 3] = opacities[splatIndex];
-
-      colorTextureData[texelBase + 0] = colors[sourceBase + 0];
-      colorTextureData[texelBase + 1] = colors[sourceBase + 1];
-      colorTextureData[texelBase + 2] = colors[sourceBase + 2];
-      colorTextureData[texelBase + 3] = 1;
-
-      axisXTextureData[texelBase + 0] = axisX[sourceBase + 0];
-      axisXTextureData[texelBase + 1] = axisX[sourceBase + 1];
-      axisXTextureData[texelBase + 2] = axisX[sourceBase + 2];
-
-      axisYTextureData[texelBase + 0] = axisY[sourceBase + 0];
-      axisYTextureData[texelBase + 1] = axisY[sourceBase + 1];
-      axisYTextureData[texelBase + 2] = axisY[sourceBase + 2];
-
-      axisZTextureData[texelBase + 0] = axisZ[sourceBase + 0];
-      axisZTextureData[texelBase + 1] = axisZ[sourceBase + 1];
-      axisZTextureData[texelBase + 2] = axisZ[sourceBase + 2];
-
-      orderTextureData[texelBase + 0] = splatIndex;
-    }
+    managed.bounds = runtime.normalizedBounds;
+    managed.normalizationScale = runtime.normalizationScale;
+    managed.requestedMaxSplats = layer.gaussianSplatSettings?.render.maxSplats ?? 0;
+    managed.appliedRuntimeKey = runtime.runtimeKey;
+    managed.stagedTargetRuntime = null;
+    managed.stagedLastStepMs = 0;
+    managed.centerOpacityTextureData = runtime.centerOpacityTextureData;
+    managed.colorTextureData = runtime.colorTextureData;
+    managed.axisXTextureData = runtime.axisXTextureData;
+    managed.axisYTextureData = runtime.axisYTextureData;
+    managed.axisZTextureData = runtime.axisZTextureData;
+    managed.orderTextureData = new Float32Array(runtime.orderTemplateData);
 
     managed.centerOpacityTexture.dispose();
     managed.colorTexture.dispose();
@@ -787,13 +656,42 @@ export class ThreeSceneRenderer {
     managed.axisZTexture.dispose();
     managed.orderTexture.dispose();
 
-    managed.centerOpacityTexture = this.createFloatDataTexture(T, centerOpacityTextureData, textureWidth, textureHeight);
-    managed.colorTexture = this.createFloatDataTexture(T, colorTextureData, textureWidth, textureHeight);
-    managed.axisXTexture = this.createFloatDataTexture(T, axisXTextureData, textureWidth, textureHeight);
-    managed.axisYTexture = this.createFloatDataTexture(T, axisYTextureData, textureWidth, textureHeight);
-    managed.axisZTexture = this.createFloatDataTexture(T, axisZTextureData, textureWidth, textureHeight);
-    managed.orderTexture = this.createFloatDataTexture(T, orderTextureData, textureWidth, textureHeight);
-    managed.orderTextureData = orderTextureData;
+    managed.centerOpacityTexture = this.createFloatDataTexture(
+      T,
+      runtime.centerOpacityTextureData,
+      runtime.textureWidth,
+      runtime.textureHeight,
+    );
+    managed.colorTexture = this.createFloatDataTexture(
+      T,
+      runtime.colorTextureData,
+      runtime.textureWidth,
+      runtime.textureHeight,
+    );
+    managed.axisXTexture = this.createFloatDataTexture(
+      T,
+      runtime.axisXTextureData,
+      runtime.textureWidth,
+      runtime.textureHeight,
+    );
+    managed.axisYTexture = this.createFloatDataTexture(
+      T,
+      runtime.axisYTextureData,
+      runtime.textureWidth,
+      runtime.textureHeight,
+    );
+    managed.axisZTexture = this.createFloatDataTexture(
+      T,
+      runtime.axisZTextureData,
+      runtime.textureWidth,
+      runtime.textureHeight,
+    );
+    managed.orderTexture = this.createFloatDataTexture(
+      T,
+      managed.orderTextureData,
+      runtime.textureWidth,
+      runtime.textureHeight,
+    );
 
     managed.material.uniforms.uCenterOpacityTex.value = managed.centerOpacityTexture;
     managed.material.uniforms.uColorTex.value = managed.colorTexture;
@@ -802,44 +700,267 @@ export class ThreeSceneRenderer {
     managed.material.uniforms.uAxisZTex.value = managed.axisZTexture;
     managed.material.uniforms.uOrderTexture.value = managed.orderTexture;
 
-    managed.geometry.instanceCount = splatCount;
+    managed.geometry.instanceCount = runtime.splatCount;
     managed.geometry.boundingSphere = new T.Sphere(
       new T.Vector3(0, 0, 0),
       Math.max(
         0.5,
         Math.hypot(
-          normalizedBounds.max[0] - normalizedBounds.min[0],
-          normalizedBounds.max[1] - normalizedBounds.min[1],
-          normalizedBounds.max[2] - normalizedBounds.min[2],
+          runtime.normalizedBounds.max[0] - runtime.normalizedBounds.min[0],
+          runtime.normalizedBounds.max[1] - runtime.normalizedBounds.min[1],
+          runtime.normalizedBounds.max[2] - runtime.normalizedBounds.min[2],
         ) * 0.75,
       ),
     );
 
     this.updateSplatSort(managed, true);
 
-    log.info('Three.js splat mesh loaded', {
-      layerId: layer.layerId,
-      fileName: layer.gaussianSplatFileName,
-      totalSplats,
-      requestedMaxSplats,
-      renderedSplats: splatCount,
-      stride,
-      rawBounds,
-      normalizedBounds,
-      normalizationScale,
-    });
-    log.warn('Three.js splat geometry prepared', {
+    log.warn('Three.js splat runtime applied', {
       layerId: layer.layerId,
       clipId: layer.clipId,
       fileName: layer.gaussianSplatFileName,
-      totalSplats,
-      requestedMaxSplats,
-      renderedSplats: splatCount,
-      stride,
-      rawBounds,
-      normalizedBounds,
-      normalizationScale,
+      variant: runtime.variant,
+      totalSplats: runtime.totalSplats,
+      requestedMaxSplats: runtime.requestedMaxSplats,
+      renderedSplats: runtime.splatCount,
+      stride: runtime.stride,
     });
+  }
+
+  private beginStagedSplatUpgrade(
+    T: THREE,
+    managed: ManagedSplat,
+    layer: Layer3DData,
+    targetRuntime: PreparedSplatRuntime,
+  ): void {
+    if (targetRuntime.splatCount <= managed.splatCount) {
+      managed.appliedRuntimeKey = targetRuntime.runtimeKey;
+      managed.stagedTargetRuntime = null;
+      return;
+    }
+
+    const currentCount = managed.splatCount;
+    const currentTexelFloatCount = currentCount * 4;
+
+    managed.centerOpacityTextureData = new Float32Array(targetRuntime.centerOpacityTextureData.length);
+    managed.colorTextureData = new Float32Array(targetRuntime.colorTextureData.length);
+    managed.axisXTextureData = new Float32Array(targetRuntime.axisXTextureData.length);
+    managed.axisYTextureData = new Float32Array(targetRuntime.axisYTextureData.length);
+    managed.axisZTextureData = new Float32Array(targetRuntime.axisZTextureData.length);
+    managed.orderTextureData = new Float32Array(targetRuntime.orderTemplateData.length);
+
+    managed.centerOpacityTextureData.set(
+      targetRuntime.centerOpacityTextureData.subarray(0, currentTexelFloatCount),
+      0,
+    );
+    managed.colorTextureData.set(
+      targetRuntime.colorTextureData.subarray(0, currentTexelFloatCount),
+      0,
+    );
+    managed.axisXTextureData.set(
+      targetRuntime.axisXTextureData.subarray(0, currentTexelFloatCount),
+      0,
+    );
+    managed.axisYTextureData.set(
+      targetRuntime.axisYTextureData.subarray(0, currentTexelFloatCount),
+      0,
+    );
+    managed.axisZTextureData.set(
+      targetRuntime.axisZTextureData.subarray(0, currentTexelFloatCount),
+      0,
+    );
+    managed.orderTextureData.set(
+      targetRuntime.orderTemplateData.subarray(0, currentTexelFloatCount),
+      0,
+    );
+
+    managed.centerOpacityTexture.dispose();
+    managed.colorTexture.dispose();
+    managed.axisXTexture.dispose();
+    managed.axisYTexture.dispose();
+    managed.axisZTexture.dispose();
+    managed.orderTexture.dispose();
+
+    managed.centerOpacityTexture = this.createFloatDataTexture(
+      T,
+      managed.centerOpacityTextureData,
+      targetRuntime.textureWidth,
+      targetRuntime.textureHeight,
+    );
+    managed.colorTexture = this.createFloatDataTexture(
+      T,
+      managed.colorTextureData,
+      targetRuntime.textureWidth,
+      targetRuntime.textureHeight,
+    );
+    managed.axisXTexture = this.createFloatDataTexture(
+      T,
+      managed.axisXTextureData,
+      targetRuntime.textureWidth,
+      targetRuntime.textureHeight,
+    );
+    managed.axisYTexture = this.createFloatDataTexture(
+      T,
+      managed.axisYTextureData,
+      targetRuntime.textureWidth,
+      targetRuntime.textureHeight,
+    );
+    managed.axisZTexture = this.createFloatDataTexture(
+      T,
+      managed.axisZTextureData,
+      targetRuntime.textureWidth,
+      targetRuntime.textureHeight,
+    );
+    managed.orderTexture = this.createFloatDataTexture(
+      T,
+      managed.orderTextureData,
+      targetRuntime.textureWidth,
+      targetRuntime.textureHeight,
+    );
+
+    managed.material.uniforms.uCenterOpacityTex.value = managed.centerOpacityTexture;
+    managed.material.uniforms.uColorTex.value = managed.colorTexture;
+    managed.material.uniforms.uAxisXTex.value = managed.axisXTexture;
+    managed.material.uniforms.uAxisYTex.value = managed.axisYTexture;
+    managed.material.uniforms.uAxisZTex.value = managed.axisZTexture;
+    managed.material.uniforms.uOrderTexture.value = managed.orderTexture;
+
+    managed.centers = targetRuntime.centers;
+    managed.sortIndices = Array.from({ length: targetRuntime.splatCount }, (_, index) => index);
+    managed.sortDepths = new Float32Array(targetRuntime.splatCount);
+    managed.bounds = targetRuntime.normalizedBounds;
+    managed.normalizationScale = targetRuntime.normalizationScale;
+    managed.geometry.instanceCount = currentCount;
+    managed.splatCount = currentCount;
+    managed.lastSortCameraPosition = null;
+    managed.lastSortCameraDirection = null;
+    managed.lastSortTimeMs = 0;
+    managed.stagedTargetRuntime = targetRuntime;
+    managed.stagedLastStepMs = 0;
+
+    log.warn('Three.js splat runtime staged upgrade started', {
+      layerId: layer.layerId,
+      clipId: layer.clipId,
+      fileName: layer.gaussianSplatFileName,
+      currentSplats: currentCount,
+      targetSplats: targetRuntime.splatCount,
+    });
+  }
+
+  private advanceStagedSplatUpgrade(managed: ManagedSplat, realtimePlayback: boolean): void {
+    const targetRuntime = managed.stagedTargetRuntime;
+    if (!targetRuntime) {
+      return;
+    }
+
+    const now = performance.now();
+    const minIntervalMs = realtimePlayback ? 20 : 0;
+    if (managed.stagedLastStepMs > 0 && now - managed.stagedLastStepMs < minIntervalMs) {
+      return;
+    }
+
+    const chunkSplats = realtimePlayback ? 12288 : 65536;
+    const nextCount = Math.min(targetRuntime.splatCount, managed.splatCount + chunkSplats);
+    if (nextCount <= managed.splatCount) {
+      return;
+    }
+
+    const fromFloat = managed.splatCount * 4;
+    const toFloat = nextCount * 4;
+
+    managed.centerOpacityTextureData.set(
+      targetRuntime.centerOpacityTextureData.subarray(fromFloat, toFloat),
+      fromFloat,
+    );
+    managed.colorTextureData.set(
+      targetRuntime.colorTextureData.subarray(fromFloat, toFloat),
+      fromFloat,
+    );
+    managed.axisXTextureData.set(
+      targetRuntime.axisXTextureData.subarray(fromFloat, toFloat),
+      fromFloat,
+    );
+    managed.axisYTextureData.set(
+      targetRuntime.axisYTextureData.subarray(fromFloat, toFloat),
+      fromFloat,
+    );
+    managed.axisZTextureData.set(
+      targetRuntime.axisZTextureData.subarray(fromFloat, toFloat),
+      fromFloat,
+    );
+    managed.orderTextureData.set(
+      targetRuntime.orderTemplateData.subarray(fromFloat, toFloat),
+      fromFloat,
+    );
+
+    managed.centerOpacityTexture.needsUpdate = true;
+    managed.colorTexture.needsUpdate = true;
+    managed.axisXTexture.needsUpdate = true;
+    managed.axisYTexture.needsUpdate = true;
+    managed.axisZTexture.needsUpdate = true;
+    managed.orderTexture.needsUpdate = true;
+
+    managed.splatCount = nextCount;
+    managed.geometry.instanceCount = nextCount;
+    managed.lastSortCameraPosition = null;
+    managed.lastSortCameraDirection = null;
+    managed.lastSortTimeMs = 0;
+    managed.stagedLastStepMs = now;
+
+    if (nextCount >= targetRuntime.splatCount) {
+      managed.appliedRuntimeKey = targetRuntime.runtimeKey;
+      managed.stagedTargetRuntime = null;
+      managed.stagedLastStepMs = 0;
+    }
+  }
+
+  private queueSplatRuntimeUpgrade(
+    T: THREE,
+    managed: ManagedSplat,
+    layer: Layer3DData,
+  ): void {
+    const sourceOptions = this.getSplatRuntimeSourceOptions(layer);
+    void waitForTargetPreparedSplatRuntime(sourceOptions)
+      .then((runtime) => {
+        const current = this.splatObjects.get(layer.layerId);
+        if (
+          !current ||
+          current !== managed ||
+          current.splatUrl !== layer.gaussianSplatUrl ||
+          current.requestedMaxSplats !== sourceOptions.requestedMaxSplats
+        ) {
+          return;
+        }
+
+        this.beginStagedSplatUpgrade(T, current, layer, runtime);
+      })
+      .catch((error) => {
+        log.warn('Failed to upgrade Three.js splat runtime', {
+          layerId: layer.layerId,
+          clipId: layer.clipId,
+          fileName: layer.gaussianSplatFileName,
+          error,
+        });
+      });
+  }
+
+  private async populateSplatGeometry(
+    T: THREE,
+    managed: ManagedSplat,
+    layer: Layer3DData,
+  ): Promise<void> {
+    const sourceOptions = this.getSplatRuntimeSourceOptions(layer);
+    prewarmGaussianSplatRuntime(sourceOptions);
+    const { runtime, usingBase } = await resolvePreparedSplatRuntime(sourceOptions);
+    this.applyPreparedSplatRuntime(T, managed, layer, runtime);
+
+    if (
+      usingBase &&
+      runtime.splatCount < runtime.totalSplats &&
+      (sourceOptions.requestedMaxSplats === 0 || sourceOptions.requestedMaxSplats > DEFAULT_SPLAT_BASE_LOD_MAX_SPLATS)
+    ) {
+      this.queueSplatRuntimeUpgrade(T, managed, layer);
+    }
   }
 
   private applySplatOrder(managed: ManagedSplat): void {
@@ -1491,6 +1612,7 @@ export class ThreeSceneRenderer {
     this.applySplatEffectors(managed, effectors);
     managed.sortFrequency = Math.max(0, layer.gaussianSplatSettings?.render?.sortFrequency ?? 1);
     if (managed.splatCount > 0) {
+      this.advanceStagedSplatUpgrade(managed, realtimePlayback);
       this.updateSplatSort(managed, false, realtimePlayback);
     }
   }

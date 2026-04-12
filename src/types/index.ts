@@ -98,6 +98,7 @@ export interface LayerSource {
   // Gaussian splat clip support
   gaussianSplatUrl?: string;
   gaussianSplatFileName?: string;
+  gaussianSplatFileHash?: string;
   gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;
   cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;
   // Nested composition support - pre-rendered layers from nested comp

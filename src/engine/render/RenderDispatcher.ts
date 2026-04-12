@@ -779,6 +779,7 @@ export class RenderDispatcher {
         wireframe: layer.wireframe,
         gaussianSplatUrl: src?.gaussianSplatUrl ?? undefined,
         gaussianSplatFileName: src?.gaussianSplatFileName ?? undefined,
+        gaussianSplatFileHash: src?.gaussianSplatFileHash ?? undefined,
         gaussianSplatSettings: src?.gaussianSplatSettings ?? undefined,
       });
     }

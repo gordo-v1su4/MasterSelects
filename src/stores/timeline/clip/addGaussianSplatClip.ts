@@ -6,6 +6,7 @@ import { DEFAULT_TRANSFORM } from '../constants';
 import { generateClipId } from '../helpers/idGenerator';
 import { blobUrlManager } from '../helpers/blobUrlManager';
 import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../../../engine/gaussian/types';
+import { prewarmGaussianSplatRuntime } from '../../../engine/three/splatRuntimeCache';
 
 const DEFAULT_SPLAT_DURATION = 30; // seconds
 const MAX_SPLAT_DURATION = 3600; // 1 hour
@@ -78,6 +79,14 @@ export function loadGaussianSplatMedia(params: LoadGaussianSplatMediaParams): vo
         gaussianSplatSettings: clip.source?.gaussianSplatSettings || { ...DEFAULT_GAUSSIAN_SPLAT_SETTINGS },
       },
       isLoading: false,
+    });
+
+    prewarmGaussianSplatRuntime({
+      cacheKey: clip.mediaFileId || clip.source?.mediaFileId || clip.id,
+      file: clip.file,
+      url: gaussianSplatUrl,
+      fileName: clip.file.name,
+      requestedMaxSplats: clip.source?.gaussianSplatSettings?.render.maxSplats ?? 0,
     });
   } catch (err) {
     console.error('[GaussianSplat] loadGaussianSplatMedia failed:', err);

@@ -11,6 +11,7 @@ import { fileSystemService } from '../../../services/fileSystemService';
 import { projectDB } from '../../../services/projectDB';
 import { useSettingsStore } from '../../settingsStore';
 import { Logger } from '../../../services/logger';
+import { prewarmGaussianSplatRuntime } from '../../../engine/three/splatRuntimeCache';
 
 const log = Logger.create('Import');
 
@@ -112,6 +113,17 @@ export async function processImport(params: ImportParams): Promise<ImportResult>
     ...info,
     ...proxyInfo,
   };
+
+  if (type === 'gaussian-splat') {
+    void Promise.resolve().then(() => {
+      prewarmGaussianSplatRuntime({
+        cacheKey: fileHash || id,
+        fileHash,
+        file: canonicalFile,
+        fileName: canonicalFile.name || file.name,
+      });
+    });
+  }
 
   return {
     mediaFile,

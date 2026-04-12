@@ -28,6 +28,7 @@ export interface Layer3DData {
   // Gaussian splat source
   gaussianSplatUrl?: string;
   gaussianSplatFileName?: string;
+  gaussianSplatFileHash?: string;
   gaussianSplatSettings?: GaussianSplatSettings;
 }
 
