@@ -2,7 +2,7 @@
 // The output is imported into the existing WebGPU compositor as a texture.
 
 import { Logger } from '../../services/logger';
-import type { Layer3DData, CameraConfig } from './types';
+import type { Layer3DData, CameraConfig, SplatEffectorRuntimeData } from './types';
 import { DEFAULT_CAMERA_CONFIG } from './types';
 import { loadGaussianSplatAsset } from '../gaussian/loaders';
 import type { GaussianSplatAsset, GaussianSplatFormat } from '../gaussian/loaders';
@@ -10,11 +10,18 @@ import type { GaussianSplatAsset, GaussianSplatFormat } from '../gaussian/loader
 const log = Logger.create('ThreeSceneRenderer');
 
 type THREE = typeof import('three');
+type Vector2Like = import('three').Vector2;
+type Vector4Like = import('three').Vector4;
 type SplatShaderMaterial = import('three').ShaderMaterial & {
   uniforms: {
     uOpacity: { value: number };
     uSplatScale: { value: number };
-    uViewportSize: { value: import('three').Vector2 };
+    uViewportSize: { value: Vector2Like };
+    uEffectorCount: { value: number };
+    uEffectorPosRadius: { value: Vector4Like[] };
+    uEffectorAxisStrength: { value: Vector4Like[] };
+    uEffectorParamsA: { value: Vector4Like[] };
+    uEffectorParamsB: { value: Vector4Like[] };
   };
 };
 
@@ -62,6 +69,7 @@ const splatAssetCache = new Map<string, Promise<GaussianSplatAsset>>();
 const AUTO_THREE_SPLAT_BUDGET = 2_000_000;
 const MAX_CPU_SORT_SPLATS = 100000;
 const THREE_SPLAT_RENDERER_REVISION = 10;
+const MAX_SPLAT_EFFECTORS = 8;
 
 export class ThreeSceneRenderer {
   private THREE: THREE | null = null;
@@ -75,6 +83,10 @@ export class ThreeSceneRenderer {
   private height = 0;
   private initialized = false;
   private modelFileNames = new Map<string, string>();
+
+  private getZeroEffectorVector4s(T: THREE): import('three').Vector4[] {
+    return Array.from({ length: MAX_SPLAT_EFFECTORS }, () => new T.Vector4(0, 0, 0, 0));
+  }
 
   private getFiniteNumber(value: number | undefined, fallback: number): number {
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -210,6 +222,7 @@ export class ThreeSceneRenderer {
   }
 
   private createSplatMaterial(T: THREE): SplatShaderMaterial {
+    const zeroVec4s = this.getZeroEffectorVector4s(T);
     return new T.ShaderMaterial({
       transparent: true,
       premultipliedAlpha: true,
@@ -221,8 +234,15 @@ export class ThreeSceneRenderer {
         uOpacity: { value: 1 },
         uSplatScale: { value: 1 },
         uViewportSize: { value: new T.Vector2(Math.max(this.width, 1), Math.max(this.height, 1)) },
+        uEffectorCount: { value: 0 },
+        uEffectorPosRadius: { value: zeroVec4s.map((v) => v.clone()) },
+        uEffectorAxisStrength: { value: zeroVec4s.map((v) => v.clone()) },
+        uEffectorParamsA: { value: zeroVec4s.map((v) => v.clone()) },
+        uEffectorParamsB: { value: zeroVec4s.map((v) => v.clone()) },
       },
       vertexShader: `
+        #define MAX_SPLAT_EFFECTORS ${MAX_SPLAT_EFFECTORS}
+
         attribute vec3 instanceCenter;
         attribute vec3 instanceColor;
         attribute float instanceOpacity;
@@ -238,6 +258,83 @@ export class ThreeSceneRenderer {
         uniform float uOpacity;
         uniform float uSplatScale;
         uniform vec2 uViewportSize;
+        uniform int uEffectorCount;
+        uniform vec4 uEffectorPosRadius[MAX_SPLAT_EFFECTORS];
+        uniform vec4 uEffectorAxisStrength[MAX_SPLAT_EFFECTORS];
+        uniform vec4 uEffectorParamsA[MAX_SPLAT_EFFECTORS];
+        uniform vec4 uEffectorParamsB[MAX_SPLAT_EFFECTORS];
+
+        vec3 hash33(vec3 p) {
+          p = vec3(
+            dot(p, vec3(127.1, 311.7, 74.7)),
+            dot(p, vec3(269.5, 183.3, 246.1)),
+            dot(p, vec3(113.5, 271.9, 124.6))
+          );
+          return fract(sin(p) * 43758.5453123) * 2.0 - 1.0;
+        }
+
+        vec3 applySplatEffectors(vec3 center) {
+          vec3 displaced = center;
+
+          for (int i = 0; i < MAX_SPLAT_EFFECTORS; i++) {
+            if (i >= uEffectorCount) {
+              break;
+            }
+
+            vec3 effectorPos = uEffectorPosRadius[i].xyz;
+            float radius = max(uEffectorPosRadius[i].w, 0.0001);
+            vec3 axis = uEffectorAxisStrength[i].xyz;
+            float axisLen = length(axis);
+            if (axisLen > 0.0001) {
+              axis /= axisLen;
+            } else {
+              axis = vec3(0.0, 1.0, 0.0);
+            }
+            float strength = uEffectorAxisStrength[i].w;
+            float falloff = max(uEffectorParamsA[i].x, 0.001);
+            float speed = uEffectorParamsA[i].y;
+            float seed = uEffectorParamsA[i].z;
+            float mode = uEffectorParamsA[i].w;
+            float localTime = uEffectorParamsB[i].x;
+
+            vec3 fromEffector = displaced - effectorPos;
+            float dist = length(fromEffector);
+            if (dist > radius) {
+              continue;
+            }
+
+            float normDist = clamp(dist / radius, 0.0, 1.0);
+            float weight = pow(1.0 - normDist, falloff);
+            vec3 radialDir = dist > 0.0001 ? (fromEffector / dist) : axis;
+            vec3 delta = vec3(0.0);
+
+            if (mode < 0.5) {
+              delta = radialDir * strength * weight;
+            } else if (mode < 1.5) {
+              delta = -radialDir * strength * weight;
+            } else if (mode < 2.5) {
+              vec3 tangent = cross(axis, radialDir);
+              float tangentLen = length(tangent);
+              if (tangentLen > 0.0001) {
+                tangent /= tangentLen;
+              }
+              float pulse = 0.6 + 0.4 * sin(localTime * speed + dist * 6.0 + seed);
+              delta = tangent * strength * weight * pulse;
+            } else {
+              vec3 noiseVector = hash33(displaced * (3.0 + falloff) + vec3(seed + localTime * speed));
+              float noiseLen = length(noiseVector);
+              if (noiseLen > 0.0001) {
+                noiseVector /= noiseLen;
+              }
+              float pulse = 0.5 + 0.5 * sin(localTime * speed + seed + dist * 5.0);
+              delta = noiseVector * strength * weight * pulse;
+            }
+
+            displaced += delta;
+          }
+
+          return displaced;
+        }
 
         vec2 projectAxisToPixels(vec3 centerView, vec3 axisView, vec2 focal) {
           float depth = max(-centerView.z, 0.0001);
@@ -255,7 +352,8 @@ export class ThreeSceneRenderer {
           vConic = vec3(0.0);
           vOffsetPx = vec2(0.0);
 
-          vec4 centerView4 = modelViewMatrix * vec4(instanceCenter, 1.0);
+          vec3 displacedCenter = applySplatEffectors(instanceCenter);
+          vec4 centerView4 = modelViewMatrix * vec4(displacedCenter, 1.0);
           vec3 centerView = centerView4.xyz;
           float viewDepth = -centerView.z;
           if (composedOpacity <= 0.0 || viewDepth <= 0.0001) {
@@ -739,6 +837,7 @@ export class ThreeSceneRenderer {
     cameraConfig: CameraConfig,
     width: number,
     height: number,
+    effectors: SplatEffectorRuntimeData[] = [],
   ): HTMLCanvasElement | OffscreenCanvas | null {
     if (!this.initialized || !this.THREE || !this.renderer || !this.scene || !this.camera) {
       return null;
@@ -800,7 +899,7 @@ export class ThreeSceneRenderer {
 
       if (layer.gaussianSplatUrl) {
         this.disposeManagedMeshById(layer.layerId);
-        this.syncSplatLayer(layer, outputAspect, worldHeight);
+        this.syncSplatLayer(layer, outputAspect, worldHeight, effectors);
         continue;
       }
 
@@ -977,7 +1076,103 @@ export class ThreeSceneRenderer {
     return this.splatObjects.get(layerId)?.bounds ?? undefined;
   }
 
-  private syncSplatLayer(layer: Layer3DData, outputAspect: number, worldHeight: number): void {
+  private getEffectorModeId(mode: SplatEffectorRuntimeData['mode']): number {
+    switch (mode) {
+      case 'attract':
+        return 1;
+      case 'swirl':
+        return 2;
+      case 'noise':
+        return 3;
+      case 'repel':
+      default:
+        return 0;
+    }
+  }
+
+  private applySplatEffectors(managed: ManagedSplat, effectors: SplatEffectorRuntimeData[]): void {
+    if (!this.THREE) return;
+
+    const count = Math.min(effectors.length, MAX_SPLAT_EFFECTORS);
+    const { uEffectorCount, uEffectorPosRadius, uEffectorAxisStrength, uEffectorParamsA, uEffectorParamsB } =
+      managed.material.uniforms;
+
+    uEffectorCount.value = count;
+
+    const meshWorldScale = new this.THREE.Vector3();
+    const meshWorldQuaternion = new this.THREE.Quaternion();
+    const inverseMeshWorldQuaternion = new this.THREE.Quaternion();
+    const worldPosition = new this.THREE.Vector3();
+    const localPosition = new this.THREE.Vector3();
+    const effectorAxis = new this.THREE.Vector3(0, 0, 1);
+    const localAxis = new this.THREE.Vector3();
+    const effectorEuler = new this.THREE.Euler();
+    const effectorQuaternion = new this.THREE.Quaternion();
+
+    managed.mesh.updateMatrixWorld(true);
+    managed.mesh.getWorldScale(meshWorldScale);
+    managed.mesh.getWorldQuaternion(meshWorldQuaternion);
+    inverseMeshWorldQuaternion.copy(meshWorldQuaternion).invert();
+
+    const meshScaleNormalizer = Math.max(
+      Math.abs(meshWorldScale.x),
+      Math.abs(meshWorldScale.y),
+      Math.abs(meshWorldScale.z),
+      0.0001,
+    );
+
+    for (let i = 0; i < MAX_SPLAT_EFFECTORS; i += 1) {
+      const posRadius = uEffectorPosRadius.value[i];
+      const axisStrength = uEffectorAxisStrength.value[i];
+      const paramsA = uEffectorParamsA.value[i];
+      const paramsB = uEffectorParamsB.value[i];
+
+      if (i >= count) {
+        posRadius.set(0, 0, 0, 0);
+        axisStrength.set(0, 0, 0, 0);
+        paramsA.set(0, 0, 0, 0);
+        paramsB.set(0, 0, 0, 0);
+        continue;
+      }
+
+      const effector = effectors[i];
+      worldPosition.set(effector.position.x, effector.position.y, effector.position.z);
+      localPosition.copy(worldPosition);
+      managed.mesh.worldToLocal(localPosition);
+
+      effectorEuler.set(
+        (-effector.rotation.x * Math.PI) / 180,
+        (effector.rotation.y * Math.PI) / 180,
+        (effector.rotation.z * Math.PI) / 180,
+        'ZYX',
+      );
+      effectorQuaternion.setFromEuler(effectorEuler);
+      localAxis.copy(effectorAxis)
+        .applyQuaternion(effectorQuaternion)
+        .applyQuaternion(inverseMeshWorldQuaternion)
+        .normalize();
+
+      const localRadius = Math.max(Math.abs(effector.radius) / meshScaleNormalizer, 0.0001);
+      const localStrength = (effector.strength * 0.01) / meshScaleNormalizer;
+
+      posRadius.set(localPosition.x, localPosition.y, localPosition.z, localRadius);
+      axisStrength.set(localAxis.x, localAxis.y, localAxis.z, localStrength);
+      paramsA.set(
+        Math.max(0.001, effector.falloff),
+        Math.max(0, effector.speed),
+        effector.seed,
+        this.getEffectorModeId(effector.mode),
+      );
+      paramsB.set(effector.time, 0, 0, 0);
+    }
+  }
+
+  private syncSplatLayer(
+    layer: Layer3DData,
+    outputAspect: number,
+    worldHeight: number,
+    effectors: SplatEffectorRuntimeData[],
+  ): void {
     if (!this.scene || !this.THREE) return;
 
     let managed = this.splatObjects.get(layer.layerId);
@@ -1060,6 +1255,7 @@ export class ThreeSceneRenderer {
     managed.material.uniforms.uOpacity.value = layer.opacity;
     managed.material.uniforms.uViewportSize.value.set(Math.max(this.width, 1), Math.max(this.height, 1));
     managed.material.uniforms.uSplatScale.value = layer.gaussianSplatSettings?.render?.splatScale ?? 1;
+    this.applySplatEffectors(managed, effectors);
     managed.sortFrequency = Math.max(0, layer.gaussianSplatSettings?.render?.sortFrequency ?? 1);
     if (managed.splatCount > 0) {
       this.updateSplatSort(managed);

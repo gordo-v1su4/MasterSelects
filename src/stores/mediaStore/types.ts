@@ -1,9 +1,10 @@
 // MediaStore types - extracted from mediaStore.ts
 
 import type { CompositionTimelineData, TranscriptWord, TranscriptStatus, AnalysisStatus } from '../../types';
+import type { SplatEffectorSettings } from '../../types/splatEffector';
 
 // Media item types
-export type MediaType = 'video' | 'audio' | 'image' | 'composition' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
+export type MediaType = 'video' | 'audio' | 'image' | 'composition' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat' | 'splat-effector';
 
 // Proxy status for video files
 export type ProxyStatus = 'none' | 'generating' | 'ready' | 'error';
@@ -132,6 +133,12 @@ export interface CameraItem extends MediaItem {
   cameraSettings: SceneCameraSettings;
 }
 
+export interface SplatEffectorItem extends MediaItem {
+  type: 'splat-effector';
+  duration: number;
+  splatEffectorSettings: SplatEffectorSettings;
+}
+
 // 3D camera configuration for compositions
 export interface CompositionCamera {
   enabled: boolean;
@@ -174,7 +181,7 @@ export interface MediaFolder {
 }
 
 // Union type for all items
-export type ProjectItem = MediaFile | Composition | MediaFolder | TextItem | SolidItem | MeshItem | CameraItem;
+export type ProjectItem = MediaFile | Composition | MediaFolder | TextItem | SolidItem | MeshItem | CameraItem | SplatEffectorItem;
 
 // Slice creator type for mediaStore
 export type MediaSliceCreator<T> = (
@@ -192,6 +199,7 @@ export interface MediaState {
   solidItems: SolidItem[];
   meshItems: MeshItem[];
   cameraItems: CameraItem[];
+  splatEffectorItems: SplatEffectorItem[];
 
   // Active composition
   activeCompositionId: string | null;

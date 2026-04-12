@@ -619,7 +619,7 @@ export class NestedCompRenderer {
       });
     }
 
-    const canvas = renderer.renderScene(layers3D, DEFAULT_CAMERA_CONFIG, width, height);
+    const canvas = renderer.renderScene(layers3D, DEFAULT_CAMERA_CONFIG, width, height, []);
     if (!canvas) {
       for (let i = indices3D.length - 1; i >= 0; i--) layerData.splice(indices3D[i], 1);
       return;

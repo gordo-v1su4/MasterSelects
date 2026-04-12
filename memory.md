@@ -150,3 +150,56 @@ Der Fehler sitzt wahrscheinlich in einem dieser Punkte:
 Die Baustelle ist inzwischen eng eingegrenzt:
 Three.js Shared Scene, Layer und Camera sind grundsaetzlich da.
 Das offene Problem ist das korrekte Screen-Space-Splat-Rasterizing im Three.js-Pfad.
+
+## Three.js Splat Effector
+
+Stand: 2026-04-12
+
+### Ziel
+
+Ein neuer Timeline-Clip `splat-effector` soll Three.js-Splats live zur Laufzeit beeinflussen.
+Native Gaussian-Splats bleiben unberuehrt.
+
+### Implementierter Stand
+
+- Neuer Media-/Clip-Typ `splat-effector`
+- Eigener Property-Tab `Effector`
+- Effector-Clips sind nicht rendernd und wirken nur als Scene-Controller
+- Aktive Effector-Clips werden im `RenderDispatcher` direkt aus der Timeline gesammelt
+- Der Three.js-Splat-Shader bekommt pro Frame bis zu `8` aktive Effectors als Uniforms
+- Erste Modi:
+  - `repel`
+  - `attract`
+  - `swirl`
+  - `noise`
+
+### Wichtige technische Entscheidung
+
+Keine persistente Physik-Simulation.
+Der Effekt ist prozedural und deterministisch aus:
+
+- Clip-Laufzeit
+- Clip-Transform
+- Effector-Settings
+
+Damit bleibt Scrubbing stabil und reproduzierbar.
+
+### Relevante Dateien
+
+- `C:\Users\admin\Documents\masterselects-spalts\src\types\splatEffector.ts`
+- `C:\Users\admin\Documents\masterselects-spalts\src\stores\timeline\splatEffectorClipSlice.ts`
+- `C:\Users\admin\Documents\masterselects-spalts\src\components\panels\properties\SplatEffectorTab.tsx`
+- `C:\Users\admin\Documents\masterselects-spalts\src\engine\render\RenderDispatcher.ts`
+- `C:\Users\admin\Documents\masterselects-spalts\src\engine\three\ThreeSceneRenderer.ts`
+
+### Aktuelle Grenzen
+
+- Effectors wirken aktuell global auf alle Three.js-Splats
+- Noch kein Targeting auf einzelne Splat-Clips / Gruppen
+- Radius ist aktuell kugelfoermig ueber `max(scale.x, scale.y, scale.z)` approximiert
+- Sorting der Splats bleibt auf dem vorhandenen Approx-Pfad und kennt die live deformierte Position nicht exakt
+
+### Verifikation
+
+- `npm run -s build` laeuft grün
+- Bekannte Projektwarnungen (`mp4box`, chunk-size) bleiben unveraendert

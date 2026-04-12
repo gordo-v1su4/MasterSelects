@@ -23,6 +23,7 @@ import {
   getProjectRawPathCandidates,
   getStoredProjectFileHandle,
 } from './mediaSourceResolver';
+import { fromProjectTransform } from './transformSerialization';
 
 const log = Logger.create('ProjectSync');
 
@@ -259,13 +260,14 @@ function convertProjectCompositionToStore(
         waveform: c.waveform,
         meshType: c.meshType,
         cameraSettings: c.cameraSettings,
+        splatEffectorSettings: c.splatEffectorSettings,
         gaussianBlendshapes: c.gaussianBlendshapes,
         gaussianSplatSettings: c.gaussianSplatSettings,
         startTime: c.startTime,
         duration: c.duration,
         inPoint: c.inPoint,
         outPoint: c.outPoint,
-        transform: c.transform,
+        transform: fromProjectTransform(c.transform),
         effects: c.effects,
         masks: c.masks,
         keyframes: c.keyframes || [],
@@ -367,6 +369,7 @@ export async function loadProjectToStores(): Promise<void> {
   const solidItems = (projectData as any).solidItems || [];
   const meshItems = (projectData as any).meshItems || [];
   const cameraItems = (projectData as any).cameraItems || [];
+  const splatEffectorItems = (projectData as any).splatEffectorItems || [];
 
   // Update media store
   useMediaStore.setState({
@@ -388,6 +391,7 @@ export async function loadProjectToStores(): Promise<void> {
     solidItems,
     meshItems,
     cameraItems,
+    splatEffectorItems,
     activeCompositionId: projectData.activeCompositionId,
     openCompositionIds: projectData.openCompositionIds || [],
     expandedFolderIds: projectData.expandedFolderIds || [],

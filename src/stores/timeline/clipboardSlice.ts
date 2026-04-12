@@ -53,6 +53,9 @@ export const createClipboardSlice: SliceCreator<ClipboardActions> = (set, get) =
         outPoint: clip.outPoint,
         sourceType: clip.source?.type || 'video',
         naturalDuration: clip.source?.naturalDuration,
+        splatEffectorSettings: clip.source?.type === 'splat-effector' && clip.source.splatEffectorSettings
+          ? { ...clip.source.splatEffectorSettings }
+          : undefined,
         transform: { ...clip.transform },
         effects: clip.effects.map(e => ({ ...e, params: { ...e.params } })),
         masks: clip.masks?.map(m => ({
@@ -146,9 +149,16 @@ export const createClipboardSlice: SliceCreator<ClipboardActions> = (set, get) =
           type: clipData.sourceType,
           mediaFileId: clipData.mediaFileId,
           naturalDuration: clipData.naturalDuration,
+          ...(clipData.sourceType === 'splat-effector'
+            ? { splatEffectorSettings: clipData.splatEffectorSettings }
+            : {}),
         } : clipData.solidColor ? {
           type: 'solid' as const,
           naturalDuration: clipData.duration,
+        } : clipData.sourceType === 'splat-effector' ? {
+          type: 'splat-effector' as const,
+          naturalDuration: clipData.naturalDuration,
+          splatEffectorSettings: clipData.splatEffectorSettings,
         } : null,
         transform: {
           ...clipData.transform,
@@ -249,6 +259,28 @@ export const createClipboardSlice: SliceCreator<ClipboardActions> = (set, get) =
               ),
             }));
           });
+          continue;
+        }
+
+        if (newClip.source?.type === 'splat-effector') {
+          const originalClipData = clipboardData.find(cd => idMapping.get(cd.id) === newClip.id);
+          set(state => ({
+            clips: state.clips.map(c =>
+              c.id === newClip.id
+                ? {
+                    ...c,
+                    source: {
+                      type: 'splat-effector' as const,
+                      mediaFileId: c.source?.mediaFileId,
+                      naturalDuration: c.source?.naturalDuration,
+                      splatEffectorSettings: originalClipData?.splatEffectorSettings,
+                    },
+                    isLoading: false,
+                    needsReload: false,
+                  }
+                : c
+            ),
+          }));
           continue;
         }
 

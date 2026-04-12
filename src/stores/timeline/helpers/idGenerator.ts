@@ -71,6 +71,13 @@ export function generateCameraClipId(): string {
 }
 
 /**
+ * Generate a unique ID for splat effector clips.
+ */
+export function generateSplatEffectorClipId(): string {
+  return generateClipId('clip-splat-effector');
+}
+
+/**
  * Generate a unique ID for composition clips.
  */
 export function generateCompClipId(): string {

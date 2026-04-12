@@ -113,6 +113,7 @@ export interface StoredProject {
     solidItems?: unknown[];
     meshItems?: unknown[];
     cameraItems?: unknown[];
+    splatEffectorItems?: unknown[];
   };
 }
 

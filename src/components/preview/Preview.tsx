@@ -9,7 +9,7 @@ import { useEngine } from '../../hooks/useEngine';
 import { useShortcut } from '../../hooks/useShortcut';
 import { useEngineStore } from '../../stores/engineStore';
 import { useTimelineStore } from '../../stores/timeline';
-import { useMediaStore } from '../../stores/mediaStore';
+import { useMediaStore, DEFAULT_SCENE_CAMERA_SETTINGS } from '../../stores/mediaStore';
 import { useDockStore } from '../../stores/dockStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useRenderTargetStore } from '../../stores/renderTargetStore';
@@ -32,6 +32,22 @@ import {
   getPreviewSourceLabel,
   resolvePreviewSourceCompositionId,
 } from '../../utils/previewPanelSource';
+
+const CAMERA_NAV_MOVE_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE']);
+
+function isCameraNavMoveCode(code: string): code is 'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'KeyQ' | 'KeyE' {
+  return CAMERA_NAV_MOVE_CODES.has(code);
+}
+
+function getCameraNavForwardOffset(scaleZ: number | undefined): number {
+  return typeof scaleZ === 'number' && Number.isFinite(scaleZ) ? scaleZ : 0;
+}
+
+function getSharedSceneDefaultCameraDistance(fovDegrees: number): number {
+  const worldHeight = 2.0;
+  const fovRadians = (Math.max(fovDegrees, 1) * Math.PI) / 180;
+  return worldHeight / (2 * Math.tan(fovRadians * 0.5));
+}
 
 interface PreviewProps {
   panelId: string;
@@ -291,6 +307,10 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     zoom: 1,
   });
   const gaussianWheelBatchTimerRef = useRef<number | null>(null);
+  const gaussianKeyboardMoveCodesRef = useRef<Set<'KeyW' | 'KeyA' | 'KeyS' | 'KeyD' | 'KeyQ' | 'KeyE'>>(new Set());
+  const gaussianKeyboardFrameRef = useRef<number | null>(null);
+  const gaussianKeyboardLastTimeRef = useRef<number | null>(null);
+  const gaussianKeyboardBatchActiveRef = useRef(false);
 
   useEffect(() => {
     if (!isEditableSource) {
@@ -358,10 +378,11 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     positionX?: number;
     positionY?: number;
     scale?: number;
+    forwardOffset?: number;
     rotationX?: number;
     rotationY?: number;
   }) => {
-    const propertyUpdates: Array<readonly [property: 'position.x' | 'position.y' | 'scale.x' | 'scale.y' | 'rotation.x' | 'rotation.y', value: number]> = [];
+    const propertyUpdates: Array<readonly [property: 'position.x' | 'position.y' | 'scale.x' | 'scale.y' | 'scale.z' | 'rotation.x' | 'rotation.y', value: number]> = [];
 
     if (values.positionX !== undefined) {
       propertyUpdates.push(['position.x', values.positionX]);
@@ -371,6 +392,9 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     }
     if (values.scale !== undefined) {
       propertyUpdates.push(['scale.x', values.scale], ['scale.y', values.scale]);
+    }
+    if (values.forwardOffset !== undefined) {
+      propertyUpdates.push(['scale.z', values.forwardOffset]);
     }
     if (values.rotationX !== undefined) {
       propertyUpdates.push(['rotation.x', values.rotationX]);
@@ -401,7 +425,13 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
             }
           : {}),
         ...(values.scale !== undefined
-          ? { scale: { x: values.scale, y: values.scale } }
+          || values.forwardOffset !== undefined
+          ? {
+              scale: {
+                ...(values.scale !== undefined ? { x: values.scale, y: values.scale } : {}),
+                ...(values.forwardOffset !== undefined ? { z: values.forwardOffset } : {}),
+              },
+            }
           : {}),
         ...(values.rotationX !== undefined || values.rotationY !== undefined
           ? {
@@ -430,6 +460,132 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
     }, 180);
   }, []);
 
+  const finishGaussianKeyboardBatch = useCallback(() => {
+    if (!gaussianKeyboardBatchActiveRef.current) return;
+    gaussianKeyboardBatchActiveRef.current = false;
+    endBatch();
+  }, []);
+
+  const stopGaussianKeyboardLoop = useCallback(() => {
+    if (gaussianKeyboardFrameRef.current !== null) {
+      window.cancelAnimationFrame(gaussianKeyboardFrameRef.current);
+      gaussianKeyboardFrameRef.current = null;
+    }
+    gaussianKeyboardLastTimeRef.current = null;
+  }, []);
+
+  const stopGaussianKeyboardMovement = useCallback(() => {
+    gaussianKeyboardMoveCodesRef.current.clear();
+    stopGaussianKeyboardLoop();
+    finishGaussianKeyboardBatch();
+  }, [finishGaussianKeyboardBatch, stopGaussianKeyboardLoop]);
+
+  const tickGaussianKeyboardMovement = useCallback((timestamp: number) => {
+    gaussianKeyboardFrameRef.current = null;
+
+    if (!gaussianNavEnabled || !selectedCameraNavClip || document.activeElement !== containerRef.current) {
+      stopGaussianKeyboardMovement();
+      return;
+    }
+
+    const activeCodes = gaussianKeyboardMoveCodesRef.current;
+    if (activeCodes.size === 0) {
+      stopGaussianKeyboardLoop();
+      finishGaussianKeyboardBatch();
+      return;
+    }
+
+    const dt = gaussianKeyboardLastTimeRef.current === null
+      ? 1 / 60
+      : Math.min(0.05, (timestamp - gaussianKeyboardLastTimeRef.current) / 1000);
+    gaussianKeyboardLastTimeRef.current = timestamp;
+
+    const freshTransform = getFreshCameraNavTransform(selectedCameraNavClip);
+    if (!freshTransform) {
+      stopGaussianKeyboardMovement();
+      return;
+    }
+
+    const rightInput = (activeCodes.has('KeyD') ? 1 : 0) - (activeCodes.has('KeyA') ? 1 : 0);
+    const upInput = (activeCodes.has('KeyE') ? 1 : 0) - (activeCodes.has('KeyQ') ? 1 : 0);
+    const forwardInput = (activeCodes.has('KeyW') ? 1 : 0) - (activeCodes.has('KeyS') ? 1 : 0);
+
+    if (rightInput === 0 && upInput === 0 && forwardInput === 0) {
+      stopGaussianKeyboardLoop();
+      finishGaussianKeyboardBatch();
+      return;
+    }
+
+    const zoom = Math.max(0.01, freshTransform.scale.x || 1);
+    const zoomDamping = 1 / Math.sqrt(Math.max(0.35, zoom));
+    const clipSource = selectedCameraNavClip.source;
+    const fovDegrees = clipSource?.type === 'camera'
+      ? clipSource.cameraSettings?.fov ?? DEFAULT_SCENE_CAMERA_SETTINGS.fov
+      : clipSource?.gaussianSplatSettings?.render?.fov ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.fov;
+    const minimumDistance = clipSource?.type === 'camera'
+      ? getSharedSceneDefaultCameraDistance(fovDegrees)
+      : clipSource?.gaussianSplatSettings?.render?.minimumDistance ?? 5;
+    const baseDistance = freshTransform.position.z !== 0 ? Math.abs(freshTransform.position.z) : minimumDistance;
+    const currentDistance = baseDistance / zoom;
+    const panStep = 0.9 * zoomDamping * dt;
+    const forwardStep = Math.max(0.15, currentDistance * 0.85) * dt;
+
+    applyGaussianCameraValues(selectedCameraNavClip.id, {
+      ...(rightInput !== 0 ? { positionX: freshTransform.position.x + rightInput * panStep } : {}),
+      ...(upInput !== 0 ? { positionY: freshTransform.position.y + upInput * panStep } : {}),
+      ...(forwardInput !== 0
+        ? { forwardOffset: getCameraNavForwardOffset(freshTransform.scale.z) + forwardInput * forwardStep }
+        : {}),
+    });
+
+    gaussianKeyboardFrameRef.current = window.requestAnimationFrame(tickGaussianKeyboardMovement);
+  }, [
+    applyGaussianCameraValues,
+    finishGaussianKeyboardBatch,
+    gaussianNavEnabled,
+    getFreshCameraNavTransform,
+    selectedCameraNavClip,
+    stopGaussianKeyboardLoop,
+    stopGaussianKeyboardMovement,
+  ]);
+
+  const startGaussianKeyboardMovement = useCallback(() => {
+    if (gaussianKeyboardFrameRef.current !== null) return;
+    gaussianKeyboardFrameRef.current = window.requestAnimationFrame(tickGaussianKeyboardMovement);
+  }, [tickGaussianKeyboardMovement]);
+
+  const handleGaussianNavKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!gaussianNavEnabled || !selectedCameraNavClip) return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!isCameraNavMoveCode(e.code)) return;
+
+    e.preventDefault();
+
+    if (!gaussianKeyboardBatchActiveRef.current) {
+      startBatch('Gaussian move');
+      gaussianKeyboardBatchActiveRef.current = true;
+    }
+
+    gaussianKeyboardMoveCodesRef.current.add(e.code);
+    startGaussianKeyboardMovement();
+  }, [gaussianNavEnabled, selectedCameraNavClip, startGaussianKeyboardMovement]);
+
+  const handleGaussianNavKeyUp = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isCameraNavMoveCode(e.code)) return;
+
+    e.preventDefault();
+    gaussianKeyboardMoveCodesRef.current.delete(e.code);
+
+    if (gaussianKeyboardMoveCodesRef.current.size === 0) {
+      stopGaussianKeyboardLoop();
+      finishGaussianKeyboardBatch();
+    }
+  }, [finishGaussianKeyboardBatch, stopGaussianKeyboardLoop]);
+
+  const handleGaussianNavBlur = useCallback(() => {
+    stopGaussianKeyboardMovement();
+  }, [stopGaussianKeyboardMovement]);
+
   useEffect(() => {
     return () => {
       if (gaussianWheelBatchTimerRef.current !== null) {
@@ -445,11 +601,13 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         gaussianPanStart.current.clipId = null;
         endBatch();
       }
+      stopGaussianKeyboardMovement();
     };
-  }, []);
+  }, [stopGaussianKeyboardMovement]);
 
   useEffect(() => {
     if (gaussianNavEnabled) return;
+    stopGaussianKeyboardMovement();
     if (isGaussianOrbiting) {
       gaussianOrbitStart.current.clipId = null;
       setIsGaussianOrbiting(false);
@@ -460,7 +618,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       setIsGaussianPanning(false);
       endBatch();
     }
-  }, [gaussianNavEnabled, isGaussianOrbiting, isGaussianPanning]);
+  }, [gaussianNavEnabled, isGaussianOrbiting, isGaussianPanning, stopGaussianKeyboardMovement]);
 
   useEffect(() => {
     if (!isGaussianOrbiting) return;
@@ -656,6 +814,7 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
   // Handle gaussian nav and edit-mode panning
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (gaussianNavEnabled && selectedCameraNavClip && isCanvasInteractionTarget(e.target)) {
+      containerRef.current?.focus({ preventScroll: true });
       const freshTransform = getFreshCameraNavTransform(selectedCameraNavClip);
       if (!freshTransform) return;
 
@@ -809,6 +968,10 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
       onMouseLeave={handleMouseUp}
       onContextMenu={handleContextMenu}
       onAuxClick={handleAuxClick}
+      onKeyDownCapture={handleGaussianNavKeyDown}
+      onKeyUpCapture={handleGaussianNavKeyUp}
+      onBlur={handleGaussianNavBlur}
+      tabIndex={0}
       style={{
         cursor: isGaussianOrbiting || isGaussianPanning
           ? 'grabbing'
@@ -941,8 +1104,8 @@ export function Preview({ panelId, source, showTransparencyGrid }: PreviewProps)
         {gaussianNavEnabled && (
           <div className="preview-edit-hint">
             {selectedCameraNavClip?.source?.type === 'camera'
-              ? 'Scene Camera Nav: LMB orbit | MMB/RMB/Shift+LMB pan | Wheel zoom'
-              : 'Gaussian Nav: LMB orbit | MMB/RMB/Shift+LMB pan | Wheel zoom'}
+              ? 'Scene Camera Nav: click preview, WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom'
+              : 'Gaussian Nav: click preview, WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom'}
           </div>
         )}
 

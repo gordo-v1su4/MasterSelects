@@ -130,6 +130,7 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         is3D: clip.is3D || undefined,
         meshType: clip.meshType,
         cameraSettings: clip.source?.type === 'camera' ? clip.source.cameraSettings : undefined,
+        splatEffectorSettings: clip.source?.type === 'splat-effector' ? clip.source.splatEffectorSettings : undefined,
         // Gaussian avatar blendshapes
         gaussianBlendshapes: clip.source?.type === 'gaussian-avatar' ? clip.source.gaussianBlendshapes : undefined,
         // Gaussian splat settings
@@ -1010,6 +1011,42 @@ export const createSerializationUtils: SliceCreator<SerializationUtils> = (set, 
         }));
 
         log.debug('Restored camera clip', { clip: serializedClip.name });
+        continue;
+      }
+
+      if (serializedClip.sourceType === 'splat-effector') {
+        const { DEFAULT_SPLAT_EFFECTOR_SETTINGS } = await import('../../types/splatEffector');
+
+        const effectorClip: TimelineClip = {
+          id: serializedClip.id,
+          trackId: serializedClip.trackId,
+          name: serializedClip.name || 'Splat Effector',
+          file: new File([], 'splat-effector.dat', { type: 'application/octet-stream' }),
+          mediaFileId: serializedClip.mediaFileId || undefined,
+          startTime: serializedClip.startTime,
+          duration: serializedClip.duration,
+          inPoint: serializedClip.inPoint,
+          outPoint: serializedClip.outPoint,
+          source: {
+            type: 'splat-effector',
+            splatEffectorSettings: serializedClip.splatEffectorSettings || { ...DEFAULT_SPLAT_EFFECTOR_SETTINGS },
+            mediaFileId: serializedClip.mediaFileId || undefined,
+            naturalDuration: Number.MAX_SAFE_INTEGER,
+          },
+          transform: serializedClip.transform,
+          effects: serializedClip.effects || [],
+          masks: serializedClip.masks,
+          speed: serializedClip.speed,
+          preservesPitch: serializedClip.preservesPitch,
+          is3D: serializedClip.is3D ?? true,
+          isLoading: false,
+        };
+
+        set((state) => ({
+          clips: [...state.clips, effectorClip],
+        }));
+
+        log.debug('Restored splat effector clip', { clip: serializedClip.name });
         continue;
       }
 

@@ -2,6 +2,7 @@
 
 import type { BlendMode } from '../../types';
 import type { GaussianSplatSettings } from '../gaussian/types';
+import type { SplatEffectorMode } from '../../types/splatEffector';
 
 /** Data for a single 3D layer to be rendered by Three.js */
 export interface Layer3DData {
@@ -27,6 +28,20 @@ export interface Layer3DData {
   gaussianSplatUrl?: string;
   gaussianSplatFileName?: string;
   gaussianSplatSettings?: GaussianSplatSettings;
+}
+
+export interface SplatEffectorRuntimeData {
+  clipId: string;
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number };  // degrees
+  scale: { x: number; y: number; z: number };
+  radius: number;
+  mode: SplatEffectorMode;
+  strength: number;
+  falloff: number;
+  speed: number;
+  seed: number;
+  time: number;
 }
 
 /** Camera configuration from Composition */

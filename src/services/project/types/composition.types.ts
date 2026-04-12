@@ -3,6 +3,7 @@
 import type { ProjectKeyframe, ProjectMarker, ProjectEffect, ProjectMask, ProjectTransform } from './timeline.types';
 import type { MeshPrimitiveType, SceneCameraSettings } from '../../../stores/mediaStore/types';
 import type { GaussianSplatSettings } from '../../../engine/gaussian/types';
+import type { SplatEffectorSettings } from '../../../types/splatEffector';
 
 export interface ProjectTrack {
   id: string;
@@ -58,7 +59,7 @@ export interface ProjectClip {
   compositionId?: string;
 
   // Additional clip metadata (for restoration)
-  sourceType?: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
+  sourceType?: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat' | 'splat-effector';
   naturalDuration?: number;
   linkedClipId?: string;
   linkedGroupId?: string;
@@ -66,6 +67,7 @@ export interface ProjectClip {
   waveform?: number[];
   meshType?: MeshPrimitiveType;
   cameraSettings?: SceneCameraSettings;
+  splatEffectorSettings?: SplatEffectorSettings;
   gaussianBlendshapes?: Record<string, number>;
   gaussianSplatSettings?: GaussianSplatSettings;
   is3D?: boolean;

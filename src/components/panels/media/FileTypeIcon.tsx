@@ -84,6 +84,14 @@ export const FileTypeIcon = memo(({ type, large }: FileTypeIconProps) => {
           <path d="M5 5.2L6 4h4l1 1.2" stroke="#d5bf84" strokeWidth="0.7" strokeLinecap="round"/>
         </svg>
       );
+    case 'splat-effector':
+      return (
+        <svg style={style} viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="2" width="14" height="12" rx="1.5" fill="#3d5a47" stroke="#74c792" strokeWidth="0.7"/>
+          <circle cx="8" cy="8" r="2.3" fill="#183224" stroke="#a7f0c0" strokeWidth="0.8"/>
+          <path d="M8 3.5V5.4M8 10.6V12.5M3.5 8H5.4M10.6 8H12.5M4.8 4.8L6.1 6.1M9.9 9.9L11.2 11.2M11.2 4.8L9.9 6.1M6.1 9.9L4.8 11.2" stroke="#a7f0c0" strokeWidth="0.8" strokeLinecap="round"/>
+        </svg>
+      );
     case 'gaussian-avatar':
       return (
         <svg style={style} viewBox="0 0 16 16" fill="none">
@@ -243,6 +251,16 @@ const LargeIcon = memo(({ type, style }: { type?: string; style: React.CSSProper
           <circle cx="24" cy="24" r="6.5" fill="#d8bc82" opacity="0.9"/>
           <circle cx="24" cy="24" r="3" fill="#6c5a36"/>
           <circle cx="34" cy="19" r="1.5" fill="#d8bc82" opacity="0.85"/>
+        </svg>
+      );
+    case 'splat-effector':
+      return (
+        <svg style={style} viewBox="0 0 48 48" fill="none">
+          <rect x="4" y="8" width="40" height="32" rx="3" fill="#2c4e3b"/>
+          <rect x="4" y="8" width="40" height="32" rx="3" stroke="#6fd294" strokeWidth="1"/>
+          <circle cx="24" cy="24" r="7" fill="#173123" stroke="#aef2c7" strokeWidth="1.2"/>
+          <path d="M24 11v6M24 31v6M11 24h6M31 24h6M15.5 15.5l4.2 4.2M28.3 28.3l4.2 4.2M32.5 15.5l-4.2 4.2M19.7 28.3l-4.2 4.2" stroke="#aef2c7" strokeWidth="1.4" strokeLinecap="round"/>
+          <circle cx="24" cy="24" r="2.2" fill="#d6ffe4"/>
         </svg>
       );
     case 'gaussian-avatar':

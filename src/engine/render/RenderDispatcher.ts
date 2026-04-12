@@ -26,13 +26,14 @@ import { vfPipelineMonitor } from '../../services/vfPipelineMonitor';
 import { getCopiedHtmlVideoPreviewFrame } from './htmlVideoPreviewFallback';
 import { flags } from '../featureFlags';
 import type { ThreeSceneRenderer } from '../three/ThreeSceneRenderer';
-import type { Layer3DData, CameraConfig } from '../three/types';
+import type { Layer3DData, CameraConfig, SplatEffectorRuntimeData } from '../three/types';
 import { DEFAULT_CAMERA_CONFIG } from '../three/types';
 import { useMediaStore, DEFAULT_SCENE_CAMERA_SETTINGS } from '../../stores/mediaStore';
 import { getGaussianSplatGpuRenderer } from '../gaussian/core/GaussianSplatGpuRenderer';
 import { buildSplatCamera, resolveOrbitCameraPose } from '../gaussian/core/SplatCameraUtils';
 import { loadGaussianSplatAssetCached } from '../gaussian/loaders';
 import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../gaussian/types';
+import { DEFAULT_SPLAT_EFFECTOR_SETTINGS } from '../../types/splatEffector';
 
 const log = Logger.create('RenderDispatcher');
 const GAUSSIAN_PLAYBACK_SORT_FREQUENCY = 6;
@@ -233,6 +234,61 @@ export class RenderDispatcher {
     }
 
     return { ...DEFAULT_CAMERA_CONFIG };
+  }
+
+  private collectActiveSplatEffectors(width: number, height: number): SplatEffectorRuntimeData[] {
+    const timelineStore = useTimelineStore.getState();
+    const playhead = timelineStore.playheadPosition;
+    const worldHeight = 2.0;
+    const halfWorldW = (worldHeight * (width / Math.max(height, 1))) / 2;
+    const halfWorldH = worldHeight / 2;
+    const visibleTrackIds = new Set(
+      timelineStore.tracks
+        .filter((track) => track.type === 'video' && track.visible !== false)
+        .map((track) => track.id),
+    );
+
+    return timelineStore.clips
+      .filter((clip) => {
+        if (clip.source?.type !== 'splat-effector') return false;
+        if (!visibleTrackIds.has(clip.trackId)) return false;
+        return playhead >= clip.startTime && playhead < clip.startTime + clip.duration;
+      })
+      .map((clip) => {
+        const clipLocalTime = playhead - clip.startTime;
+        const transform = timelineStore.getInterpolatedTransform(clip.id, clipLocalTime);
+        const settings = clip.source?.splatEffectorSettings ?? DEFAULT_SPLAT_EFFECTOR_SETTINGS;
+        const scaleZ = transform.scale.z ?? 1;
+        const scaleX = Math.abs(transform.scale.x);
+        const scaleY = Math.abs(transform.scale.y);
+        const scaleZAbs = Math.abs(scaleZ);
+
+        return {
+          clipId: clip.id,
+          position: {
+            x: transform.position.x * halfWorldW,
+            y: -transform.position.y * halfWorldH,
+            z: transform.position.z,
+          },
+          rotation: {
+            x: transform.rotation.x,
+            y: transform.rotation.y,
+            z: transform.rotation.z,
+          },
+          scale: {
+            x: scaleX,
+            y: scaleY,
+            z: scaleZAbs,
+          },
+          radius: Math.max(scaleX, scaleY, scaleZAbs, 0.0001),
+          mode: settings.mode,
+          strength: settings.strength,
+          falloff: settings.falloff,
+          speed: settings.speed,
+          seed: settings.seed,
+          time: clipLocalTime,
+        };
+      });
   }
 
   async ensureGaussianSplatSceneLoaded(
@@ -727,9 +783,10 @@ export class RenderDispatcher {
     }
 
     const cameraConfig = this.resolveSharedSceneCameraConfig(layers3D, width, height);
+    const activeSplatEffectors = this.collectActiveSplatEffectors(width, height);
 
     // Render the 3D scene
-    const canvas = renderer.renderScene(layers3D, cameraConfig, width, height);
+    const canvas = renderer.renderScene(layers3D, cameraConfig, width, height, activeSplatEffectors);
     if (!canvas) return;
 
     // Import the OffscreenCanvas as a GPU texture

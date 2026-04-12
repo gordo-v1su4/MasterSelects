@@ -15,6 +15,7 @@ import {
   type ProjectMarker,
   type ProjectFolder,
 } from '../projectFileService';
+import { toProjectTransform } from './transformSerialization';
 
 const log = Logger.create('ProjectSync');
 
@@ -94,6 +95,7 @@ function convertCompositions(compositions: Composition[]): ProjectComposition[] 
       waveform: c.waveform,
       meshType: c.source?.meshType || c.meshType,
       cameraSettings: c.source?.cameraSettings || c.cameraSettings,
+      splatEffectorSettings: c.source?.splatEffectorSettings || c.splatEffectorSettings,
       gaussianBlendshapes: c.source?.gaussianBlendshapes || c.gaussianBlendshapes,
       gaussianSplatSettings: c.source?.gaussianSplatSettings || c.gaussianSplatSettings,
       is3D: c.is3D || undefined,
@@ -101,20 +103,7 @@ function convertCompositions(compositions: Composition[]): ProjectComposition[] 
       duration: c.duration,
       inPoint: c.inPoint || 0,
       outPoint: c.outPoint || c.duration,
-      transform: {
-        x: c.transform?.x || 0,
-        y: c.transform?.y || 0,
-        z: c.transform?.z || 0,
-        scaleX: c.transform?.scaleX || 1,
-        scaleY: c.transform?.scaleY || 1,
-        rotation: c.transform?.rotation || 0,
-        rotationX: c.transform?.rotationX || 0,
-        rotationY: c.transform?.rotationY || 0,
-        anchorX: c.transform?.anchorX || 0.5,
-        anchorY: c.transform?.anchorY || 0.5,
-        opacity: c.transform?.opacity ?? 1,
-        blendMode: c.transform?.blendMode || 'normal',
-      },
+      transform: toProjectTransform(c.transform),
       effects: (c.effects || []).map((e: any) => ({
         id: e.id,
         type: e.type,
@@ -283,6 +272,7 @@ export async function syncStoresToProject(): Promise<void> {
     (projectData as any).solidItems = freshState.solidItems;
     (projectData as any).meshItems = freshState.meshItems;
     (projectData as any).cameraItems = freshState.cameraItems;
+    (projectData as any).splatEffectorItems = freshState.splatEffectorItems;
   }
 
   log.info(' Synced stores to project');

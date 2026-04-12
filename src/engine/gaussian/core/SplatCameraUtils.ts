@@ -16,8 +16,9 @@ export interface OrbitCameraPose {
  * Build view + projection matrices from a layer's transform properties.
  *
  * Mapping:
- *  - position.z  -> camera distance from origin (default 5)
+ *  - position.z  -> camera orbit distance from its look target (default 5)
  *  - position.x/y -> pan in camera screen space (-1..1 roughly equals full viewport)
+ *  - scale.z     -> forward travel in view direction for camera-nav clips
  *  - rotation    -> orbit angles in degrees (x = pitch, y = yaw). Accepts number (yaw only) or {x,y,z}.
  *  - scale.x     -> zoom multiplier (dollies camera distance)
  *  - settings.nearPlane / farPlane  -> clipping planes
@@ -119,11 +120,29 @@ export function resolveOrbitCameraPose(
   const forwardVector = normalize(eyeOffset);
   const rightVector = normalize(cross(upVector, forwardVector));
   const cameraUpVector = normalize(cross(forwardVector, rightVector));
+  const cameraForwardVector: [number, number, number] = [
+    -forwardVector[0],
+    -forwardVector[1],
+    -forwardVector[2],
+  ];
   const panWorldX = layer.position.x * halfWidth;
   const panWorldY = layer.position.y * halfHeight;
-  const targetX = centerX + rightVector[0] * panWorldX + cameraUpVector[0] * panWorldY;
-  const targetY = centerY + rightVector[1] * panWorldX + cameraUpVector[1] * panWorldY;
-  const targetZ = centerZ + rightVector[2] * panWorldX + cameraUpVector[2] * panWorldY;
+  const forwardOffset = Number.isFinite(layer.scale.z) ? layer.scale.z! : 0;
+  const targetX =
+    centerX +
+    rightVector[0] * panWorldX +
+    cameraUpVector[0] * panWorldY +
+    cameraForwardVector[0] * forwardOffset;
+  const targetY =
+    centerY +
+    rightVector[1] * panWorldX +
+    cameraUpVector[1] * panWorldY +
+    cameraForwardVector[1] * forwardOffset;
+  const targetZ =
+    centerZ +
+    rightVector[2] * panWorldX +
+    cameraUpVector[2] * panWorldY +
+    cameraForwardVector[2] * forwardOffset;
   const eyeX = targetX + eyeOffset[0];
   const eyeY = targetY + eyeOffset[1];
   const eyeZ = targetZ + eyeOffset[2];

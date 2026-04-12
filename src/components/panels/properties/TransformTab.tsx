@@ -89,11 +89,12 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
   const isModel = sourceType === 'model';
   const isCameraClip = sourceType === 'camera';
   const isGaussianSplat = sourceType === 'gaussian-splat';
+  const isSplatEffector = sourceType === 'splat-effector';
   const renderSettings = clip?.source?.gaussianSplatSettings?.render ?? DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render;
   const isNativeGaussianSplat = isGaussianSplat && renderSettings.useNativeRenderer === true;
-  const supportsScaleZ = isModel || (isGaussianSplat && !isNativeGaussianSplat);
+  const supportsScaleZ = isModel || isSplatEffector || (isGaussianSplat && !isNativeGaussianSplat);
   const usesCameraControls = isCameraClip || isNativeGaussianSplat;
-  const isLocked3D = isModel || isGaussianSplat;
+  const isLocked3D = isModel || isGaussianSplat || isSplatEffector;
   const isEffectively3D = usesCameraControls || isLocked3D || is3D;
   const gaussianNavEnabled = usesCameraControls && gaussianSplatNavClipId === clipId;
 
@@ -169,7 +170,7 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
             >
               {gaussianNavEnabled ? 'On' : 'Off'}
             </button>
-            <span style={{ color: '#8d99a6', fontSize: '11px' }}>LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom</span>
+            <span style={{ color: '#8d99a6', fontSize: '11px' }}>Click preview, then WASD move, Q/E up-down, LMB orbit, MMB/RMB/Shift+LMB pan, wheel zoom. Dist = orbit distance.</span>
           </div>
         )}
         {!isCameraClip && (
@@ -402,10 +403,10 @@ export function TransformTab({ clipId, transform, speed = 1, is3D = false }: Tra
         <button
           className="btn btn-sm"
           onClick={() => {
-            if (isCameraClip) {
+            if (usesCameraControls) {
               updateClipTransform(clipId, {
                 position: { x: 0, y: 0, z: 0 },
-                scale: { x: 1, y: 1 },
+                scale: { x: 1, y: 1, z: 0 },
                 rotation: { x: 0, y: 0, z: 0 },
               });
               return;

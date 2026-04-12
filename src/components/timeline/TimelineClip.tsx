@@ -101,6 +101,12 @@ function TimelineClipComponent({
         : (s.cameraItems || [])[0];
       if (cam?.labelColor && cam.labelColor !== 'none') return getLabelHex(cam.labelColor);
     }
+    if (clip.source?.type === 'splat-effector') {
+      const effector = mediaFileId
+        ? (s.splatEffectorItems || []).find(e => e.id === mediaFileId)
+        : (s.splatEffectorItems || []).find(e => e.name === clip.name);
+      if (effector?.labelColor && effector.labelColor !== 'none') return getLabelHex(effector.labelColor);
+    }
     return null;
   });
 
@@ -185,6 +191,7 @@ function TimelineClipComponent({
   // Determine if this is a solid clip
   const isSolidClip = clip.source?.type === 'solid';
   const isCameraClip = clip.source?.type === 'camera';
+  const isSplatEffectorClip = clip.source?.type === 'splat-effector';
 
   const isGeneratingProxy = proxyStatus === 'generating';
   const hasProxy = proxyStatus === 'ready';
@@ -207,7 +214,7 @@ function TimelineClipComponent({
     const deltaX = clipTrim.currentX - clipTrim.startX;
     const deltaTime = pixelToTime(deltaX);
     const sourceType = clip.source?.type;
-    const isInfiniteClip = sourceType === 'text' || sourceType === 'image' || sourceType === 'solid' || sourceType === 'camera';
+    const isInfiniteClip = sourceType === 'text' || sourceType === 'image' || sourceType === 'solid' || sourceType === 'camera' || sourceType === 'splat-effector';
     const maxDuration = isInfiniteClip
       ? Number.MAX_SAFE_INTEGER
       : (clip.source?.naturalDuration || clip.duration);
@@ -312,7 +319,7 @@ function TimelineClipComponent({
   }
 
   // Determine clip type class (audio, video, text, or image)
-  const clipTypeClass = isSolidClip ? 'solid' : isTextClip ? 'text' : isCameraClip ? 'camera' : isAudioClip ? 'audio' : (clip.source?.type || 'video');
+  const clipTypeClass = isSolidClip ? 'solid' : isTextClip ? 'text' : isCameraClip ? 'camera' : isSplatEffectorClip ? 'splat-effector' : isAudioClip ? 'audio' : (clip.source?.type || 'video');
 
   // Check if this clip is part of a multi-select drag
   const isInMultiSelectDrag = clipDrag?.multiSelectClipIds?.includes(clip.id) && clipDrag.multiSelectTimeDelta !== undefined;
@@ -730,6 +737,9 @@ function TimelineClipComponent({
           )}
           {isCameraClip && (
             <span className="clip-text-icon" title="Camera Clip">C</span>
+          )}
+          {isSplatEffectorClip && (
+            <span className="clip-text-icon" title="Splat Effector Clip">E</span>
           )}
           <span className="clip-name">{isTextClip && clip.textProperties ? clip.textProperties.text.slice(0, 30) || 'Text' : clip.name}</span>
           {/* PickWhip disabled */}

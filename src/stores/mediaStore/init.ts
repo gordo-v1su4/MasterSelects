@@ -254,6 +254,15 @@ function setupItemPersistence(): void {
     }
   );
 
+  useMediaStore.subscribe(
+    (state: MediaState) => state.splatEffectorItems,
+    (splatEffectorItems: MediaState['splatEffectorItems']) => {
+      try {
+        localStorage.setItem('ms-splatEffectorItems', JSON.stringify(splatEffectorItems));
+      } catch { /* quota exceeded or unavailable */ }
+    }
+  );
+
   log.info('Item persistence setup complete');
 }
 

@@ -401,10 +401,11 @@ export interface TimelineClip {
   inPoint: number;        // Trim in point within source (seconds)
   outPoint: number;       // Trim out point within source (seconds)
   source: {
-    type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
+    type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat' | 'splat-effector';
     modelUrl?: string;  // Blob URL to 3D model file
     meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
     cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;  // Shared-scene camera settings
+    splatEffectorSettings?: import('./splatEffector').SplatEffectorSettings;  // Shared-scene Three.js splat effector settings
     gaussianAvatarUrl?: string;  // URL to gaussian splat avatar file
     gaussianBlendshapes?: Record<string, number>;  // ARKit blendshape weights
     gaussianSplatUrl?: string;  // URL to gaussian splat scene file
@@ -519,7 +520,7 @@ export interface SerializableClip {
   duration: number;
   inPoint: number;
   outPoint: number;
-  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat';
+  sourceType: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat' | 'splat-effector';
   naturalDuration?: number;
   thumbnails?: string[];
   linkedClipId?: string;
@@ -557,6 +558,7 @@ export interface SerializableClip {
   is3D?: boolean;
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;
   cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;
+  splatEffectorSettings?: import('./splatEffector').SplatEffectorSettings;
   // Gaussian avatar blendshape state
   gaussianBlendshapes?: Record<string, number>;
   // Gaussian splat settings

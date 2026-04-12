@@ -76,6 +76,7 @@ export function MediaPanel() {
   const solidItems = useMediaStore(state => state.solidItems);
   const meshItems = useMediaStore(state => state.meshItems);
   const cameraItems = useMediaStore(state => state.cameraItems);
+  const splatEffectorItems = useMediaStore(state => state.splatEffectorItems);
   const selectedIds = useMediaStore(state => state.selectedIds);
   const expandedFolderIds = useMediaStore(state => state.expandedFolderIds);
   const fileSystemSupported = useMediaStore(state => state.fileSystemSupported);
@@ -116,6 +117,9 @@ export function MediaPanel() {
     createCameraItem,
     getOrCreateCameraFolder,
     removeCameraItem,
+    createSplatEffectorItem,
+    getOrCreateSplatEffectorFolder,
+    removeSplatEffectorItem,
     setLabelColor,
     importGaussianSplat,
   } = useMediaStore.getState();
@@ -220,7 +224,7 @@ export function MediaPanel() {
 
   // Sort items comparator
   const getSortValue = useCallback((item: ProjectItem, colId: ColumnId): string | number => {
-    const mediaFile = ('type' in item && item.type !== 'composition' && item.type !== 'text' && item.type !== 'solid' && item.type !== 'camera') ? item as MediaFile : null;
+    const mediaFile = ('type' in item && item.type !== 'composition' && item.type !== 'text' && item.type !== 'solid' && item.type !== 'camera' && item.type !== 'splat-effector') ? item as MediaFile : null;
     switch (colId) {
       case 'name': return item.name.toLowerCase();
       case 'label': {
@@ -532,9 +536,10 @@ export function MediaPanel() {
       else if (folders.find(f => f.id === id)) removeFolder(id);
       else if (meshItems.find(m => m.id === id)) removeMeshItem(id);
       else if (cameraItems.find(c => c.id === id)) removeCameraItem(id);
+      else if (splatEffectorItems.find(e => e.id === id)) removeSplatEffectorItem(id);
     });
     closeContextMenu();
-  }, [selectedIds, files, compositions, folders, meshItems, cameraItems, removeFile, removeComposition, removeFolder, removeMeshItem, removeCameraItem, closeContextMenu]);
+  }, [selectedIds, files, compositions, folders, meshItems, cameraItems, splatEffectorItems, removeFile, removeComposition, removeFolder, removeMeshItem, removeCameraItem, removeSplatEffectorItem, closeContextMenu]);
 
   // Get the active parent folder (grid view: current open folder, list view: selected folder or null)
   const getActiveParentId = useCallback((): string | null => {
@@ -585,6 +590,12 @@ export function MediaPanel() {
     createCameraItem(undefined, cameraFolderId);
     closeContextMenu();
   }, [createCameraItem, getOrCreateCameraFolder, closeContextMenu]);
+
+  const handleNewSplatEffector = useCallback(() => {
+    const effectorFolderId = getOrCreateSplatEffectorFolder();
+    createSplatEffectorItem(undefined, effectorFolderId);
+    closeContextMenu();
+  }, [createSplatEffectorItem, getOrCreateSplatEffectorFolder, closeContextMenu]);
 
   // Import Gaussian Avatar (.zip) — opens file picker, imports with forced gaussian-avatar type
   const handleImportGaussianSplat = useCallback(() => {
@@ -745,6 +756,23 @@ export function MediaPanel() {
         isVideo: true,
       });
       e.dataTransfer.setData('application/x-camera-item-id', item.id);
+      e.dataTransfer.effectAllowed = 'copyMove';
+      if (e.currentTarget instanceof HTMLElement) {
+        e.dataTransfer.setDragImage(e.currentTarget, 10, 10);
+      }
+      return;
+    }
+
+    if (item.type === 'splat-effector') {
+      setExternalDragPayload({
+        kind: 'splat-effector',
+        id: item.id,
+        duration: item.duration,
+        hasAudio: false,
+        isAudio: false,
+        isVideo: true,
+      });
+      e.dataTransfer.setData('application/x-splat-effector-item-id', item.id);
       e.dataTransfer.effectAllowed = 'copyMove';
       if (e.currentTarget instanceof HTMLElement) {
         e.dataTransfer.setDragImage(e.currentTarget, 10, 10);
@@ -1374,6 +1402,10 @@ export function MediaPanel() {
                   <span className="add-dropdown-icon"><FileTypeIcon type="camera" /></span>
                   <span>Camera</span>
                 </div>
+                <div className="add-dropdown-item" onClick={() => { handleNewSplatEffector(); setAddDropdownOpen(false); }}>
+                  <span className="add-dropdown-icon"><FileTypeIcon type="splat-effector" /></span>
+                  <span>Splat Effector</span>
+                </div>
                 <div className="add-dropdown-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
                   <span className="add-dropdown-icon"><FileTypeIcon type="mesh" /></span>
                   <span>Mesh</span>
@@ -1557,7 +1589,8 @@ export function MediaPanel() {
             folders.find(f => f.id === contextMenu.itemId) ||
             solidItems.find(s => s.id === contextMenu.itemId) ||
             meshItems.find(m => m.id === contextMenu.itemId) ||
-            cameraItems.find(c => c.id === contextMenu.itemId)
+            cameraItems.find(c => c.id === contextMenu.itemId) ||
+            splatEffectorItems.find(e => e.id === contextMenu.itemId)
           : null;
         const isVideoFile = selectedItem && 'type' in selectedItem && selectedItem.type === 'video';
         const isComposition = selectedItem && 'type' in selectedItem && selectedItem.type === 'composition';
@@ -1606,6 +1639,10 @@ export function MediaPanel() {
             <div className="context-menu-item" onClick={() => { handleNewCamera(); closeContextMenu(); }}>
               <span className="context-menu-icon"><FileTypeIcon type="camera" /></span>
               Camera
+            </div>
+            <div className="context-menu-item" onClick={() => { handleNewSplatEffector(); closeContextMenu(); }}>
+              <span className="context-menu-icon"><FileTypeIcon type="splat-effector" /></span>
+              Splat Effector
             </div>
             <div className="context-menu-item has-submenu" onMouseEnter={handleSubmenuHover} onMouseLeave={handleSubmenuLeave}>
               <span className="context-menu-icon"><FileTypeIcon type="mesh" /></span>

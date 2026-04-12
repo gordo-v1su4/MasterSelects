@@ -394,6 +394,10 @@ export class LayerBuilderService {
     else if (clip.source?.type === 'camera') {
       layer = null;
     }
+    // Splat effector clip (non-rendering scene controller for Three.js splats)
+    else if (clip.source?.type === 'splat-effector') {
+      layer = null;
+    }
     // 3D Model clip
     else if (clip.source?.type === 'model') {
       layer = this.buildModelLayer(clip, layerIndex, ctx, opacityOverride);

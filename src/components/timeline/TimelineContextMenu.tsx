@@ -205,6 +205,12 @@ export function TimelineContextMenu({
         : (ms.cameraItems || [])[0]; // Usually only one camera item
       if (cam) return { mediaItemId: cam.id, currentColor: cam.labelColor || 'none' };
     }
+    if (clip.source?.type === 'splat-effector') {
+      const effector = mediaFileId
+        ? (ms.splatEffectorItems || []).find(e => e.id === mediaFileId)
+        : (ms.splatEffectorItems || []).find(e => e.name === clip.name);
+      if (effector) return { mediaItemId: effector.id, currentColor: effector.labelColor || 'none' };
+    }
     return { mediaItemId: null, currentColor: 'none' };
   };
   const { mediaItemId, currentColor } = resolveMediaItemColor();

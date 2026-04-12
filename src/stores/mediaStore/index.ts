@@ -7,6 +7,7 @@ import type { MediaState, MediaFile, ProjectItem } from './types';
 import { DEFAULT_SCENE_CAMERA_SETTINGS } from './types';
 import { DEFAULT_COMPOSITION } from './constants';
 import { fileSystemService } from '../../services/fileSystemService';
+import { DEFAULT_SPLAT_EFFECTOR_SETTINGS } from '../../types/splatEffector';
 
 // Import slices
 import { createFileImportSlice, type FileImportActions } from './slices/fileImportSlice';
@@ -31,6 +32,7 @@ export type {
   SolidItem,
   MeshItem,
   CameraItem,
+  SplatEffectorItem,
   MeshPrimitiveType,
   SceneCameraSettings,
   ProjectItem,
@@ -64,6 +66,9 @@ type MediaStoreState = MediaState &
     getOrCreateCameraFolder: () => string;
     createCameraItem: (name?: string, parentId?: string | null) => string;
     removeCameraItem: (id: string) => void;
+    getOrCreateSplatEffectorFolder: () => string;
+    createSplatEffectorItem: (name?: string, parentId?: string | null) => string;
+    removeSplatEffectorItem: (id: string) => void;
   };
 
 export const useMediaStore = create<MediaStoreState>()(
@@ -76,6 +81,7 @@ export const useMediaStore = create<MediaStoreState>()(
     solidItems: [],
     meshItems: [],
     cameraItems: [],
+    splatEffectorItems: [],
     activeCompositionId: 'comp-1',
     openCompositionIds: ['comp-1'],
     slotAssignments: {},
@@ -97,7 +103,7 @@ export const useMediaStore = create<MediaStoreState>()(
 
     // Getters
     getItemsByFolder: (folderId: string | null) => {
-      const { files, compositions, folders, textItems, solidItems, meshItems, cameraItems } = get();
+      const { files, compositions, folders, textItems, solidItems, meshItems, cameraItems, splatEffectorItems } = get();
       return [
         ...folders.filter((f) => f.parentId === folderId),
         ...compositions.filter((c) => c.parentId === folderId),
@@ -105,12 +111,13 @@ export const useMediaStore = create<MediaStoreState>()(
         ...solidItems.filter((s) => s.parentId === folderId),
         ...meshItems.filter((m) => m.parentId === folderId),
         ...cameraItems.filter((c) => c.parentId === folderId),
+        ...splatEffectorItems.filter((e) => e.parentId === folderId),
         ...files.filter((f) => f.parentId === folderId),
       ];
     },
 
     getItemById: (id: string) => {
-      const { files, compositions, folders, textItems, solidItems, meshItems, cameraItems } = get();
+      const { files, compositions, folders, textItems, solidItems, meshItems, cameraItems, splatEffectorItems } = get();
       return (
         files.find((f) => f.id === id) ||
         compositions.find((c) => c.id === id) ||
@@ -118,7 +125,8 @@ export const useMediaStore = create<MediaStoreState>()(
         textItems.find((t) => t.id === id) ||
         solidItems.find((s) => s.id === id) ||
         meshItems.find((m) => m.id === id) ||
-        cameraItems.find((c) => c.id === id)
+        cameraItems.find((c) => c.id === id) ||
+        splatEffectorItems.find((e) => e.id === id)
       );
     },
 
@@ -276,6 +284,36 @@ export const useMediaStore = create<MediaStoreState>()(
 
     removeCameraItem: (id: string) => {
       set({ cameraItems: get().cameraItems.filter(c => c.id !== id) });
+    },
+
+    getOrCreateSplatEffectorFolder: () => {
+      const { folders, createFolder } = get();
+      const existingFolder = folders.find((f) => f.name === 'Effectors' && f.parentId === null);
+      if (existingFolder) {
+        return existingFolder.id;
+      }
+      const newFolder = createFolder('Effectors', null);
+      return newFolder.id;
+    },
+
+    createSplatEffectorItem: (name?: string, parentId?: string | null) => {
+      const { splatEffectorItems } = get();
+      const id = `splat-effector-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newEffector: import('./types').SplatEffectorItem = {
+        id,
+        name: name || `Splat Effector ${splatEffectorItems.length + 1}`,
+        type: 'splat-effector',
+        parentId: parentId !== undefined ? parentId : null,
+        createdAt: Date.now(),
+        duration: 10,
+        splatEffectorSettings: { ...DEFAULT_SPLAT_EFFECTOR_SETTINGS },
+      };
+      set({ splatEffectorItems: [...splatEffectorItems, newEffector] });
+      return id;
+    },
+
+    removeSplatEffectorItem: (id: string) => {
+      set({ splatEffectorItems: get().splatEffectorItems.filter(e => e.id !== id) });
     },
 
     // Merge all slices
