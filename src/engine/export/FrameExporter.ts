@@ -169,14 +169,13 @@ export class FrameExporter {
     engine.setExporting(true);
 
     // Initialize export canvas for zero-copy VideoFrame creation
-    let useZeroCopy = false;
-    if (hasGaussianSplatsInRange || has3DAssetsInRange) {
-      log.info('Complex 3D export detected, forcing readPixels capture for correctness');
-    } else {
-      useZeroCopy = engine.initExportCanvas(width, height, this.settings.stackedAlpha);
-    }
+    const useZeroCopy = engine.initExportCanvas(width, height, this.settings.stackedAlpha);
     if (useZeroCopy) {
-      log.info('Using zero-copy export path (OffscreenCanvas -> VideoFrame)');
+      if (hasGaussianSplatsInRange || has3DAssetsInRange) {
+        log.info('Complex 3D export detected, using zero-copy export canvas path');
+      } else {
+        log.info('Using zero-copy export path (OffscreenCanvas -> VideoFrame)');
+      }
     } else {
       log.info('Falling back to readPixels export path');
     }

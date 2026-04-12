@@ -338,4 +338,71 @@ describe('RenderDispatcher empty playback hold', () => {
       },
     ] as any)).rejects.toThrow('Precise export asset wait failed: 3D model "Broken Model" was not ready in time');
   });
+
+  it('reuses export readiness cache for repeated frames with the same assets', async () => {
+    const { dispatcher } = createDispatcher(false);
+
+    vi.spyOn(dispatcher, 'ensureThreeSceneRendererInitialized').mockResolvedValue(true);
+    vi.spyOn(dispatcher, 'preloadThreeModelAsset').mockResolvedValue(true);
+    vi.spyOn(dispatcher, 'ensureGaussianSplatSceneLoaded').mockResolvedValue(true);
+
+    const layers = [
+      {
+        id: 'native-splat',
+        name: 'Native Splat',
+        sourceClipId: 'native-splat',
+        visible: true,
+        opacity: 1,
+        is3D: true,
+        source: {
+          type: 'gaussian-splat',
+          gaussianSplatUrl: 'blob:native-splat',
+          gaussianSplatFileName: 'native.splat',
+          gaussianSplatSettings: {
+            render: {
+              useNativeRenderer: true,
+            },
+          },
+        },
+      },
+      {
+        id: 'model-layer',
+        name: 'Hero Model',
+        visible: true,
+        opacity: 1,
+        is3D: true,
+        source: {
+          type: 'model',
+          modelUrl: 'blob:model-1',
+        },
+      },
+      {
+        id: 'three-splat',
+        name: 'Three Splat',
+        visible: true,
+        opacity: 1,
+        is3D: true,
+        source: {
+          type: 'gaussian-splat',
+          gaussianSplatUrl: 'blob:three-splat',
+          gaussianSplatFileHash: 'three-hash',
+          gaussianSplatFileName: 'three.splat',
+          gaussianSplatSettings: {
+            render: {
+              useNativeRenderer: false,
+              maxSplats: 0,
+            },
+          },
+        },
+      },
+    ] as any;
+
+    await dispatcher.ensureExportLayersReady(layers);
+    await dispatcher.ensureExportLayersReady(layers);
+
+    expect(dispatcher.ensureThreeSceneRendererInitialized).toHaveBeenCalledTimes(1);
+    expect(dispatcher.preloadThreeModelAsset).toHaveBeenCalledTimes(1);
+    expect(dispatcher.ensureGaussianSplatSceneLoaded).toHaveBeenCalledTimes(1);
+    expect(waitForTargetPreparedSplatRuntime).toHaveBeenCalledTimes(1);
+  });
 });

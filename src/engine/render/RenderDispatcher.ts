@@ -96,6 +96,10 @@ export class RenderDispatcher {
   // Native Gaussian Splat rendering state (new WebGPU path)
   private splatLoadingClips = new Set<string>();
   private splatSceneBounds = new Map<string, { min: [number, number, number]; max: [number, number, number] }>();
+  private exportReadyThreeSceneResolutions = new Set<string>();
+  private exportReadyNativeSplatKeys = new Set<string>();
+  private exportReadyThreeSplatKeys = new Set<string>();
+  private exportReadyModelUrls = new Set<string>();
   private lastThreeSceneDebugKey = '';
 
   constructor(deps: RenderDeps) {
@@ -364,6 +368,13 @@ export class RenderDispatcher {
     return renderer.preloadModel(url, fileName);
   }
 
+  clearExportReadinessCache(): void {
+    this.exportReadyThreeSceneResolutions.clear();
+    this.exportReadyNativeSplatKeys.clear();
+    this.exportReadyThreeSplatKeys.clear();
+    this.exportReadyModelUrls.clear();
+  }
+
   async ensureExportLayersReady(layers: Layer[]): Promise<void> {
     const visibleLayers = this.collectVisibleExportLayers(layers);
     if (visibleLayers.length === 0) {
@@ -458,26 +469,43 @@ export class RenderDispatcher {
 
     if (needsThreeSceneRenderer || modelAssets.size > 0 || threeSplats.size > 0) {
       const resolution = this.deps.renderTargetManager?.getResolution() ?? { width: 1, height: 1 };
-      const initialized = await this.ensureThreeSceneRendererInitialized(resolution.width, resolution.height);
-      if (!initialized) {
-        throw new Error('Precise export could not initialize the Three.js renderer');
+      const resolutionKey = `${resolution.width}x${resolution.height}`;
+      if (!this.exportReadyThreeSceneResolutions.has(resolutionKey)) {
+        const initialized = await this.ensureThreeSceneRendererInitialized(resolution.width, resolution.height);
+        if (!initialized) {
+          throw new Error('Precise export could not initialize the Three.js renderer');
+        }
+        this.exportReadyThreeSceneResolutions.add(resolutionKey);
       }
     }
 
     const readinessChecks = [
       ...[...nativeSplats.values()].map(async ({ clipId, url, fileName }) => {
+        const nativeKey = `${clipId}|${url}`;
+        if (this.exportReadyNativeSplatKeys.has(nativeKey)) {
+          return;
+        }
         const ready = await this.ensureGaussianSplatSceneLoaded(clipId, url, fileName);
         if (!ready) {
           throw new Error(`Native gaussian splat "${fileName}" was not ready in time`);
         }
+        this.exportReadyNativeSplatKeys.add(nativeKey);
       }),
       ...[...modelAssets.values()].map(async ({ url, fileName }) => {
+        if (this.exportReadyModelUrls.has(url)) {
+          return;
+        }
         const ready = await this.preloadThreeModelAsset(url, fileName);
         if (!ready) {
           throw new Error(`3D model "${fileName}" was not ready in time`);
         }
+        this.exportReadyModelUrls.add(url);
       }),
       ...[...threeSplats.values()].map(async ({ cacheKey, fileHash, file, url, fileName, requestedMaxSplats }) => {
+        const threeSplatKey = `${cacheKey}|${requestedMaxSplats}`;
+        if (this.exportReadyThreeSplatKeys.has(threeSplatKey)) {
+          return;
+        }
         await waitForTargetPreparedSplatRuntime({
           cacheKey,
           fileHash,
@@ -486,6 +514,7 @@ export class RenderDispatcher {
           fileName,
           requestedMaxSplats,
         });
+        this.exportReadyThreeSplatKeys.add(threeSplatKey);
       }),
     ];
 
