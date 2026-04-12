@@ -105,6 +105,7 @@ export interface LayerSource {
   // Text clip support
   textCanvas?: HTMLCanvasElement;
   textProperties?: TextClipProperties;
+  text3DProperties?: Text3DProperties;
 }
 
 // Data for pre-rendering nested compositions
@@ -153,6 +154,23 @@ export interface TextClipProperties {
   // Text on Path (bezier curve)
   pathEnabled: boolean;
   pathPoints: { x: number; y: number; handleIn: { x: number; y: number }; handleOut: { x: number; y: number } }[];
+}
+
+export interface Text3DProperties {
+  text: string;
+  fontFamily: 'helvetiker' | 'optimer' | 'gentilis';
+  fontWeight: 'regular' | 'bold';
+  size: number;
+  depth: number;
+  color: string;
+  letterSpacing: number;
+  lineHeight: number;
+  textAlign: 'left' | 'center' | 'right';
+  curveSegments: number;
+  bevelEnabled: boolean;
+  bevelThickness: number;
+  bevelSize: number;
+  bevelSegments: number;
 }
 
 export interface Effect {
@@ -404,6 +422,7 @@ export interface TimelineClip {
     type: 'video' | 'audio' | 'image' | 'text' | 'solid' | 'model' | 'camera' | 'gaussian-avatar' | 'gaussian-splat' | 'splat-effector';
     modelUrl?: string;  // Blob URL to 3D model file
     meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
+    text3DProperties?: Text3DProperties;
     cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;  // Shared-scene camera settings
     splatEffectorSettings?: import('./splatEffector').SplatEffectorSettings;  // Shared-scene Three.js splat effector settings
     gaussianAvatarUrl?: string;  // URL to gaussian splat avatar file
@@ -470,6 +489,7 @@ export interface TimelineClip {
   sceneDescriptionMessage?: string;   // Status message during description
   // Text clip support
   textProperties?: TextClipProperties;
+  text3DProperties?: Text3DProperties;
   // Solid clip support
   solidColor?: string;
   // YouTube download support
@@ -549,6 +569,7 @@ export interface SerializableClip {
   preservesPitch?: boolean;  // Keep pitch when speed changes (default true)
   // Text clip support
   textProperties?: TextClipProperties;
+  text3DProperties?: Text3DProperties;
   // Solid clip support
   solidColor?: string;
   // Transition support

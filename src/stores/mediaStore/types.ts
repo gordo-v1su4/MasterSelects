@@ -105,7 +105,7 @@ export interface SolidItem extends MediaItem {
 }
 
 // 3D mesh primitive types
-export type MeshPrimitiveType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'torus' | 'cone';
+export type MeshPrimitiveType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'torus' | 'cone' | 'text3d';
 
 // 3D mesh item (for Media Panel - can be dragged to timeline)
 export interface MeshItem extends MediaItem {

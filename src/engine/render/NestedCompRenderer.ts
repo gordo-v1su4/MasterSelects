@@ -599,11 +599,16 @@ export class NestedCompRenderer {
       const src = layer.source;
       const stableSourceSize = this.resolveStable3DSourceDimensions(data, width, height);
       const rot = typeof layer.rotation === 'number' ? { x: 0, y: 0, z: layer.rotation } : layer.rotation;
+      const radToDeg = 180 / Math.PI;
       layers3D.push({
         layerId: layer.id,
         clipId: layer.sourceClipId || layer.id,
         position: layer.position,
-        rotation: { x: rot.x, y: rot.y, z: rot.z },
+        rotation: {
+          x: rot.x * radToDeg,
+          y: rot.y * radToDeg,
+          z: rot.z * radToDeg,
+        },
         scale: { x: layer.scale.x, y: layer.scale.y, z: layer.scale.z ?? 1 },
         opacity: layer.opacity,
         blendMode: layer.blendMode,
@@ -615,6 +620,7 @@ export class NestedCompRenderer {
         modelUrl: src?.modelUrl ?? undefined,
         modelFileName: layer.name,
         meshType: src?.meshType ?? undefined,
+        text3DProperties: src?.text3DProperties ?? undefined,
         wireframe: layer.wireframe,
       });
     }

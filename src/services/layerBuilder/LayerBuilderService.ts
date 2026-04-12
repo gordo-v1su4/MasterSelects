@@ -790,7 +790,12 @@ export class LayerBuilderService {
       visible: true,
       opacity: finalOpacity,
       blendMode: transform.blendMode as BlendMode,
-      source: { type: 'model', modelUrl: clip.source?.modelUrl, meshType: clip.meshType },
+      source: {
+        type: 'model',
+        modelUrl: clip.source?.modelUrl,
+        meshType: clip.meshType,
+        text3DProperties: clip.text3DProperties,
+      },
       effects,
       position: transform.position,
       scale: transform.scale,
@@ -1159,7 +1164,12 @@ export class LayerBuilderService {
     } else if (nestedClip.source?.type === 'model') {
       return {
         ...baseLayer,
-        source: { type: 'model', modelUrl: nestedClip.source.modelUrl },
+        source: {
+          type: 'model',
+          modelUrl: nestedClip.source.modelUrl,
+          meshType: nestedClip.meshType,
+          text3DProperties: nestedClip.text3DProperties,
+        },
         is3D: true,
       } as Layer;
     }

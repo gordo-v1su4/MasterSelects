@@ -13,6 +13,7 @@ import type {
   MaskVertex,
   Effect,
   TextClipProperties,
+  Text3DProperties,
   Layer,
 } from '../../types';
 import type { Composition } from '../mediaStore';
@@ -32,6 +33,7 @@ export type {
   Effect,
   Composition,
   TextClipProperties,
+  Text3DProperties,
   Layer,
 };
 
@@ -195,6 +197,7 @@ export interface SolidClipActions {
 // Mesh clip actions (extracted to meshClipSlice)
 export interface MeshClipActions {
   addMeshClip: (trackId: string, startTime: number, meshType: import('../mediaStore/types').MeshPrimitiveType, duration?: number, skipMediaItem?: boolean) => string | null;
+  updateText3DProperties: (clipId: string, props: Partial<Text3DProperties>) => void;
 }
 
 // Camera clip actions (shared Three.js scene camera)
@@ -407,8 +410,10 @@ export interface ClipboardClipData {
   speed?: number;
   preservesPitch?: boolean;
   textProperties?: import('../../types').TextClipProperties;
+  text3DProperties?: import('../../types').Text3DProperties;
   solidColor?: string;
   cameraSettings?: import('../mediaStore/types').SceneCameraSettings;
+  meshType?: import('../mediaStore/types').MeshPrimitiveType;
   splatEffectorSettings?: import('../../types/splatEffector').SplatEffectorSettings;
   // Visual data (thumbnails, waveforms)
   thumbnails?: string[];
@@ -417,6 +422,7 @@ export interface ClipboardClipData {
   isComposition?: boolean;
   compositionId?: string;
   is3D?: boolean;
+  wireframe?: boolean;
 }
 
 // Clipboard data for keyframe copy/paste

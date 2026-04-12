@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
-const BOUNDS_STORAGE_PREFIX = 'editable-draggable-number-bounds:';
+const SETTINGS_STORAGE_PREFIX = 'editable-draggable-number-settings:';
+const LEGACY_BOUNDS_STORAGE_PREFIX = 'editable-draggable-number-bounds:';
 
-interface PersistedBounds {
+interface PersistedSettings {
   min?: number;
   max?: number;
+  defaultValue?: number;
 }
 
 interface PopoverPlacement {
@@ -75,27 +77,30 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function loadPersistedBounds(persistenceKey?: string): PersistedBounds | null {
+function loadPersistedSettings(persistenceKey?: string): PersistedSettings | null {
   if (!persistenceKey) return null;
   try {
-    const raw = localStorage.getItem(`${BOUNDS_STORAGE_PREFIX}${persistenceKey}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedBounds;
+    const raw = localStorage.getItem(`${SETTINGS_STORAGE_PREFIX}${persistenceKey}`);
+    const legacyRaw = localStorage.getItem(`${LEGACY_BOUNDS_STORAGE_PREFIX}${persistenceKey}`);
+    const source = raw ?? legacyRaw;
+    if (!source) return null;
+    const parsed = JSON.parse(source) as PersistedSettings;
     return {
       min: Number.isFinite(parsed.min) ? parsed.min : undefined,
       max: Number.isFinite(parsed.max) ? parsed.max : undefined,
+      defaultValue: Number.isFinite(parsed.defaultValue) ? parsed.defaultValue : undefined,
     };
   } catch {
     return null;
   }
 }
 
-function savePersistedBounds(persistenceKey: string, bounds: PersistedBounds): void {
-  localStorage.setItem(`${BOUNDS_STORAGE_PREFIX}${persistenceKey}`, JSON.stringify(bounds));
+function savePersistedSettings(persistenceKey: string, settings: PersistedSettings): void {
+  localStorage.setItem(`${SETTINGS_STORAGE_PREFIX}${persistenceKey}`, JSON.stringify(settings));
 }
 
-function clearPersistedBounds(persistenceKey: string): void {
-  localStorage.removeItem(`${BOUNDS_STORAGE_PREFIX}${persistenceKey}`);
+function clearPersistedSettings(persistenceKey: string): void {
+  localStorage.removeItem(`${SETTINGS_STORAGE_PREFIX}${persistenceKey}`);
 }
 
 export function EditableDraggableNumber({
@@ -119,11 +124,11 @@ export function EditableDraggableNumber({
   const lastClientX = useRef(0);
   const hasPointerLock = useRef(false);
   const dragStarted = useRef(false);
-  const [draftValue, setDraftValue] = useState('');
+  const [draftDefaultValue, setDraftDefaultValue] = useState('');
   const [showBoundsPopover, setShowBoundsPopover] = useState(false);
   const [draftMin, setDraftMin] = useState('');
   const [draftMax, setDraftMax] = useState('');
-  const [persistedBounds, setPersistedBounds] = useState<PersistedBounds | null>(() => loadPersistedBounds(persistenceKey));
+  const [persistedSettings, setPersistedSettings] = useState<PersistedSettings | null>(() => loadPersistedSettings(persistenceKey));
   const [popoverPlacement, setPopoverPlacement] = useState<PopoverPlacement>({
     top: 0,
     left: 0,
@@ -132,29 +137,38 @@ export function EditableDraggableNumber({
   });
 
   useEffect(() => {
-    setPersistedBounds(loadPersistedBounds(persistenceKey));
+    setPersistedSettings(loadPersistedSettings(persistenceKey));
   }, [persistenceKey]);
 
-  const effectiveMin = persistedBounds?.min ?? min;
-  const effectiveMax = persistedBounds?.max ?? max;
+  const effectiveMin = persistedSettings?.min ?? min;
+  const effectiveMax = persistedSettings?.max ?? max;
+  const effectiveDefaultValue = persistedSettings?.defaultValue ?? defaultValue;
 
   const controlTitle = useMemo(() => {
-    const parts = ['Drag to change', 'right-click to edit value/min/max'];
-    if (defaultValue !== undefined) {
+    const parts = ['Drag to change', 'right-click to edit default/min/max'];
+    if (effectiveDefaultValue !== undefined) {
       parts.push('double-click to reset');
     }
     return parts.join(', ');
-  }, [defaultValue]);
+  }, [effectiveDefaultValue]);
 
   const syncBoundsDraft = useCallback(() => {
-    setDraftValue(formatEditableValue(value, decimals));
+    setDraftDefaultValue(
+      effectiveDefaultValue !== undefined
+        ? formatEditableValue(effectiveDefaultValue, decimals)
+        : '',
+    );
     setDraftMin(effectiveMin !== undefined ? String(effectiveMin) : '');
     setDraftMax(effectiveMax !== undefined ? String(effectiveMax) : '');
-  }, [decimals, effectiveMax, effectiveMin, value]);
+  }, [decimals, effectiveDefaultValue, effectiveMax, effectiveMin]);
 
   useEffect(() => {
-    setDraftValue(formatEditableValue(value, decimals));
-  }, [decimals, value]);
+    setDraftDefaultValue(
+      effectiveDefaultValue !== undefined
+        ? formatEditableValue(effectiveDefaultValue, decimals)
+        : '',
+    );
+  }, [decimals, effectiveDefaultValue]);
 
   useEffect(() => {
     if (!showBoundsPopover) return;
@@ -323,7 +337,7 @@ export function EditableDraggableNumber({
   ]);
 
   const applyBoundsDraft = useCallback(() => {
-    const nextValueInput = parseOptionalNumber(draftValue);
+    const nextDefaultValueInput = parseOptionalNumber(draftDefaultValue);
     const nextMin = parseOptionalNumber(draftMin);
     const nextMax = parseOptionalNumber(draftMax);
 
@@ -331,39 +345,51 @@ export function EditableDraggableNumber({
       return;
     }
 
-    const nextBounds: PersistedBounds = { min: nextMin, max: nextMax };
-    setPersistedBounds(nextBounds);
+    const nextDefaultValue = nextDefaultValueInput !== undefined
+      ? clampValue(nextDefaultValueInput, nextMin, nextMax)
+      : undefined;
+
+    const nextSettings: PersistedSettings = {
+      min: nextMin,
+      max: nextMax,
+      defaultValue: nextDefaultValue,
+    };
+
+    setPersistedSettings(nextSettings);
     if (persistenceKey) {
-      savePersistedBounds(persistenceKey, nextBounds);
+      savePersistedSettings(persistenceKey, nextSettings);
     }
 
-    const nextValue = nextValueInput ?? value;
-    const clampedCurrent = clampValue(nextValue, nextBounds.min, nextBounds.max);
+    const clampedCurrent = clampValue(value, nextSettings.min, nextSettings.max);
     const roundedValue = Math.round(clampedCurrent * Math.pow(10, decimals + 2)) / Math.pow(10, decimals + 2);
     if (roundedValue !== value) {
       onChange(roundedValue);
     }
 
     setShowBoundsPopover(false);
-  }, [decimals, draftMax, draftMin, draftValue, onChange, persistenceKey, value]);
+  }, [decimals, draftDefaultValue, draftMax, draftMin, onChange, persistenceKey, value]);
 
   const resetBounds = useCallback(() => {
-    setPersistedBounds(null);
-    setDraftValue(formatEditableValue(value, decimals));
+    setPersistedSettings(null);
+    setDraftDefaultValue(
+      defaultValue !== undefined
+        ? formatEditableValue(defaultValue, decimals)
+        : '',
+    );
     setDraftMin(min !== undefined ? String(min) : '');
     setDraftMax(max !== undefined ? String(max) : '');
     if (persistenceKey) {
-      clearPersistedBounds(persistenceKey);
+      clearPersistedSettings(persistenceKey);
     }
-  }, [decimals, max, min, persistenceKey, value]);
+  }, [decimals, defaultValue, max, min, persistenceKey]);
 
   const handleResetToDefault = useCallback(() => {
-    if (defaultValue === undefined) return;
-    const nextValue = clampValue(defaultValue, effectiveMin, effectiveMax);
+    if (effectiveDefaultValue === undefined) return;
+    const nextValue = clampValue(effectiveDefaultValue, effectiveMin, effectiveMax);
     onChange(nextValue);
-    setDraftValue(formatEditableValue(nextValue, decimals));
+    setDraftDefaultValue(formatEditableValue(nextValue, decimals));
     setShowBoundsPopover(false);
-  }, [decimals, defaultValue, effectiveMax, effectiveMin, onChange]);
+  }, [decimals, effectiveDefaultValue, effectiveMax, effectiveMin, onChange]);
 
   const popover = showBoundsPopover && typeof document !== 'undefined'
     ? createPortal(
@@ -374,12 +400,13 @@ export function EditableDraggableNumber({
         >
           <div className="draggable-number-bounds-title">Value Range</div>
           <div className="draggable-number-bounds-row">
-            <label>Val</label>
+            <label>Default</label>
             <input
               type="text"
               inputMode="decimal"
-              value={draftValue}
-              onChange={(e) => setDraftValue(e.target.value)}
+              value={draftDefaultValue}
+              placeholder={defaultValue !== undefined ? String(defaultValue) : 'none'}
+              onChange={(e) => setDraftDefaultValue(e.target.value)}
             />
           </div>
           <div className="draggable-number-bounds-row">
@@ -403,7 +430,7 @@ export function EditableDraggableNumber({
             />
           </div>
           <div className="draggable-number-bounds-actions">
-            {defaultValue !== undefined && (
+            {effectiveDefaultValue !== undefined && (
               <button
                 type="button"
                 className="btn btn-xs"

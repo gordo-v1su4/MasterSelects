@@ -1,6 +1,15 @@
 // Three.js 3D Scene Renderer - renders 3D-enabled layers to an OffscreenCanvas.
 // The output is imported into the existing WebGPU compositor as a texture.
 
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import helvetikerRegular from 'three/examples/fonts/helvetiker_regular.typeface.json';
+import helvetikerBold from 'three/examples/fonts/helvetiker_bold.typeface.json';
+import optimerRegular from 'three/examples/fonts/optimer_regular.typeface.json';
+import optimerBold from 'three/examples/fonts/optimer_bold.typeface.json';
+import gentilisRegular from 'three/examples/fonts/gentilis_regular.typeface.json';
+import gentilisBold from 'three/examples/fonts/gentilis_bold.typeface.json';
 import { Logger } from '../../services/logger';
 import type { Layer3DData, CameraConfig, SplatEffectorRuntimeData } from './types';
 import { DEFAULT_CAMERA_CONFIG } from './types';
@@ -10,6 +19,7 @@ import type { GaussianSplatAsset, GaussianSplatFormat } from '../gaussian/loader
 const log = Logger.create('ThreeSceneRenderer');
 
 type THREE = typeof import('three');
+type ParsedText3DFont = ReturnType<FontLoader['parse']>;
 type Vector2Like = import('three').Vector2;
 type Vector4Like = import('three').Vector4;
 type SplatShaderMaterial = import('three').ShaderMaterial & {
@@ -27,13 +37,13 @@ type SplatShaderMaterial = import('three').ShaderMaterial & {
 
 interface ManagedMesh {
   mesh: import('three').Mesh | import('three').Group;
-  texture: import('three').Texture | import('three').VideoTexture;
+  kind: 'plane' | 'primitive' | 'text3d' | 'model';
+  texture?: import('three').Texture | import('three').VideoTexture;
   layerId: string;
-  lastSourceType: 'video' | 'image' | 'canvas' | 'model' | null;
+  lastSourceType?: 'video' | 'image' | 'canvas' | 'model' | null;
   planeW: number;
   planeH: number;
-  isModel?: boolean;
-  modelUrl?: string;
+  resourceKey?: string;
 }
 
 interface ManagedSplat {
@@ -61,13 +71,30 @@ interface ManagedSplat {
   normalizationScale: number;
   rendererRevision: number;
   didLogVisibilityProbe: boolean;
+  requestedMaxSplats: number;
 }
 
 const modelCache = new Map<string, import('three').Group>();
 const modelLoading = new Set<string>();
 const splatAssetCache = new Map<string, Promise<GaussianSplatAsset>>();
-const AUTO_THREE_SPLAT_BUDGET = 2_000_000;
-const MAX_CPU_SORT_SPLATS = 100000;
+const text3DFontLoader = new FontLoader();
+const text3DFontCache = new Map<string, ParsedText3DFont>();
+const TEXT_3D_FONT_DATA: Record<'helvetiker' | 'optimer' | 'gentilis', Record<'regular' | 'bold', object>> = {
+  helvetiker: {
+    regular: helvetikerRegular as object,
+    bold: helvetikerBold as object,
+  },
+  optimer: {
+    regular: optimerRegular as object,
+    bold: optimerBold as object,
+  },
+  gentilis: {
+    regular: gentilisRegular as object,
+    bold: gentilisBold as object,
+  },
+};
+const MAX_EXACT_CPU_SORT_SPLATS = 100000;
+const APPROXIMATE_SPLAT_SORT_BUCKETS = 8192;
 const THREE_SPLAT_RENDERER_REVISION = 10;
 const MAX_SPLAT_EFFECTORS = 8;
 
@@ -468,6 +495,7 @@ export class ThreeSceneRenderer {
       normalizationScale: 1,
       rendererRevision: THREE_SPLAT_RENDERER_REVISION,
       didLogVisibilityProbe: false,
+      requestedMaxSplats: 0,
     };
   }
 
@@ -535,8 +563,8 @@ export class ThreeSceneRenderer {
     };
     const requestedMaxSplats = layer.gaussianSplatSettings?.render.maxSplats ?? 0;
     const targetMaxSplats = requestedMaxSplats > 0
-      ? requestedMaxSplats
-      : Math.min(totalSplats, AUTO_THREE_SPLAT_BUDGET);
+      ? Math.min(requestedMaxSplats, totalSplats)
+      : totalSplats;
     const stride = totalSplats > targetMaxSplats
       ? Math.ceil(totalSplats / targetMaxSplats)
       : 1;
@@ -618,6 +646,7 @@ export class ThreeSceneRenderer {
     managed.sortFrame = 0;
     managed.bounds = normalizedBounds;
     managed.normalizationScale = normalizationScale;
+    managed.requestedMaxSplats = requestedMaxSplats;
 
     const instanceCenters = new T.InstancedBufferAttribute(new Float32Array(centers.length), 3);
     const instanceColors = new T.InstancedBufferAttribute(new Float32Array(colors.length), 3);
@@ -658,6 +687,7 @@ export class ThreeSceneRenderer {
       layerId: layer.layerId,
       fileName: layer.gaussianSplatFileName,
       totalSplats,
+      requestedMaxSplats,
       renderedSplats: splatCount,
       stride,
       rawBounds,
@@ -669,6 +699,7 @@ export class ThreeSceneRenderer {
       clipId: layer.clipId,
       fileName: layer.gaussianSplatFileName,
       totalSplats,
+      requestedMaxSplats,
       renderedSplats: splatCount,
       stride,
       rawBounds,
@@ -727,41 +758,82 @@ export class ThreeSceneRenderer {
     axisZAttr.needsUpdate = true;
   }
 
+  private applyApproximateSplatOrder(
+    managed: ManagedSplat,
+    minDepth: number,
+    maxDepth: number,
+  ): void {
+    const depthRange = maxDepth - minDepth;
+    if (!Number.isFinite(depthRange) || depthRange <= 0.000001) {
+      for (let i = 0; i < managed.splatCount; i += 1) {
+        managed.sortIndices[i] = i;
+      }
+      return;
+    }
+
+    const bucketCount = APPROXIMATE_SPLAT_SORT_BUCKETS;
+    const bucketCounts = new Uint32Array(bucketCount);
+    const bucketOffsets = new Uint32Array(bucketCount);
+    const bucketScale = (bucketCount - 1) / depthRange;
+
+    for (let i = 0; i < managed.splatCount; i += 1) {
+      const bucketIndex = Math.max(
+        0,
+        Math.min(
+          bucketCount - 1,
+          Math.floor((managed.sortDepths[i] - minDepth) * bucketScale),
+        ),
+      );
+      bucketCounts[bucketIndex] += 1;
+    }
+
+    let offset = 0;
+    for (let bucketIndex = bucketCount - 1; bucketIndex >= 0; bucketIndex -= 1) {
+      bucketOffsets[bucketIndex] = offset;
+      offset += bucketCounts[bucketIndex];
+    }
+
+    for (let i = 0; i < managed.splatCount; i += 1) {
+      const bucketIndex = Math.max(
+        0,
+        Math.min(
+          bucketCount - 1,
+          Math.floor((managed.sortDepths[i] - minDepth) * bucketScale),
+        ),
+      );
+      const outIndex = bucketOffsets[bucketIndex];
+      managed.sortIndices[outIndex] = i;
+      bucketOffsets[bucketIndex] = outIndex + 1;
+    }
+  }
+
   private updateSplatSort(managed: ManagedSplat, force = false): void {
     if (!this.camera || managed.splatCount === 0) {
       return;
     }
 
     managed.sortFrame += 1;
-    const canCpuSort = managed.splatCount <= MAX_CPU_SORT_SPLATS;
-    if (!canCpuSort) {
-      if (force) {
-        for (let i = 0; i < managed.splatCount; i += 1) {
-          managed.sortIndices[i] = i;
-        }
-        this.applySplatOrder(managed);
-      }
-      return;
-    }
+    const canExactCpuSort = managed.splatCount <= MAX_EXACT_CPU_SORT_SPLATS;
+    const useApproximateSort = !canExactCpuSort;
 
     const baseInterval = managed.splatCount <= 12000
       ? 1
       : managed.splatCount <= 30000
         ? 2
-        : managed.splatCount <= 60000
+      : managed.splatCount <= 60000
           ? 4
-          : managed.splatCount <= 200000
-            ? 8
+        : managed.splatCount <= 200000
+            ? (useApproximateSort ? 6 : 8)
             : managed.splatCount <= 500000
               ? 16
-              : 32;
+              : managed.splatCount <= 1000000
+                ? 12
+                : 16;
     const requestedInterval = Math.max(0, managed.sortFrequency || 0);
     const interval = requestedInterval === 0 ? 0 : Math.max(baseInterval, requestedInterval);
 
     const cameraPosition = new this.THREE!.Vector3();
     const cameraDirection = new this.THREE!.Vector3();
-    const worldPosition = new this.THREE!.Vector3();
-    const toCamera = new this.THREE!.Vector3();
     let minDepth = Number.POSITIVE_INFINITY;
     let maxDepth = Number.NEGATIVE_INFINITY;
     let inFrontCount = 0;
@@ -792,24 +864,46 @@ export class ThreeSceneRenderer {
 
     managed.mesh.updateMatrixWorld(true);
 
+    const matrixElements = managed.mesh.matrixWorld.elements;
+    const depthCoeffX =
+      matrixElements[0] * dirTuple[0] +
+      matrixElements[1] * dirTuple[1] +
+      matrixElements[2] * dirTuple[2];
+    const depthCoeffY =
+      matrixElements[4] * dirTuple[0] +
+      matrixElements[5] * dirTuple[1] +
+      matrixElements[6] * dirTuple[2];
+    const depthCoeffZ =
+      matrixElements[8] * dirTuple[0] +
+      matrixElements[9] * dirTuple[1] +
+      matrixElements[10] * dirTuple[2];
+    const depthBias =
+      (matrixElements[12] - posTuple[0]) * dirTuple[0] +
+      (matrixElements[13] - posTuple[1]) * dirTuple[1] +
+      (matrixElements[14] - posTuple[2]) * dirTuple[2];
+
     for (let i = 0; i < managed.splatCount; i += 1) {
       const base = i * 3;
-      worldPosition.set(
-        managed.centers[base + 0],
-        managed.centers[base + 1],
-        managed.centers[base + 2],
-      ).applyMatrix4(managed.mesh.matrixWorld);
-      toCamera.copy(worldPosition).sub(cameraPosition);
-      managed.sortDepths[i] = toCamera.dot(cameraDirection);
+      managed.sortDepths[i] =
+        managed.centers[base + 0] * depthCoeffX +
+        managed.centers[base + 1] * depthCoeffY +
+        managed.centers[base + 2] * depthCoeffZ +
+        depthBias;
       minDepth = Math.min(minDepth, managed.sortDepths[i]);
       maxDepth = Math.max(maxDepth, managed.sortDepths[i]);
       if (managed.sortDepths[i] > 0) {
         inFrontCount += 1;
       }
-      managed.sortIndices[i] = i;
     }
 
-    managed.sortIndices.sort((a, b) => managed.sortDepths[b] - managed.sortDepths[a]);
+    if (canExactCpuSort) {
+      for (let i = 0; i < managed.splatCount; i += 1) {
+        managed.sortIndices[i] = i;
+      }
+      managed.sortIndices.sort((a, b) => managed.sortDepths[b] - managed.sortDepths[a]);
+    } else {
+      this.applyApproximateSplatOrder(managed, minDepth, maxDepth);
+    }
     managed.lastSortCameraPosition = posTuple;
     managed.lastSortCameraDirection = dirTuple;
     if (!managed.didLogVisibilityProbe) {
@@ -917,9 +1011,42 @@ export class ThreeSceneRenderer {
         planeW = planeH * sourceAspect;
       }
 
-      if (layer.meshType && !layer.modelUrl) {
+      if (layer.meshType === 'text3d' && layer.text3DProperties) {
+        const geometryKey = this.getText3DGeometryKey(layer);
+        if (!managed || managed.kind !== 'text3d' || managed.resourceKey !== geometryKey) {
+          if (managed) this.disposeManagedMesh(managed);
+          const geometry = this.createText3DGeometry(T, layer);
+          const material = new T.MeshStandardMaterial({
+            color: 0xffffff,
+            metalness: 0.2,
+            roughness: 0.45,
+          });
+          const mesh = new T.Mesh(geometry, material);
+          managed = {
+            mesh,
+            kind: 'text3d',
+            layerId: layer.layerId,
+            planeW: 1,
+            planeH: 1,
+            resourceKey: geometryKey,
+          };
+          this.meshes.set(layer.layerId, managed);
+          this.scene.add(mesh);
+        }
+
+        const material = (managed.mesh as import('three').Mesh).material as import('three').MeshStandardMaterial;
+        if (layer.wireframe) {
+          material.wireframe = true;
+          material.color.setHex(0x4488ff);
+          material.emissive.setHex(0x2244aa);
+        } else {
+          material.wireframe = false;
+          material.emissive.setHex(0x000000);
+          this.setStandardMaterialColor(material, layer.text3DProperties.color, 0xffffff);
+        }
+      } else if (layer.meshType && !layer.modelUrl) {
         const meshKey = `primitive:${layer.meshType}`;
-        if (!managed || managed.modelUrl !== meshKey) {
+        if (!managed || managed.kind !== 'primitive' || managed.resourceKey !== meshKey) {
           if (managed) this.disposeManagedMesh(managed);
           const geometry = this.createPrimitiveGeometry(T, layer.meshType);
           const material = new T.MeshStandardMaterial({
@@ -930,13 +1057,11 @@ export class ThreeSceneRenderer {
           const mesh = new T.Mesh(geometry, material);
           managed = {
             mesh,
-            texture: new T.Texture(),
+            kind: 'primitive',
             layerId: layer.layerId,
-            lastSourceType: 'model',
             planeW: 1,
             planeH: 1,
-            isModel: true,
-            modelUrl: meshKey,
+            resourceKey: meshKey,
           };
           this.meshes.set(layer.layerId, managed);
           this.scene.add(mesh);
@@ -957,7 +1082,7 @@ export class ThreeSceneRenderer {
           this.setModelFileName(layer.modelUrl, layer.modelFileName);
         }
 
-        if (!managed || managed.modelUrl !== layer.modelUrl) {
+        if (!managed || managed.kind !== 'model' || managed.resourceKey !== layer.modelUrl) {
           this.loadModel(T, layer.layerId, layer.modelUrl);
           const cachedGroup = modelCache.get(layer.modelUrl);
           if (cachedGroup) {
@@ -965,13 +1090,11 @@ export class ThreeSceneRenderer {
             const group = cachedGroup.clone();
             managed = {
               mesh: group,
-              texture: new T.Texture(),
+              kind: 'model',
               layerId: layer.layerId,
-              lastSourceType: 'model',
               planeW: 1,
               planeH: 1,
-              isModel: true,
-              modelUrl: layer.modelUrl,
+              resourceKey: layer.modelUrl,
             };
             this.meshes.set(layer.layerId, managed);
             this.scene.add(group);
@@ -980,7 +1103,7 @@ export class ThreeSceneRenderer {
           }
         }
 
-        if (managed?.isModel) {
+        if (managed?.kind === 'model') {
           (managed.mesh as import('three').Group).traverse((child) => {
             const mesh = child as import('three').Mesh;
             if (!mesh.isMesh) return;
@@ -995,7 +1118,7 @@ export class ThreeSceneRenderer {
           });
         }
       } else {
-        if (!managed || managed.isModel) {
+        if (!managed || managed.kind !== 'plane') {
           if (managed) this.disposeManagedMesh(managed);
           managed = this.createMeshForLayer(T, layer, planeW, planeH);
           this.meshes.set(layer.layerId, managed);
@@ -1036,7 +1159,7 @@ export class ThreeSceneRenderer {
         scale.z,
       );
 
-      if (managed.isModel) {
+      if (managed.kind === 'model') {
         (managed.mesh as import('three').Group).traverse((child) => {
           if (!(child as import('three').Mesh).isMesh) return;
           const material = (child as import('three').Mesh).material as import('three').MeshStandardMaterial;
@@ -1044,12 +1167,17 @@ export class ThreeSceneRenderer {
           material.transparent = layer.opacity < 1;
         });
         managed.mesh.visible = layer.opacity > 0;
-      } else {
+      } else if (managed.kind === 'plane') {
         const material = (managed.mesh as import('three').Mesh).material as import('three').MeshBasicMaterial;
         material.opacity = layer.opacity;
         // Text and image planes can carry their own alpha even at opacity 1.
         // Turning transparency off here makes the plane render as an opaque black quad.
         material.transparent = true;
+        material.visible = layer.opacity > 0;
+      } else {
+        const material = (managed.mesh as import('three').Mesh).material as import('three').MeshStandardMaterial;
+        material.opacity = layer.opacity;
+        material.transparent = layer.opacity < 1 || material.wireframe;
         material.visible = layer.opacity > 0;
       }
     }
@@ -1176,10 +1304,12 @@ export class ThreeSceneRenderer {
     if (!this.scene || !this.THREE) return;
 
     let managed = this.splatObjects.get(layer.layerId);
+    const requestedMaxSplats = layer.gaussianSplatSettings?.render.maxSplats ?? 0;
     const needsManagedRebuild =
       !managed ||
       managed.splatUrl !== layer.gaussianSplatUrl ||
-      managed.rendererRevision !== THREE_SPLAT_RENDERER_REVISION;
+      managed.rendererRevision !== THREE_SPLAT_RENDERER_REVISION ||
+      managed.requestedMaxSplats !== requestedMaxSplats;
     if (needsManagedRebuild) {
       if (managed) {
         this.disposeManagedSplat(managed);
@@ -1262,6 +1392,141 @@ export class ThreeSceneRenderer {
     }
   }
 
+  private getText3DFont(
+    fontFamily: 'helvetiker' | 'optimer' | 'gentilis',
+    fontWeight: 'regular' | 'bold',
+  ): ParsedText3DFont {
+    const cacheKey = `${fontFamily}:${fontWeight}`;
+    const cached = text3DFontCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const font = text3DFontLoader.parse(TEXT_3D_FONT_DATA[fontFamily][fontWeight] as any);
+    text3DFontCache.set(cacheKey, font);
+    return font;
+  }
+
+  private getText3DGeometryKey(layer: Layer3DData): string {
+    const props = layer.text3DProperties;
+    if (!props) {
+      return 'text3d:missing';
+    }
+
+    return JSON.stringify({
+      text: props.text,
+      fontFamily: props.fontFamily,
+      fontWeight: props.fontWeight,
+      size: props.size,
+      depth: props.depth,
+      letterSpacing: props.letterSpacing,
+      lineHeight: props.lineHeight,
+      textAlign: props.textAlign,
+      curveSegments: props.curveSegments,
+      bevelEnabled: props.bevelEnabled,
+      bevelThickness: props.bevelThickness,
+      bevelSize: props.bevelSize,
+      bevelSegments: props.bevelSegments,
+    });
+  }
+
+  private createText3DGeometry(T: THREE, layer: Layer3DData): import('three').BufferGeometry {
+    const props = layer.text3DProperties;
+    if (!props) {
+      return new T.BoxGeometry(0.001, 0.001, 0.001);
+    }
+
+    const font = this.getText3DFont(props.fontFamily, props.fontWeight);
+    const lines = (props.text || '3D Text').split(/\r?\n/);
+    const textOptions = {
+      font,
+      size: props.size,
+      depth: props.depth,
+      curveSegments: Math.max(1, Math.round(props.curveSegments)),
+      bevelEnabled: props.bevelEnabled,
+      bevelThickness: props.bevelThickness,
+      bevelSize: props.bevelSize,
+      bevelSegments: Math.max(1, Math.round(props.bevelSegments)),
+    };
+    const lineAdvance = props.size * props.lineHeight;
+    const letterSpacing = props.letterSpacing;
+    const spaceAdvance = props.size * 0.35 + letterSpacing;
+    const lineGeometries: import('three').BufferGeometry[] = [];
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex] ?? '';
+      const characterGeometries: import('three').BufferGeometry[] = [];
+      let cursorX = 0;
+
+      for (const character of line) {
+        if (character === ' ') {
+          cursorX += spaceAdvance;
+          continue;
+        }
+
+        const charGeometry = new TextGeometry(character, textOptions);
+        charGeometry.computeBoundingBox();
+        const bbox = charGeometry.boundingBox;
+        const width = bbox ? bbox.max.x - bbox.min.x : props.size * 0.4;
+        const minX = bbox?.min.x ?? 0;
+
+        charGeometry.translate(cursorX - minX, 0, 0);
+        characterGeometries.push(charGeometry);
+        cursorX += width + letterSpacing;
+      }
+
+      const trimmedLineWidth = cursorX > 0 ? cursorX - letterSpacing : 0;
+      const mergedLineGeometry = characterGeometries.length > 0
+        ? mergeGeometries(characterGeometries, false)
+        : new T.BoxGeometry(0.001, 0.001, 0.001);
+
+      if (!mergedLineGeometry) {
+        continue;
+      }
+
+      const alignOffsetX = props.textAlign === 'left'
+        ? 0
+        : props.textAlign === 'right'
+          ? -trimmedLineWidth
+          : -trimmedLineWidth / 2;
+
+      mergedLineGeometry.translate(alignOffsetX, -lineIndex * lineAdvance, 0);
+      lineGeometries.push(mergedLineGeometry);
+    }
+
+    const mergedGeometry = lineGeometries.length > 0
+      ? mergeGeometries(lineGeometries, false)
+      : null;
+
+    if (!mergedGeometry) {
+      return new T.BoxGeometry(0.001, 0.001, 0.001);
+    }
+
+    mergedGeometry.computeBoundingBox();
+    const bbox = mergedGeometry.boundingBox;
+    if (bbox) {
+      mergedGeometry.translate(
+        -(bbox.min.x + bbox.max.x) / 2,
+        -(bbox.min.y + bbox.max.y) / 2,
+        -(bbox.min.z + bbox.max.z) / 2,
+      );
+    }
+
+    return mergedGeometry;
+  }
+
+  private setStandardMaterialColor(
+    material: import('three').MeshStandardMaterial,
+    color: string | undefined,
+    fallbackHex = 0xaaaaaa,
+  ): void {
+    try {
+      material.color.set(color || '#ffffff');
+    } catch {
+      material.color.setHex(fallbackHex);
+    }
+  }
+
   private createPrimitiveGeometry(T: THREE, meshType: string): import('three').BufferGeometry {
     switch (meshType) {
       case 'cube':
@@ -1276,6 +1541,8 @@ export class ThreeSceneRenderer {
         return new T.TorusGeometry(0.3, 0.1, 16, 48);
       case 'cone':
         return new T.ConeGeometry(0.3, 0.6, 32);
+      case 'text3d':
+        return new T.BoxGeometry(0.001, 0.001, 0.001);
       default:
         return new T.BoxGeometry(0.6, 0.6, 0.6);
     }
@@ -1363,6 +1630,7 @@ export class ThreeSceneRenderer {
     return {
       mesh,
       texture,
+      kind: 'plane',
       layerId: layer.layerId,
       lastSourceType: null,
       planeW,
@@ -1417,12 +1685,18 @@ export class ThreeSceneRenderer {
 
   private disposeManagedMesh(managed: ManagedMesh): void {
     this.scene?.remove(managed.mesh);
-    if (!managed.isModel) {
-      managed.texture.dispose();
-      const mesh = managed.mesh as import('three').Mesh;
-      (mesh.material as import('three').MeshBasicMaterial).dispose();
-      mesh.geometry.dispose();
+    if (managed.kind === 'model') {
+      return;
     }
+
+    managed.texture?.dispose();
+    const mesh = managed.mesh as import('three').Mesh;
+    if (Array.isArray(mesh.material)) {
+      mesh.material.forEach((material) => material.dispose());
+    } else {
+      mesh.material.dispose();
+    }
+    mesh.geometry.dispose();
   }
 
   private disposeManagedSplatById(layerId: string): void {

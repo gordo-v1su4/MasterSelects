@@ -39,6 +39,16 @@ export type {
 } from './types';
 export { DEFAULT_SCENE_CAMERA_SETTINGS } from './types';
 
+const MESH_ITEM_LABELS: Record<import('./types').MeshPrimitiveType, string> = {
+  cube: 'Cube',
+  sphere: 'Sphere',
+  plane: 'Plane',
+  cylinder: 'Cylinder',
+  torus: 'Torus',
+  cone: 'Cone',
+  text3d: '3D Text',
+};
+
 // Combined store type with all actions
 type MediaStoreState = MediaState &
   FileImportActions &
@@ -237,7 +247,7 @@ export const useMediaStore = create<MediaStoreState>()(
     createMeshItem: (meshType: import('./types').MeshPrimitiveType, name?: string, parentId?: string | null) => {
       const { meshItems } = get();
       const id = `mesh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const label = meshType.charAt(0).toUpperCase() + meshType.slice(1);
+      const label = MESH_ITEM_LABELS[meshType] || meshType;
       const newMesh: import('./types').MeshItem = {
         id,
         name: name || `${label} ${meshItems.filter(m => m.meshType === meshType).length + 1}`,

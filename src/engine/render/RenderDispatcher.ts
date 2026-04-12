@@ -775,6 +775,7 @@ export class RenderDispatcher {
         modelUrl: src?.modelUrl ?? undefined,
         modelFileName: layer.name,  // Original filename for format detection
         meshType: src?.meshType ?? undefined,
+        text3DProperties: src?.text3DProperties ?? undefined,
         wireframe: layer.wireframe,
         gaussianSplatUrl: src?.gaussianSplatUrl ?? undefined,
         gaussianSplatFileName: src?.gaussianSplatFileName ?? undefined,

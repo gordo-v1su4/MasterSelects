@@ -1,6 +1,6 @@
 // Types for Three.js 3D layer integration
 
-import type { BlendMode } from '../../types';
+import type { BlendMode, Text3DProperties } from '../../types';
 import type { GaussianSplatSettings } from '../gaussian/types';
 import type { SplatEffectorMode } from '../../types/splatEffector';
 
@@ -23,6 +23,7 @@ export interface Layer3DData {
   modelUrl?: string;  // Blob URL to OBJ/glTF/GLB file
   modelFileName?: string;  // Original filename (for format detection from blob URLs)
   meshType?: import('../../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
+  text3DProperties?: Text3DProperties;
   wireframe?: boolean;  // Debug: show as wireframe
   // Gaussian splat source
   gaussianSplatUrl?: string;

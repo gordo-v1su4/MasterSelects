@@ -59,6 +59,13 @@ export const FileTypeIcon = memo(({ type, large }: FileTypeIconProps) => {
           <text x="8" y="11.5" textAnchor="middle" fill="#eeddcc" fontSize="9" fontWeight="bold" fontFamily="sans-serif">T</text>
         </svg>
       );
+    case 'text-3d':
+      return (
+        <svg style={style} viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="2" width="14" height="12" rx="1.5" fill="#7b604a" stroke="#c8a07c" strokeWidth="0.7"/>
+          <text x="8" y="10.6" textAnchor="middle" fill="#f3e3cf" fontSize="6.4" fontWeight="bold" fontFamily="sans-serif">3T</text>
+        </svg>
+      );
     case 'solid':
       return (
         <svg style={style} viewBox="0 0 16 16" fill="none">
@@ -66,6 +73,7 @@ export const FileTypeIcon = memo(({ type, large }: FileTypeIconProps) => {
           <rect x="4" y="5" width="8" height="6" rx="0.5" fill="#bbb"/>
         </svg>
       );
+    case 'model':
     case 'mesh':
       return (
         <svg style={style} viewBox="0 0 16 16" fill="none">
@@ -218,6 +226,14 @@ const LargeIcon = memo(({ type, style }: { type?: string; style: React.CSSProper
           <text x="24" y="32" textAnchor="middle" fill="#eeddcc" fontSize="22" fontWeight="bold" fontFamily="sans-serif">T</text>
         </svg>
       );
+    case 'text-3d':
+      return (
+        <svg style={style} viewBox="0 0 48 48" fill="none">
+          <rect x="4" y="8" width="40" height="32" rx="3" fill="#70543f"/>
+          <rect x="4" y="8" width="40" height="32" rx="3" stroke="#c79b71" strokeWidth="1"/>
+          <text x="24" y="31" textAnchor="middle" fill="#f3e3cf" fontSize="18" fontWeight="bold" fontFamily="sans-serif">3T</text>
+        </svg>
+      );
     case 'solid':
       return (
         <svg style={style} viewBox="0 0 48 48" fill="none">
@@ -226,6 +242,7 @@ const LargeIcon = memo(({ type, style }: { type?: string; style: React.CSSProper
           <rect x="12" y="16" width="24" height="16" rx="1" fill="#aaa"/>
         </svg>
       );
+    case 'model':
     case 'mesh':
       return (
         <svg style={style} viewBox="0 0 48 48" fill="none">

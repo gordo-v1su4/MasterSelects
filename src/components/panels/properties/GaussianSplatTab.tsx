@@ -17,7 +17,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
   const render = settings.render;
   const nativeRender = render.useNativeRenderer === true;
   const maxSplatsSuffix = render.maxSplats === 0
-    ? (nativeRender ? ' (unlimited)' : ' (auto)')
+    ? (nativeRender ? ' (unlimited)' : ' (all)')
     : '';
 
   const updateRenderSetting = useCallback(<K extends keyof GaussianSplatRenderSettings>(key: K, value: GaussianSplatRenderSettings[K]) => {
@@ -102,6 +102,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           <DraggableNumber
             value={render.splatScale}
             onChange={(value) => updateRenderSetting('splatScale', Math.max(0.01, value))}
+            defaultValue={DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.splatScale}
             persistenceKey="gaussian.render.splatScale"
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
@@ -117,6 +118,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           <DraggableNumber
             value={render.maxSplats}
             onChange={(value) => updateRenderSetting('maxSplats', Math.max(0, Math.round(value)))}
+            defaultValue={DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.maxSplats}
             persistenceKey="gaussian.render.maxSplats"
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
@@ -133,6 +135,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
           <DraggableNumber
             value={render.sortFrequency}
             onChange={(value) => updateRenderSetting('sortFrequency', Math.max(0, Math.round(value)))}
+            defaultValue={DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.sortFrequency}
             persistenceKey="gaussian.render.sortFrequency"
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
@@ -150,6 +153,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
             <DraggableNumber
               value={render.nearPlane}
               onChange={(value) => updateRenderSetting('nearPlane', value)}
+              defaultValue={DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.nearPlane}
               persistenceKey="gaussian.render.nearPlane"
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
@@ -165,6 +169,7 @@ export function GaussianSplatTab({ clipId }: GaussianSplatTabProps) {
             <DraggableNumber
               value={render.farPlane}
               onChange={(value) => updateRenderSetting('farPlane', value)}
+              defaultValue={DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.farPlane}
               persistenceKey="gaussian.render.farPlane"
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}

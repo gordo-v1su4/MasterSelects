@@ -187,6 +187,7 @@ function TimelineClipComponent({
 
   // Determine if this is a text clip
   const isTextClip = clip.source?.type === 'text';
+  const isText3DClip = clip.source?.type === 'model' && clip.meshType === 'text3d';
 
   // Determine if this is a solid clip
   const isSolidClip = clip.source?.type === 'solid';
@@ -319,7 +320,7 @@ function TimelineClipComponent({
   }
 
   // Determine clip type class (audio, video, text, or image)
-  const clipTypeClass = isSolidClip ? 'solid' : isTextClip ? 'text' : isCameraClip ? 'camera' : isSplatEffectorClip ? 'splat-effector' : isAudioClip ? 'audio' : (clip.source?.type || 'video');
+  const clipTypeClass = isSolidClip ? 'solid' : (isTextClip || isText3DClip) ? 'text' : isCameraClip ? 'camera' : isSplatEffectorClip ? 'splat-effector' : isAudioClip ? 'audio' : (clip.source?.type || 'video');
 
   // Check if this clip is part of a multi-select drag
   const isInMultiSelectDrag = clipDrag?.multiSelectClipIds?.includes(clip.id) && clipDrag.multiSelectTimeDelta !== undefined;
@@ -732,8 +733,10 @@ function TimelineClipComponent({
           {isSolidClip && (
             <span className="clip-solid-swatch" title="Solid Clip" style={{ background: clip.solidColor || '#fff' }} />
           )}
-          {isTextClip && (
-            <span className="clip-text-icon" title="Text Clip">T</span>
+          {(isTextClip || isText3DClip) && (
+            <span className="clip-text-icon" title={isText3DClip ? '3D Text Clip' : 'Text Clip'}>
+              {isText3DClip ? '3T' : 'T'}
+            </span>
           )}
           {isCameraClip && (
             <span className="clip-text-icon" title="Camera Clip">C</span>
@@ -741,7 +744,13 @@ function TimelineClipComponent({
           {isSplatEffectorClip && (
             <span className="clip-text-icon" title="Splat Effector Clip">E</span>
           )}
-          <span className="clip-name">{isTextClip && clip.textProperties ? clip.textProperties.text.slice(0, 30) || 'Text' : clip.name}</span>
+          <span className="clip-name">
+            {isTextClip && clip.textProperties
+              ? clip.textProperties.text.slice(0, 30) || 'Text'
+              : isText3DClip && clip.text3DProperties
+                ? clip.text3DProperties.text.slice(0, 30) || '3D Text'
+                : clip.name}
+          </span>
           {/* PickWhip disabled */}
         </div>
         <span className="clip-duration">{formatTime(displayDuration)}</span>

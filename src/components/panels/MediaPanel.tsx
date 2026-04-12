@@ -68,11 +68,22 @@ function loadColumnOrder(): ColumnId[] {
   return DEFAULT_COLUMN_ORDER;
 }
 
+function getProjectItemIconType(item: ProjectItem | undefined): string | undefined {
+  if (!item || !('type' in item)) return undefined;
+  if (item.type === 'model') {
+    return 'meshType' in item && item.meshType === 'text3d'
+      ? 'text-3d'
+      : 'mesh';
+  }
+  return item.type;
+}
+
 export function MediaPanel() {
   // Reactive data - subscribe to specific values only
   const files = useMediaStore(state => state.files);
   const compositions = useMediaStore(state => state.compositions);
   const folders = useMediaStore(state => state.folders);
+  const textItems = useMediaStore(state => state.textItems);
   const solidItems = useMediaStore(state => state.solidItems);
   const meshItems = useMediaStore(state => state.meshItems);
   const cameraItems = useMediaStore(state => state.cameraItems);
@@ -108,6 +119,7 @@ export function MediaPanel() {
     moveToFolder,
     createTextItem,
     getOrCreateTextFolder,
+    removeTextItem,
     createSolidItem,
     getOrCreateSolidFolder,
     updateSolidItem,
@@ -534,12 +546,13 @@ export function MediaPanel() {
       if (files.find(f => f.id === id)) removeFile(id);
       else if (compositions.find(c => c.id === id)) removeComposition(id);
       else if (folders.find(f => f.id === id)) removeFolder(id);
+      else if (textItems.find(t => t.id === id)) removeTextItem(id);
       else if (meshItems.find(m => m.id === id)) removeMeshItem(id);
       else if (cameraItems.find(c => c.id === id)) removeCameraItem(id);
       else if (splatEffectorItems.find(e => e.id === id)) removeSplatEffectorItem(id);
     });
     closeContextMenu();
-  }, [selectedIds, files, compositions, folders, meshItems, cameraItems, splatEffectorItems, removeFile, removeComposition, removeFolder, removeMeshItem, removeCameraItem, removeSplatEffectorItem, closeContextMenu]);
+  }, [selectedIds, files, compositions, folders, textItems, meshItems, cameraItems, splatEffectorItems, removeFile, removeComposition, removeFolder, removeTextItem, removeMeshItem, removeCameraItem, removeSplatEffectorItem, closeContextMenu]);
 
   // Get the active parent folder (grid view: current open folder, list view: selected folder or null)
   const getActiveParentId = useCallback((): string | null => {
@@ -570,6 +583,12 @@ export function MediaPanel() {
     createTextItem(undefined, textFolderId);
     closeContextMenu();
   }, [createTextItem, getOrCreateTextFolder, closeContextMenu]);
+
+  const handleNewText3D = useCallback(() => {
+    const textFolderId = getOrCreateTextFolder();
+    createMeshItem('text3d', undefined, textFolderId);
+    closeContextMenu();
+  }, [createMeshItem, getOrCreateTextFolder, closeContextMenu]);
 
   // New solid item (in Media Panel, can be dragged to timeline)
   const handleNewSolid = useCallback(() => {
@@ -1059,7 +1078,7 @@ export function MediaPanel() {
             <span className="media-item-icon">
               {isFolder
                 ? <span className="media-folder-icon">&#128193;</span>
-                : <FileTypeIcon type={'type' in item ? item.type : undefined} />
+                : <FileTypeIcon type={getProjectItemIconType(item)} />
               }
             </span>
             {isRenaming ? (
@@ -1289,7 +1308,7 @@ export function MediaPanel() {
               <img src={thumbUrl} alt="" draggable={false} />
             ) : (
               <div className="media-grid-thumb-placeholder">
-                <FileTypeIcon type={isFolder ? 'folder' : isComp ? 'composition' : (item as MediaFile).type} large />
+                <FileTypeIcon type={isFolder ? 'folder' : isComp ? 'composition' : getProjectItemIconType(item)} large />
               </div>
             )}
             {duration ? (
@@ -1307,7 +1326,16 @@ export function MediaPanel() {
 
   // Get root items (with sorting applied)
   const rootItems = sortItems(getItemsByFolder(null));
-  const totalItems = files.length + compositions.length;
+  const totalItems = (
+    files.length +
+    compositions.length +
+    folders.length +
+    textItems.length +
+    solidItems.length +
+    meshItems.length +
+    cameraItems.length +
+    splatEffectorItems.length
+  );
 
   // Grid view: items for current folder + breadcrumb path
   const gridItems = sortItems(getItemsByFolder(gridFolderId));
@@ -1393,6 +1421,10 @@ export function MediaPanel() {
                 <div className="add-dropdown-item" onClick={() => { handleNewText(); setAddDropdownOpen(false); }}>
                   <span className="add-dropdown-icon"><FileTypeIcon type="text" /></span>
                   <span>Text</span>
+                </div>
+                <div className="add-dropdown-item" onClick={() => { handleNewText3D(); setAddDropdownOpen(false); }}>
+                  <span className="add-dropdown-icon"><FileTypeIcon type="text-3d" /></span>
+                  <span>3D Text</span>
                 </div>
                 <div className="add-dropdown-item" onClick={() => { handleNewSolid(); setAddDropdownOpen(false); }}>
                   <span className="add-dropdown-icon"><FileTypeIcon type="solid" /></span>
@@ -1587,6 +1619,7 @@ export function MediaPanel() {
           ? files.find(f => f.id === contextMenu.itemId) ||
             compositions.find(c => c.id === contextMenu.itemId) ||
             folders.find(f => f.id === contextMenu.itemId) ||
+            textItems.find(t => t.id === contextMenu.itemId) ||
             solidItems.find(s => s.id === contextMenu.itemId) ||
             meshItems.find(m => m.id === contextMenu.itemId) ||
             cameraItems.find(c => c.id === contextMenu.itemId) ||
@@ -1631,6 +1664,10 @@ export function MediaPanel() {
             <div className="context-menu-item" onClick={() => { handleNewText(); closeContextMenu(); }}>
               <span className="context-menu-icon"><FileTypeIcon type="text" /></span>
               Text
+            </div>
+            <div className="context-menu-item" onClick={() => { handleNewText3D(); closeContextMenu(); }}>
+              <span className="context-menu-icon"><FileTypeIcon type="text-3d" /></span>
+              3D Text
             </div>
             <div className="context-menu-item" onClick={() => { handleNewSolid(); closeContextMenu(); }}>
               <span className="context-menu-icon"><FileTypeIcon type="solid" /></span>

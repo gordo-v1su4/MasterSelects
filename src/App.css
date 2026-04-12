@@ -7856,7 +7856,7 @@ input[type="checkbox"] {
 }
 
 .draggable-number-bounds-row label {
-  width: 26px;
+  width: 46px;
   color: var(--text-secondary);
   font-size: 11px;
 }
