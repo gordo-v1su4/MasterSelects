@@ -16,6 +16,13 @@ The export panel currently exposes three live encoder paths:
 
 There is also a separate FCPXML export action for NLE interchange.
 
+### Current Panel Layout
+
+- A sticky summary bar at the top shows only compact badges for mode, workflow, output, range, duration, and estimated size.
+- The main form is split into exactly two groups: `Video` and `Audio`.
+- The `Video` group now contains workflow selection, output naming, resolution, frame rate, delivery presets, codec controls, stacked-alpha, and range toggles.
+- The `Audio` group contains output naming for audio-only exports, sample rate, bitrate, normalization, and audio-only range controls.
+
 ---
 
 ## WebCodecs And HTMLVideo Export
