@@ -4,7 +4,7 @@
 
 Current feature documentation for the `staging` branch.
 
-Version 1.5.3 | April 2026
+Version 1.5.4 | April 2026
 
 ---
 
@@ -111,7 +111,7 @@ Native Helper     Rust service with HTTP/WebSocket bridge, yt-dlp, helper-backed
 
 ## Audit Notes
 
-- The authoritative app version is [`src/version.ts`](../../src/version.ts), currently `1.5.3`.
+- The authoritative app version is [`src/version.ts`](../../src/version.ts), currently `1.5.4`.
 - Preview quality is wired into engine-backed preview resolution through `useEngine()`; it does not affect export resolution or the HTML-only source monitor.
 - `openComposition` and `searchVideos` are still the two known AI dispatch gaps.
 - Gaussian AI tool definitions exist in code but are not exported through `AI_TOOLS` yet.
@@ -122,4 +122,4 @@ Native Helper     Rust service with HTTP/WebSocket bridge, yt-dlp, helper-backed
 ## Version History
 
 See [`src/version.ts`](../../src/version.ts) and [`src/changelog-data.json`](../../src/changelog-data.json) for the authoritative changelog.
-Current version: 1.5.3.
+Current version: 1.5.4.
