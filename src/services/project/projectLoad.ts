@@ -11,6 +11,7 @@ import { useYouTubeStore } from '../../stores/youtubeStore';
 import { useDockStore } from '../../stores/dockStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFlashBoardStore } from '../../stores/flashboardStore';
+import { useExportStore } from '../../stores/exportStore';
 import { flashBoardMediaBridge } from '../flashboard/FlashBoardMediaBridge';
 import type {
   FlashBoard,
@@ -545,6 +546,8 @@ export async function loadProjectToStores(): Promise<void> {
       useSettingsStore.setState(changelogSettings);
     }
   }
+
+  useExportStore.getState().hydrateFromProject(projectData.uiState?.exportState);
 
   // Reload API keys (may have been restored from .keys.enc during loadProject)
   await useSettingsStore.getState().loadApiKeys();

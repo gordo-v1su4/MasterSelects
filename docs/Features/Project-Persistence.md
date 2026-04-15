@@ -187,6 +187,7 @@ The `setupAutoSync()` function (in `projectLifecycle.ts`) subscribes to store ch
 - Clips or tracks change (timelineStore)
 - YouTube panel state changes
 - Dock layout changes
+- Export settings or export presets change
 
 ### Manual Save
 - `Ctrl+S` shortcut
@@ -324,6 +325,7 @@ interface ProjectFile {
 - Transcript language preference
 - View toggles: thumbnails, waveforms, proxy, transcript markers
 - Changelog preferences (`showChangelogOnStartup`, `lastSeenChangelogVersion`)
+- Export panel state: live export settings, named export presets, and the selected preset
 
 ### Other Persisted Panels
 - YouTube panel state is saved in `project.json`

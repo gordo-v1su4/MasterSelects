@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Logger } from '../../services/logger';
 import { downloadFCPXML } from '../../services/export/fcpxmlExport';
+import { projectFileService } from '../../services/projectFileService';
 
 const log = Logger.create('ExportPanel');
 import { FrameExporter, downloadBlob } from '../../engine/export';
@@ -18,22 +19,123 @@ import {
   DNXHR_PROFILES,
   CONTAINER_FORMATS,
   getCodecInfo,
+  getCodecsForContainer,
 } from '../../engine/ffmpeg';
 import { CodecSelector } from './CodecSelector';
 import type {
   FFmpegExportSettings,
   FFmpegProgress,
   FFmpegContainer,
+  FFmpegVideoCodec,
   ProResProfile,
   DnxhrProfile,
 } from '../../engine/ffmpeg';
 import { FFmpegFrameRenderer } from './exportHelpers';
 import { useExportState, type EncoderType } from './useExportState';
+import {
+  useExportStore,
+  type ExportImageFormat as ImageFormat,
+} from '../../stores/exportStore';
+
+type ExportSummaryTarget =
+  | 'command-bar'
+  | 'basic-output'
+  | 'basic-container'
+  | 'basic-workflow'
+  | 'video-section'
+  | 'video-resolution'
+  | 'video-fps'
+  | 'video-rate'
+  | 'video-codec'
+  | 'video-alpha'
+  | 'image-section'
+  | 'image-resolution'
+  | 'image-quality'
+  | 'audio-section'
+  | 'audio-format'
+  | 'audio-quality'
+  | 'audio-processing';
+
+type ExportSummaryBadge = {
+  label: string;
+  target: ExportSummaryTarget;
+  warning?: boolean;
+};
+
+const IMAGE_FORMATS: Array<{
+  id: ImageFormat;
+  label: string;
+  mimeType: string;
+  supportsAlpha: boolean;
+  lossless: boolean;
+}> = [
+  { id: 'png', label: 'PNG', mimeType: 'image/png', supportsAlpha: true, lossless: true },
+  { id: 'jpg', label: 'JPG', mimeType: 'image/jpeg', supportsAlpha: false, lossless: false },
+  { id: 'webp', label: 'WebP', mimeType: 'image/webp', supportsAlpha: true, lossless: false },
+  { id: 'bmp', label: 'BMP', mimeType: 'image/bmp', supportsAlpha: false, lossless: true },
+];
+
+const IMAGE_QUALITY_PRESETS = [
+  { id: 'draft', label: 'Draft', value: 0.72 },
+  { id: 'standard', label: 'Standard', value: 0.85 },
+  { id: 'high', label: 'High', value: 0.92 },
+  { id: 'max', label: 'Max', value: 1 },
+] as const;
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error(`Failed to export ${type}`));
+    }, type, quality);
+  });
+}
+
+function encodeBmp(imageData: ImageData): Blob {
+  const { width, height, data } = imageData;
+  const rowStride = width * 3;
+  const rowPadding = (4 - (rowStride % 4)) % 4;
+  const paddedRowStride = rowStride + rowPadding;
+  const pixelArraySize = paddedRowStride * height;
+  const fileSize = 54 + pixelArraySize;
+  const buffer = new ArrayBuffer(fileSize);
+  const view = new DataView(buffer);
+
+  view.setUint8(0, 0x42);
+  view.setUint8(1, 0x4d);
+  view.setUint32(2, fileSize, true);
+  view.setUint32(10, 54, true);
+  view.setUint32(14, 40, true);
+  view.setInt32(18, width, true);
+  view.setInt32(22, height, true);
+  view.setUint16(26, 1, true);
+  view.setUint16(28, 24, true);
+  view.setUint32(34, pixelArraySize, true);
+  view.setInt32(38, 2835, true);
+  view.setInt32(42, 2835, true);
+
+  let offset = 54;
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) {
+      const pixelOffset = (y * width + x) * 4;
+      view.setUint8(offset++, data[pixelOffset + 2]);
+      view.setUint8(offset++, data[pixelOffset + 1]);
+      view.setUint8(offset++, data[pixelOffset]);
+    }
+    offset += rowPadding;
+  }
+
+  return new Blob([buffer], { type: 'image/bmp' });
+}
 
 export function ExportPanel() {
   const ffmpegFrameRendererRef = useRef<FFmpegFrameRenderer | null>(null);
   const ffmpegAudioPipelineRef = useRef<AudioExportPipeline | null>(null);
-  const [videoEnabled, setVideoEnabled] = useState(true);
+  const summaryHighlightTimeoutsRef = useRef<Map<HTMLElement, number>>(new Map());
+  const [setupStatus, setSetupStatus] = useState<string | null>(null);
   const { duration, inPoint, outPoint, playheadPosition, startExport, setExportProgress, endExport } = useTimelineStore(useShallow(s => ({
     duration: s.duration,
     inPoint: s.inPoint,
@@ -47,6 +149,21 @@ export function ExportPanel() {
     getActiveComposition: s.getActiveComposition,
   })));
   const composition = getActiveComposition();
+  const {
+    presets,
+    selectedPresetId,
+    setSelectedPresetId,
+    savePreset,
+    updatePreset,
+    loadPreset,
+  } = useExportStore(useShallow((state) => ({
+    presets: state.presets,
+    selectedPresetId: state.selectedPresetId,
+    setSelectedPresetId: state.setSelectedPresetId,
+    savePreset: state.savePreset,
+    updatePreset: state.updatePreset,
+    loadPreset: state.loadPreset,
+  })));
 
   // All export state, effects, and simple handlers extracted to hook
   const {
@@ -58,19 +175,24 @@ export function ExportPanel() {
     useInOut, setUseInOut, filename, setFilename,
     bitrate, setBitrate, containerFormat, setContainerFormat,
     videoCodec, setVideoCodec, codecSupport, rateControl, setRateControl,
-    ffmpegCodec, ffmpegContainer, ffmpegPreset,
+    ffmpegCodec, ffmpegContainer,
     proresProfile, setProresProfile, dnxhrProfile, setDnxhrProfile,
     ffmpegQuality, setFfmpegQuality, ffmpegBitrate, ffmpegRateControl,
     isFFmpegLoading, isFFmpegReady, ffmpegLoadError,
     stackedAlpha, setStackedAlpha,
     includeAudio, setIncludeAudio, audioSampleRate, setAudioSampleRate,
     audioBitrate, setAudioBitrate, normalizeAudio, setNormalizeAudio,
+    videoEnabled, setVideoEnabled,
+    visualMode, setVisualMode,
+    imageFormat, setImageFormat,
+    imageQuality, setImageQuality,
+    specialContainer, setSpecialContainer,
     isExporting, setIsExporting, progress, setProgress,
     ffmpegProgress, setFfmpegProgress, exportPhase, setExportPhase,
     error, setError, exporter, setExporter,
     isSupported, isAudioSupported, audioCodec,
     isFFmpegSupported, isFFmpegMultiThreaded,
-    handleResolutionChange, loadFFmpeg, applyFFmpegPreset,
+    handleResolutionChange, loadFFmpeg,
     handleFFmpegContainerChange, handleFFmpegCodecChange,
   } = useExportState(composition);
 
@@ -101,6 +223,7 @@ export function ExportPanel() {
       codec: videoCodec,
       container: containerFormat,
       bitrate,
+      rateControl,
       startTime,
       endTime,
       // Alpha
@@ -137,7 +260,37 @@ export function ExportPanel() {
       // End export progress in timeline
       endExport();
     }
-  }, [width, height, customWidth, customHeight, useCustomResolution, fps, customFps, useCustomFps, bitrate, startTime, endTime, filename, isExporting, includeAudio, audioSampleRate, audioBitrate, normalizeAudio, containerFormat, videoCodec]);
+  }, [
+    audioBitrate,
+    audioSampleRate,
+    bitrate,
+    containerFormat,
+    customFps,
+    customHeight,
+    customWidth,
+    encoder,
+    endExport,
+    filename,
+    fps,
+    includeAudio,
+    isExporting,
+    normalizeAudio,
+    rateControl,
+    setError,
+    setExportProgress,
+    setExporter,
+    setIsExporting,
+    setProgress,
+    stackedAlpha,
+    startExport,
+    startTime,
+    endTime,
+    useCustomFps,
+    useCustomResolution,
+    videoCodec,
+    width,
+    height,
+  ]);
 
   // Handle cancel
   const handleCancel = useCallback(() => {
@@ -509,66 +662,74 @@ export function ExportPanel() {
 
   // Handle render current frame
   const handleRenderFrame = useCallback(async () => {
+    if (isExporting) {
+      return;
+    }
+
+    const actualWidth = useCustomResolution ? customWidth : width;
+    const actualHeight = useCustomResolution ? customHeight : height;
+    const exportTime = playheadPosition;
+    const exportFps = useCustomFps ? customFps : fps;
+    const selectedImageFormat = IMAGE_FORMATS.find(({ id }) => id === imageFormat) ?? IMAGE_FORMATS[0];
+    const originalDimensions = engine.getOutputDimensions();
+    const frameRenderer = new FFmpegFrameRenderer({
+      width: actualWidth,
+      height: actualHeight,
+      fps: exportFps,
+      startTime: exportTime,
+      endTime: exportTime + (1 / Math.max(exportFps, 1)),
+    });
+
     try {
-      // Read pixels from the engine's composited frame
+      await frameRenderer.initialize();
+      engine.setExporting(true);
+      engine.setResolution(actualWidth, actualHeight);
+      engine.setRenderTimeOverride(exportTime);
+
+      const layers = await frameRenderer.buildLayersAtTime(exportTime);
+      await engine.ensureExportLayersReady(layers);
+      engine.render(layers);
+
       const pixels = await engine.readPixels();
       if (!pixels) {
         setError('Failed to read frame from GPU');
         return;
       }
 
-      // Get the engine's output dimensions (this is what was actually rendered)
-      const { width: engineWidth, height: engineHeight } = engine.getOutputDimensions();
-
-      // Create ImageData from the pixels
-      const imageData = new ImageData(new Uint8ClampedArray(pixels), engineWidth, engineHeight);
-
-      // Create a canvas to draw the image
+      const imageData = new ImageData(new Uint8ClampedArray(pixels), actualWidth, actualHeight);
       const canvas = document.createElement('canvas');
-      canvas.width = engineWidth;
-      canvas.height = engineHeight;
+      canvas.width = actualWidth;
+      canvas.height = actualHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
         setError('Failed to create canvas context');
         return;
       }
 
-      // Draw the image data
       ctx.putImageData(imageData, 0, 0);
-
-      // If custom resolution is different, scale to target size
-      const actualWidth = useCustomResolution ? customWidth : width;
-      const actualHeight = useCustomResolution ? customHeight : height;
-
-      if (actualWidth !== engineWidth || actualHeight !== engineHeight) {
-        // Create a scaled canvas
-        const scaledCanvas = document.createElement('canvas');
-        scaledCanvas.width = actualWidth;
-        scaledCanvas.height = actualHeight;
-        const scaledCtx = scaledCanvas.getContext('2d');
-        if (scaledCtx) {
-          scaledCtx.drawImage(canvas, 0, 0, actualWidth, actualHeight);
-          scaledCanvas.toBlob((blob) => {
-            if (blob) {
-              const frameName = `${filename}_frame_${Math.floor(playheadPosition * 1000)}.png`;
-              downloadBlob(blob, frameName);
-            }
-          }, 'image/png');
-        }
-      } else {
-        // Export at native resolution
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const frameName = `${filename}_frame_${Math.floor(playheadPosition * 1000)}.png`;
-            downloadBlob(blob, frameName);
-          }
-        }, 'image/png');
-      }
+      const blob = imageFormat === 'bmp'
+        ? encodeBmp(imageData)
+        : await canvasToBlob(
+            canvas,
+            selectedImageFormat.mimeType,
+            selectedImageFormat.lossless ? undefined : imageQuality,
+          );
+      const frameName = `${filename}_frame_${Math.floor(playheadPosition * 1000)}.${imageFormat}`;
+      downloadBlob(blob, frameName);
     } catch (e) {
       log.error('Frame render failed', e);
       setError(e instanceof Error ? e.message : 'Frame render failed');
+    } finally {
+      frameRenderer.cleanup();
+      engine.setRenderTimeOverride(null);
+      engine.setExporting(false);
+      engine.setResolution(originalDimensions.width, originalDimensions.height);
     }
-  }, [width, height, customWidth, customHeight, useCustomResolution, filename, playheadPosition]);
+  }, [
+    width, height, customWidth, customHeight, useCustomResolution,
+    fps, customFps, useCustomFps,
+    filename, playheadPosition, imageFormat, imageQuality, isExporting,
+  ]);
 
   // Format time as MM:SS.ff
   const formatTime = (seconds: number) => {
@@ -622,10 +783,13 @@ export function ExportPanel() {
   // Only MJPEG has quality slider (q:v), professional codecs use profiles
   const showFFmpegQualityControl = ffmpegCodec === 'mjpeg';
   const isWebCodecsEncoder = encoder === 'webcodecs' || encoder === 'htmlvideo';
-  const currentContainerId = isWebCodecsEncoder ? containerFormat : ffmpegContainer;
-  const currentContainerLabel = isWebCodecsEncoder
-    ? FrameExporter.getContainerFormats().find(({ id }) => id === containerFormat)?.label ?? containerFormat.toUpperCase()
-    : CONTAINER_FORMATS.find(({ id }) => id === ffmpegContainer)?.name ?? ffmpegContainer.toUpperCase();
+  const isXmlMode = specialContainer === 'xml';
+  const currentContainerId = isXmlMode ? 'fcpxml' : (isWebCodecsEncoder ? containerFormat : ffmpegContainer);
+  const currentContainerLabel = isXmlMode
+    ? 'FCPXML'
+    : isWebCodecsEncoder
+      ? FrameExporter.getContainerFormats().find(({ id }) => id === containerFormat)?.label ?? containerFormat.toUpperCase()
+      : CONTAINER_FORMATS.find(({ id }) => id === ffmpegContainer)?.name ?? ffmpegContainer.toUpperCase();
   const currentCodecLabel = isWebCodecsEncoder
     ? FrameExporter.getVideoCodecs(containerFormat).find(({ id }) => id === videoCodec)?.label ?? videoCodec.toUpperCase()
     : ffmpegCodecInfo?.name ?? ffmpegCodec.toUpperCase();
@@ -646,51 +810,124 @@ export function ExportPanel() {
           badge: isFFmpegMultiThreaded ? 'Intermediate' : 'CPU',
           description: 'Professional intermediates and edit-friendly interchange formats.',
         };
+  const ffmpegAudioCodecLabel = ffmpegContainer === 'mov'
+    ? 'AAC'
+    : ffmpegContainer === 'mkv'
+      ? 'FLAC'
+      : ffmpegContainer === 'avi'
+        ? 'PCM'
+        : ffmpegContainer === 'mxf'
+          ? 'PCM'
+          : 'AAC';
+  const isImageMode = !isXmlMode && videoEnabled && visualMode === 'image';
+  const isVideoMode = !isXmlMode && videoEnabled && visualMode === 'video';
+  const isAudioOnlyMode = !isXmlMode && !videoEnabled;
+  const effectiveIncludeAudio = (isVideoMode || isXmlMode) && includeAudio;
+  const selectedImageFormat = IMAGE_FORMATS.find(({ id }) => id === imageFormat) ?? IMAGE_FORMATS[0];
   const audioExtension = audioCodec === 'opus' ? 'ogg' : 'aac';
   const audioCodecLabel = audioCodec?.toUpperCase() ?? 'AAC';
-  const outputHeight = stackedAlpha ? actualHeight * 2 : actualHeight;
-  const frameCount = Math.ceil((endTime - startTime) * actualFps);
-  const estimatedSizeLabel = (!videoEnabled && !includeAudio) ? '-' : estimatedSize();
-  const exportModeLabel = videoEnabled
-    ? (includeAudio ? 'Video + Audio' : 'Video Only')
-    : (includeAudio ? 'Audio Only' : 'Nothing Selected');
+  const currentAudioCodecLabel = isVideoMode && encoder === 'ffmpeg'
+    ? ffmpegAudioCodecLabel
+    : audioCodecLabel;
+  const outputHeight = stackedAlpha && isVideoMode ? actualHeight * 2 : actualHeight;
+  const frameCount = isVideoMode ? Math.ceil((endTime - startTime) * actualFps) : 1;
+  const displayExtension = isXmlMode ? 'fcpxml' : isAudioOnlyMode ? audioExtension : isImageMode ? imageFormat : currentContainerId;
+  const estimatedSizeLabel = isXmlMode ? 'Metadata only' : isImageMode ? 'Current frame' : (!videoEnabled && !includeAudio) ? '-' : estimatedSize();
+  const sizeLabelPrefix = isVideoMode && isWebCodecsEncoder ? 'Target' : 'Size';
+  const sizeStatLabel = isVideoMode && isWebCodecsEncoder ? 'Target Size' : 'Est. Size';
+  const webCodecsRateNote = rateControl === 'vbr'
+    ? 'VBR is only a bitrate target. Simple shots can encode much smaller than the selected Mbps.'
+    : 'CBR tries to stay closer, but browser encoders can still drift from the requested bitrate.';
+  const exportModeLabel = isXmlMode
+    ? 'Timeline XML'
+    : isImageMode
+    ? 'Image'
+    : isVideoMode
+      ? (effectiveIncludeAudio ? 'Video + Audio' : 'Video Only')
+      : (includeAudio ? 'Audio Only' : 'Nothing Selected');
   const exportDisabled =
     isExporting ||
-    endTime <= startTime ||
-    !videoEnabled && !includeAudio ||
-    (videoEnabled && encoder === 'ffmpeg' && isFFmpegLoading);
-  const primaryExportLabel = videoEnabled ? 'Export Video' : includeAudio ? 'Export Audio' : 'Select Video or Audio';
-  const videoSummaryBadges = [
-    currentContainerLabel,
-    currentCodecLabel,
-    `${actualWidth}x${outputHeight}`,
-    `${actualFps} fps`,
-    encoder === 'ffmpeg'
-      ? (ffmpegPreset ? `Preset: ${ffmpegPreset}` : currentCodecLabel)
-      : `${(bitrate / 1_000_000).toFixed(1)} Mbps`,
-  ];
-  const audioSummaryBadges = includeAudio
+    (!isImageMode && !isXmlMode && endTime <= startTime) ||
+    isAudioOnlyMode && (!includeAudio || !isAudioSupported) ||
+    (isVideoMode && encoder === 'ffmpeg' && isFFmpegLoading);
+  const primaryExportLabel = 'Export';
+  const audioSummaryBadges = (effectiveIncludeAudio || isAudioOnlyMode && includeAudio)
     ? [
-        audioCodecLabel,
-        `${audioSampleRate / 1000} kHz`,
-        `${Math.round(audioBitrate / 1000)} kbps`,
-        normalizeAudio ? 'Normalized' : 'Unprocessed',
+        { label: currentAudioCodecLabel, target: 'audio-format' as const },
+        { label: `${audioSampleRate / 1000} kHz`, target: 'audio-format' as const },
+        { label: `${Math.round(audioBitrate / 1000)} kbps`, target: 'audio-quality' as const },
+        { label: normalizeAudio ? 'Normalized' : 'Unprocessed', target: 'audio-processing' as const },
       ]
     : [];
-  const summaryBadges = [
-    exportModeLabel,
-    videoEnabled ? methodMeta.title : `Audio ${audioCodecLabel}`,
-    ...(videoEnabled ? videoSummaryBadges : []),
-    ...audioSummaryBadges,
-    `Range ${formatTime(startTime)} - ${formatTime(endTime)}`,
-    `Duration ${formatTime(endTime - startTime)}`,
-    stackedAlpha && videoEnabled ? 'Stacked alpha' : null,
-    `Size ${estimatedSizeLabel}`,
-  ].filter(Boolean) as string[];
-  const showSharedFileInVideo = videoEnabled;
-  const showSharedFileInAudio = !videoEnabled && includeAudio;
-  const showRangeInVideo = videoEnabled;
-  const showRangeInAudio = !videoEnabled && includeAudio;
+  const summaryBadges: ExportSummaryBadge[] = isXmlMode
+    ? [
+        { label: exportModeLabel, target: 'basic-container' },
+        { label: currentContainerLabel, target: 'basic-container' },
+        { label: `${composition?.width ?? actualWidth}x${composition?.height ?? actualHeight}`, target: 'basic-output' },
+        { label: `${composition?.frameRate ?? actualFps} fps`, target: 'basic-output' },
+        { label: includeAudio ? 'With audio refs' : 'No audio refs', target: 'audio-section' },
+      ]
+    : isImageMode
+    ? [
+        { label: exportModeLabel, target: 'image-section' },
+        { label: selectedImageFormat.label, target: 'basic-container' },
+        { label: `${actualWidth}x${actualHeight}`, target: 'image-resolution' },
+        { label: `Frame ${formatTime(playheadPosition)}`, target: 'image-section' },
+        {
+          label: selectedImageFormat.lossless ? 'Lossless' : `${Math.round(imageQuality * 100)}% quality`,
+          target: 'image-quality',
+        },
+        {
+          label: selectedImageFormat.supportsAlpha ? 'Alpha kept' : 'Opaque export',
+          target: 'image-quality',
+          warning: !selectedImageFormat.supportsAlpha,
+        },
+      ]
+    : [
+        {
+          label: exportModeLabel,
+          target: isVideoMode ? 'video-section' : 'audio-section',
+        },
+        {
+          label: isVideoMode ? methodMeta.title : `Audio ${currentAudioCodecLabel}`,
+          target: isVideoMode ? 'video-section' : 'audio-format',
+        },
+        ...(isVideoMode ? [
+          { label: currentContainerLabel, target: 'basic-container' as const },
+          { label: currentCodecLabel, target: 'video-codec' as const },
+          { label: `${actualWidth}x${outputHeight}`, target: 'video-resolution' as const },
+          { label: `${actualFps} fps`, target: 'video-fps' as const },
+          {
+            label: encoder === 'ffmpeg'
+              ? (showFFmpegQualityControl ? `MJPEG Q${ffmpegQuality}` : currentCodecLabel)
+              : `${(bitrate / 1_000_000).toFixed(1)} Mbps`,
+            target: encoder === 'ffmpeg' && !showFFmpegQualityControl ? 'video-codec' as const : 'video-rate' as const,
+          },
+        ] : []),
+        ...audioSummaryBadges,
+        {
+          label: `Range ${formatTime(startTime)} - ${formatTime(endTime)}`,
+          target: isVideoMode ? 'video-alpha' : 'audio-processing',
+        },
+        {
+          label: `Duration ${formatTime(endTime - startTime)}`,
+          target: isVideoMode ? 'video-alpha' : 'audio-processing',
+        },
+        ...(stackedAlpha && isVideoMode ? [{
+          label: 'Stacked alpha',
+          target: 'video-alpha' as const,
+          warning: true,
+        }] : []),
+        {
+          label: `${sizeLabelPrefix} ${estimatedSizeLabel}`,
+          target: isVideoMode
+            ? (isWebCodecsEncoder || showFFmpegQualityControl ? 'video-rate' : 'video-codec')
+            : 'audio-quality',
+          warning: true,
+        },
+      ];
+  const showRangeInVideo = isVideoMode;
+  const showRangeInAudio = isAudioOnlyMode && includeAudio;
   const quickResolutionPresets = FrameExporter.getPresetResolutions();
   const quickFrameRatePresets = [24, 30, 60];
   const webQualityPresets = [
@@ -699,12 +936,18 @@ export function ExportPanel() {
     { id: 'high', label: 'High', detail: '25 Mbps', value: 25_000_000 },
     { id: 'master', label: 'Master', detail: '50 Mbps', value: 50_000_000 },
   ] as const;
-  const ffmpegWorkflowPresets = [
-    { id: 'premiere', label: 'Premiere', detail: 'ProRes HQ MOV' },
-    { id: 'davinci', label: 'Resolve', detail: 'DNxHR HQ MXF' },
-    { id: 'finalcut', label: 'Final Cut', detail: 'ProRes HQ MOV' },
-    { id: 'archive', label: 'Archive', detail: 'FFV1 MKV' },
+  const audioSampleRatePresets = [
+    { value: 48000 as const, label: '48 kHz' },
+    { value: 44100 as const, label: '44.1 kHz' },
   ] as const;
+  const audioBitratePresets = [
+    { value: 128000, label: '128 kbps' },
+    { value: 192000, label: '192 kbps' },
+    { value: 256000, label: '256 kbps' },
+    { value: 320000, label: '320 kbps' },
+  ] as const;
+  const selectedPreset = presets.find((preset) => preset.id === selectedPresetId) ?? null;
+  const selectedPresetName = selectedPreset?.name ?? '';
 
   const handleQuickResolutionPreset = useCallback((value: string) => {
     setUseCustomResolution(false);
@@ -721,7 +964,107 @@ export function ExportPanel() {
     setBitrate(value);
   }, [setBitrate, setRateControl]);
 
+  const saveCurrentSetup = useCallback(() => {
+    try {
+      const suggestedName = selectedPresetName || filename || 'Export Preset';
+      const nextName = window.prompt('Preset name', suggestedName);
+      if (nextName === null) {
+        return;
+      }
+
+      const result = savePreset(nextName);
+      if (!result) {
+        setSetupStatus('Preset name required');
+        return;
+      }
+
+      const suffix = projectFileService.isProjectOpen() ? '' : ' (session only)';
+      setSetupStatus(result.overwritten ? `Preset updated${suffix}` : `Preset saved${suffix}`);
+    } catch (error) {
+      log.error('Failed to save export setup', error);
+      setSetupStatus('Preset save failed');
+    }
+  }, [filename, savePreset, selectedPresetName]);
+
+  const updateCurrentSetup = useCallback(() => {
+    try {
+      if (!selectedPresetId) {
+        setSetupStatus(presets.length > 0 ? 'Select a preset' : 'No presets saved');
+        return;
+      }
+
+      const updatedPreset = updatePreset(selectedPresetId);
+      if (!updatedPreset) {
+        setSetupStatus('Preset not found');
+        return;
+      }
+
+      const suffix = projectFileService.isProjectOpen() ? '' : ' (session only)';
+      setSetupStatus(`Preset updated${suffix}`);
+    } catch (error) {
+      log.error('Failed to update export setup', error);
+      setSetupStatus('Preset update failed');
+    }
+  }, [presets.length, selectedPresetId, updatePreset]);
+
+  const loadSavedSetup = useCallback(() => {
+    try {
+      if (!selectedPresetId) {
+        setSetupStatus(presets.length > 0 ? 'Select a preset' : 'No presets saved');
+        return;
+      }
+
+      const loaded = loadPreset(selectedPresetId);
+      setSetupStatus(loaded ? 'Preset loaded' : 'Preset not found');
+    } catch (error) {
+      log.error('Failed to load export setup', error);
+      setSetupStatus('Preset load failed');
+    }
+  }, [loadPreset, presets.length, selectedPresetId]);
+
+  const scrollToSummaryTarget = useCallback((target: ExportSummaryTarget) => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const node = document.querySelector<HTMLElement>(`[data-export-target="${target}"]`);
+    if (!node) {
+      return;
+    }
+
+    node.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+
+    const existingTimeout = summaryHighlightTimeoutsRef.current.get(node);
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout);
+    }
+
+    node.classList.remove('export-scroll-highlight');
+    void node.offsetHeight;
+    node.classList.add('export-scroll-highlight');
+
+    const timeout = window.setTimeout(() => {
+      node.classList.remove('export-scroll-highlight');
+      summaryHighlightTimeoutsRef.current.delete(node);
+    }, 1200);
+
+    summaryHighlightTimeoutsRef.current.set(node, timeout);
+  }, []);
+
   const handlePrimaryExport = useCallback(() => {
+    if (isXmlMode) {
+      handleExportFCPXML();
+      return;
+    }
+
+    if (isImageMode) {
+      void handleRenderFrame();
+      return;
+    }
+
     if (!videoEnabled) {
       if (includeAudio) {
         void handleExportAudioOnly();
@@ -735,7 +1078,7 @@ export function ExportPanel() {
     }
 
     void handleFFmpegExport();
-  }, [handleExport, handleExportAudioOnly, handleFFmpegExport, includeAudio, isWebCodecsEncoder, videoEnabled]);
+  }, [handleExport, handleExportAudioOnly, handleExportFCPXML, handleFFmpegExport, handleRenderFrame, includeAudio, isImageMode, isWebCodecsEncoder, isXmlMode, videoEnabled]);
 
   // If neither encoder is supported, show error
   if (!webCodecsAvailable && !ffmpegAvailable) {
@@ -754,61 +1097,68 @@ export function ExportPanel() {
 
   return (
     <div className="export-panel">
-      <div className="export-toolbar">
-        <div className="export-mode-tabs" role="tablist" aria-label="Export type">
-          <button type="button" className="export-mode-tab is-active" aria-selected="true">
-            Video
-          </button>
-          <button
-            type="button"
-            className="export-mode-tab"
-            onClick={handleRenderFrame}
-            disabled={isExporting || !videoEnabled}
-          >
-            Frame
-          </button>
-          <button
-            type="button"
-            className="export-mode-tab"
-            onClick={handleExportAudioOnly}
-            disabled={isExporting || endTime <= startTime || !isAudioSupported || !includeAudio}
-            title={!isAudioSupported ? 'Audio encoding not supported in this browser' : `Export as ${audioCodec?.toUpperCase() || 'audio'}`}
-          >
-            Audio
-          </button>
-          <button
-            type="button"
-            className="export-mode-tab"
-            onClick={handleExportFCPXML}
-            disabled={isExporting}
-            title="Export timeline as Final Cut Pro XML (compatible with Resolve, Premiere)"
-          >
-            XML
-          </button>
-        </div>
-        <button
-          className="btn export-start-btn export-toolbar-cta"
-          onClick={handlePrimaryExport}
-          disabled={exportDisabled}
-        >
-          {primaryExportLabel}
-        </button>
-      </div>
-
       {!isExporting ? (
         <div className="export-form">
           <section className="export-hero-card export-summary-sticky export-summary-badges">
-            <div className="export-pill-row">
-              {summaryBadges.map((badge) => (
-                <span
-                  key={badge}
-                  className={`export-pill${badge.includes('Stacked alpha') || badge.startsWith('Size ') ? ' export-pill-warning' : ''}`}
-                >
-                  {badge}
-                </span>
-              ))}
+            <div className="export-summary-actions">
+              <div className="export-pill-row">
+                {summaryBadges.map((badge) => (
+                  <button
+                    key={`${badge.target}-${badge.label}`}
+                    type="button"
+                    className={`export-pill${badge.warning ? ' export-pill-warning' : ''}`}
+                    onClick={() => scrollToSummaryTarget(badge.target)}
+                  >
+                    {badge.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="btn export-start-btn export-summary-cta"
+                onClick={handlePrimaryExport}
+                disabled={exportDisabled}
+              >
+                {primaryExportLabel}
+              </button>
             </div>
           </section>
+
+          <div className="export-section export-command-row" data-export-target="command-bar">
+            <div className="export-command-bar">
+              <div className="export-command-actions">
+                <div className="export-preset-picker">
+                  <select
+                    id="export-preset-select"
+                    aria-label="Export preset"
+                    value={selectedPresetId ?? ''}
+                    onChange={(e) => setSelectedPresetId(e.target.value || null)}
+                  >
+                    <option value="">Project presets</option>
+                    {presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button type="button" className="export-chip" onClick={loadSavedSetup} disabled={!selectedPresetId}>
+                  Load
+                </button>
+                <button type="button" className="export-chip" onClick={updateCurrentSetup} disabled={!selectedPresetId}>
+                  Update
+                </button>
+                <button type="button" className="export-chip" onClick={saveCurrentSetup}>
+                  Save
+                </button>
+              </div>
+            </div>
+
+            {setupStatus && (
+              <div className="export-inline-note">
+                {setupStatus}
+              </div>
+            )}
+          </div>
 
           {/* Encoder Selection */}
           <div className="export-section export-workflow-section">
@@ -899,140 +1249,231 @@ export function ExportPanel() {
             <div className="export-section-header">Basics</div>
 
             <div className="export-channel-grid">
-              <div className={`export-channel-card${videoEnabled ? '' : ' is-disabled'}`}>
+              <div className="export-channel-card export-basic-card">
                 <div className="export-channel-head">
                   <div className="export-channel-title">
-                    <span>Video</span>
-                    <strong>{videoEnabled ? `${actualWidth}x${outputHeight}` : 'Disabled'}</strong>
+                    <span>Basic</span>
+                    <strong>.{displayExtension}</strong>
                   </div>
-                  <button
-                    type="button"
-                    className={`export-toggle${videoEnabled ? ' is-active' : ''}`}
-                    onClick={() => setVideoEnabled((current) => !current)}
-                  >
-                    {videoEnabled ? 'On' : 'Off'}
-                  </button>
                 </div>
 
-                {videoEnabled ? (
-                  <>
-                    {showSharedFileInVideo && (
-                      <div className="export-field-card export-subcard">
-                        <div className="export-field-head">
-                          <span>Output</span>
-                          <strong>.{currentContainerId}</strong>
-                        </div>
-                        <div className="control-row">
-                          <label>Name</label>
-                          <div className="export-input-group">
-                            <input
-                              type="text"
-                              value={filename}
-                              onChange={(e) => setFilename(e.target.value)}
-                              placeholder="export"
-                            />
-                            <select
-                              className="export-extension-select"
-                              value={currentContainerId}
-                              onChange={(e) => {
-                                if (isWebCodecsEncoder) {
-                                  setContainerFormat(e.target.value as ContainerFormat);
-                                } else {
-                                  handleFFmpegContainerChange(e.target.value as FFmpegContainer);
-                                }
-                              }}
-                            >
-                              {isWebCodecsEncoder ? (
-                                FrameExporter.getContainerFormats().map(({ id }) => (
-                                  <option key={id} value={id}>.{id}</option>
-                                ))
-                              ) : (
-                                CONTAINER_FORMATS.map(({ id }) => (
-                                  <option key={id} value={id}>.{id}</option>
-                                ))
-                              )}
-                            </select>
-                          </div>
-                        </div>
+                <div className="export-field-card export-subcard" data-export-target="basic-output">
+                  <div className="export-field-head">
+                    <span>Output</span>
+                    <strong>{`${filename || 'export'}.${displayExtension}`}</strong>
+                  </div>
+                  <div className="control-row">
+                    <label>Name</label>
+                    <div className="export-input-group">
+                      <input
+                        type="text"
+                        value={filename}
+                        onChange={(e) => setFilename(e.target.value)}
+                        placeholder="export"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="export-field-card export-subcard" data-export-target="basic-container">
+                  <div className="export-field-head">
+                    <span>Container</span>
+                    <strong>.{displayExtension}</strong>
+                  </div>
+                  <div className="export-container-groups">
+                    <div className="export-container-group">
+                      <span className="export-container-group-label">Video</span>
+                      <div className="export-chip-row">
+                        {(isWebCodecsEncoder ? FrameExporter.getContainerFormats() : CONTAINER_FORMATS).map((format) => (
+                          <button
+                            key={`video-${format.id}`}
+                            type="button"
+                            className={`export-chip${!isXmlMode && isVideoMode && currentContainerId === format.id ? ' is-active' : ''}`}
+                            onClick={() => {
+                              setSpecialContainer('none');
+                              setVideoEnabled(true);
+                              setVisualMode('video');
+                              if (isWebCodecsEncoder) {
+                                setContainerFormat(format.id as ContainerFormat);
+                              } else {
+                                handleFFmpegContainerChange(format.id as FFmpegContainer);
+                              }
+                            }}
+                          >
+                            .{format.id}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="export-container-group">
+                      <span className="export-container-group-label">Image</span>
+                      <div className="export-chip-row">
+                        {IMAGE_FORMATS.map((format) => (
+                          <button
+                            key={`image-${format.id}`}
+                            type="button"
+                            className={`export-chip${!isXmlMode && isImageMode && imageFormat === format.id ? ' is-active' : ''}`}
+                            onClick={() => {
+                              setSpecialContainer('none');
+                              setVideoEnabled(true);
+                              setVisualMode('image');
+                              setImageFormat(format.id);
+                            }}
+                          >
+                            .{format.id}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="export-container-group">
+                      <span className="export-container-group-label">Audio</span>
+                      <div className="export-chip-row">
+                        <button
+                          type="button"
+                          className={`export-chip${!isXmlMode && isAudioOnlyMode ? ' is-active' : ''}`}
+                          onClick={() => {
+                            setSpecialContainer('none');
+                            setVideoEnabled(false);
+                            setIncludeAudio(true);
+                          }}
+                          disabled={!isAudioSupported}
+                        >
+                          .{audioExtension}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="export-container-group">
+                      <span className="export-container-group-label">XML</span>
+                      <div className="export-chip-row">
+                        <button
+                          type="button"
+                          className={`export-chip${isXmlMode ? ' is-active' : ''}`}
+                          onClick={() => {
+                            setSpecialContainer('xml');
+                            setVideoEnabled(true);
+                          }}
+                        >
+                          .fcpxml
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {isVideoMode ? (
+                  <div className="export-field-card export-subcard" data-export-target="basic-workflow">
+                    <div className="export-field-head">
+                      <span>Workflow</span>
+                      <strong>{methodMeta.title}</strong>
+                    </div>
+                    <div className="export-chip-row">
+                      {webCodecsAvailable && (
+                        <button
+                          type="button"
+                          className={`export-chip${encoder === 'webcodecs' ? ' is-active' : ''}`}
+                          onClick={() => setEncoder('webcodecs')}
+                        >
+                          WebCodecs
+                        </button>
+                      )}
+                      {webCodecsAvailable && (
+                        <button
+                          type="button"
+                          className={`export-chip${encoder === 'htmlvideo' ? ' is-active' : ''}`}
+                          onClick={() => setEncoder('htmlvideo')}
+                        >
+                          HTMLVideo
+                        </button>
+                      )}
+                      {ffmpegAvailable && (
+                        <button
+                          type="button"
+                          className={`export-chip${encoder === 'ffmpeg' ? ' is-active' : ''}`}
+                          onClick={() => setEncoder('ffmpeg')}
+                        >
+                          FFmpeg
+                        </button>
+                      )}
+                    </div>
+
+                    {encoder === 'ffmpeg' && (
+                      <div className="export-status-row">
+                        {!isFFmpegReady ? (
+                          <button
+                            type="button"
+                            onClick={loadFFmpeg}
+                            disabled={isFFmpegLoading}
+                            className="btn-small export-status-button"
+                          >
+                            {isFFmpegLoading ? 'Loading FFmpeg...' : 'Load FFmpeg Runtime'}
+                          </button>
+                        ) : (
+                          <span className="export-status-ok">
+                            FFmpeg Ready
+                          </span>
+                        )}
                       </div>
                     )}
 
-                    <div className="export-field-card export-subcard export-video-workflow-card">
-                      <div className="export-field-head">
-                        <span>Workflow</span>
-                        <strong>{methodMeta.title}</strong>
+                    {ffmpegLoadError && encoder === 'ffmpeg' && (
+                      <div className="export-error export-error-inline">
+                        {ffmpegLoadError}
                       </div>
+                    )}
+                  </div>
+                ) : isXmlMode ? (
+                  <div className="export-inline-note">
+                    XML export writes a Final Cut Pro interchange file from the current timeline instead of rendering media.
+                  </div>
+                ) : isImageMode ? (
+                  <div className="export-inline-note">
+                    Image export renders exactly one frame at the current playhead position.
+                  </div>
+                ) : isAudioOnlyMode ? (
+                  <div className="export-inline-note">
+                    Audio-only export uses the detected browser codec.
+                  </div>
+                ) : null}
+              </div>
 
-                      <div className="export-method-grid">
-                        {webCodecsAvailable && (
-                          <button
-                            type="button"
-                            className={`export-method-card${encoder === 'webcodecs' ? ' is-active' : ''}`}
-                            onClick={() => setEncoder('webcodecs')}
-                          >
-                            <span className="export-method-chip">Fast</span>
-                            <strong>WebCodecs</strong>
-                            <span>Hardware-assisted browser export for quick delivery files.</span>
-                          </button>
-                        )}
-                        {webCodecsAvailable && (
-                          <button
-                            type="button"
-                            className={`export-method-card${encoder === 'htmlvideo' ? ' is-active' : ''}`}
-                            onClick={() => setEncoder('htmlvideo')}
-                          >
-                            <span className="export-method-chip">Precise</span>
-                            <strong>HTMLVideo</strong>
-                            <span>Safer fallback when seek accuracy matters more than speed.</span>
-                          </button>
-                        )}
-                        {ffmpegAvailable && (
-                          <button
-                            type="button"
-                            className={`export-method-card${encoder === 'ffmpeg' ? ' is-active' : ''}`}
-                            onClick={() => setEncoder('ffmpeg')}
-                          >
-                            <span className="export-method-chip">CPU</span>
-                            <strong>FFmpeg</strong>
-                            <span>Intermediates, archival codecs, and NLE-friendly containers.</span>
-                          </button>
-                        )}
-                      </div>
+              <div className={`export-channel-card${!isXmlMode && videoEnabled ? '' : ' is-disabled'}`} data-export-target={isImageMode ? 'image-section' : 'video-section'}>
+                <div className="export-channel-head">
+                  <div className="export-channel-title">
+                    <span>{isXmlMode ? 'XML' : isImageMode ? 'Image' : 'Video'}</span>
+                    <strong>{isXmlMode ? 'Timeline interchange' : videoEnabled ? `${actualWidth}x${outputHeight}` : 'Disabled'}</strong>
+                  </div>
+                  {isXmlMode ? (
+                    <span className="export-chip export-chip-static">FCPXML</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`export-toggle${videoEnabled ? ' is-active' : ''}`}
+                      onClick={() => {
+                        if (videoEnabled) {
+                          setVideoEnabled(false);
+                          return;
+                        }
+                        setSpecialContainer('none');
+                        setVideoEnabled(true);
+                        setVisualMode('video');
+                      }}
+                    >
+                      {videoEnabled ? 'On' : 'Off'}
+                    </button>
+                  )}
+                </div>
 
-                      {encoder === 'ffmpeg' && (
-                        <div className="export-status-row">
-                          {!isFFmpegReady ? (
-                            <button
-                              type="button"
-                              onClick={loadFFmpeg}
-                              disabled={isFFmpegLoading}
-                              className="btn-small export-status-button"
-                            >
-                              {isFFmpegLoading ? 'Loading FFmpeg...' : 'Load FFmpeg Runtime'}
-                            </button>
-                          ) : (
-                            <span className="export-status-ok">
-                              FFmpeg Ready
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {ffmpegLoadError && encoder === 'ffmpeg' && (
-                        <div className="export-error export-error-inline">
-                          {ffmpegLoadError}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="export-chip-row">
-                      {videoSummaryBadges.map((badge) => (
-                        <span key={badge} className="export-chip export-chip-static">{badge}</span>
-                      ))}
-                    </div>
-
-                    <div className="export-quick-grid">
-                      <div className="export-field-card">
+                {isXmlMode ? (
+                  <div className="export-inline-note">
+                    XML export uses the current timeline structure and clip references. Render-specific video settings do not apply here.
+                  </div>
+                ) : isImageMode ? (
+                  <>
+                    <div className="export-quick-grid export-quick-grid-stack">
+                      <div className="export-field-card export-subcard" data-export-target="image-resolution">
                         <div className="export-field-head">
                           <span>Resolution</span>
                           <strong>{actualWidth}x{actualHeight}</strong>
@@ -1079,7 +1520,107 @@ export function ExportPanel() {
                         )}
                       </div>
 
-                      <div className="export-field-card">
+                      <div className="export-field-card export-subcard" data-export-target="image-quality">
+                        <div className="export-field-head">
+                          <span>Quality</span>
+                          <strong>{selectedImageFormat.lossless ? 'Lossless' : `${Math.round(imageQuality * 100)}%`}</strong>
+                        </div>
+                        <div className="export-chip-row">
+                          <span className="export-chip export-chip-static">
+                            {selectedImageFormat.supportsAlpha ? 'Alpha kept' : 'Opaque'}
+                          </span>
+                          {!selectedImageFormat.lossless && IMAGE_QUALITY_PRESETS.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              className={`export-chip${Math.abs(imageQuality - preset.value) < 0.001 ? ' is-active' : ''}`}
+                              onClick={() => setImageQuality(preset.value)}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                        {!selectedImageFormat.lossless && (
+                          <div className="export-slider-control">
+                            <div className="export-slider-head">
+                              <label>Fine Tune</label>
+                              <span className="export-slider-value">{Math.round(imageQuality * 100)}%</span>
+                            </div>
+                            <input
+                              className="export-slider-input"
+                              type="range"
+                              min={0.4}
+                              max={1}
+                              step={0.01}
+                              value={imageQuality}
+                              onChange={(e) => setImageQuality(Number(e.target.value))}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="export-field-card export-subcard">
+                      <div className="export-field-head">
+                        <span>Frame</span>
+                        <strong>{formatTime(playheadPosition)}</strong>
+                      </div>
+                      <div className="export-inline-note">
+                        Exports the exact composited frame currently under the playhead.
+                      </div>
+                    </div>
+                  </>
+                ) : videoEnabled ? (
+                  <>
+                    <div className="export-quick-grid">
+                      <div className="export-field-card export-subcard" data-export-target="video-resolution">
+                        <div className="export-field-head">
+                          <span>Resolution</span>
+                          <strong>{actualWidth}x{actualHeight}</strong>
+                        </div>
+                        <div className="export-chip-row">
+                          {quickResolutionPresets.map(({ label, width: presetWidth, height: presetHeight }) => (
+                            <button
+                              key={`${presetWidth}x${presetHeight}`}
+                              type="button"
+                              className={`export-chip${!useCustomResolution && width === presetWidth && height === presetHeight ? ' is-active' : ''}`}
+                              onClick={() => handleQuickResolutionPreset(`${presetWidth}x${presetHeight}`)}
+                            >
+                              {label.split(' ')[0]}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            className={`export-chip${useCustomResolution ? ' is-active' : ''}`}
+                            onClick={() => setUseCustomResolution(true)}
+                          >
+                            Custom
+                          </button>
+                        </div>
+                        {useCustomResolution && (
+                          <div className="export-inline-inputs">
+                            <input
+                              type="number"
+                              value={customWidth}
+                              onChange={(e) => setCustomWidth(Math.max(1, parseInt(e.target.value) || 1920))}
+                              placeholder="Width"
+                              min="1"
+                              max="7680"
+                            />
+                            <span>x</span>
+                            <input
+                              type="number"
+                              value={customHeight}
+                              onChange={(e) => setCustomHeight(Math.max(1, parseInt(e.target.value) || 1080))}
+                              placeholder="Height"
+                              min="1"
+                              max="4320"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="export-field-card export-subcard" data-export-target="video-fps">
                         <div className="export-field-head">
                           <span>Frame Rate</span>
                           <strong>{actualFps} fps</strong>
@@ -1118,94 +1659,114 @@ export function ExportPanel() {
                       </div>
                     </div>
 
-                    <div className="export-field-card">
+                    {(isWebCodecsEncoder || showFFmpegQualityControl) && (
+                    <div className="export-field-card export-subcard" data-export-target="video-rate">
                       <div className="export-field-head">
-                        <span>{isWebCodecsEncoder ? 'Delivery Preset' : 'FFmpeg Workflow'}</span>
-                        <strong>{isWebCodecsEncoder ? `${(bitrate / 1_000_000).toFixed(1)} Mbps` : (ffmpegPreset || 'Custom')}</strong>
+                        <span>{isWebCodecsEncoder ? 'Rate' : 'Quality'}</span>
+                        <strong>
+                          {isWebCodecsEncoder
+                            ? `${rateControl.toUpperCase()} / ${(bitrate / 1_000_000).toFixed(1)} Mbps`
+                            : `MJPEG / Q${ffmpegQuality}`}
+                        </strong>
                       </div>
-                      <div className="export-preset-grid">
-                        {isWebCodecsEncoder ? (
-                          webQualityPresets.map((preset) => (
+                      {isWebCodecsEncoder ? (
+                        <>
+                          <div className="export-chip-row">
                             <button
-                              key={preset.id}
                               type="button"
-                              className={`export-preset-card${rateControl === 'vbr' && bitrate === preset.value ? ' is-active' : ''}`}
-                              onClick={() => handleQuickBitratePreset(preset.value)}
+                              className={`export-chip${rateControl === 'vbr' ? ' is-active' : ''}`}
+                              onClick={() => setRateControl('vbr')}
                             >
-                              <strong>{preset.label}</strong>
-                              <span>{preset.detail}</span>
+                              VBR
                             </button>
-                          ))
-                        ) : (
-                          ffmpegWorkflowPresets.map((preset) => (
                             <button
-                              key={preset.id}
                               type="button"
-                              className={`export-preset-card${ffmpegPreset === preset.id ? ' is-active' : ''}`}
-                              onClick={() => applyFFmpegPreset(preset.id)}
+                              className={`export-chip${rateControl === 'cbr' ? ' is-active' : ''}`}
+                              onClick={() => setRateControl('cbr')}
                             >
-                              <strong>{preset.label}</strong>
-                              <span>{preset.detail}</span>
+                              CBR
                             </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="export-field-card export-subcard">
-                      <div className="export-field-head">
-                        <span>Codec & Quality</span>
-                        <strong>{currentCodecLabel}</strong>
-                      </div>
-
-                      {encoder === 'ffmpeg' && (
-                        <div className="control-row">
-                          <label>Preset</label>
-                          <select value={ffmpegPreset} onChange={(e) => applyFFmpegPreset(e.target.value)}>
-                            <option value="">Custom</option>
-                            <optgroup label="Professional NLEs">
-                              <option value="premiere">Adobe Premiere</option>
-                              <option value="finalcut">Final Cut Pro</option>
-                              <option value="davinci">DaVinci Resolve</option>
-                              <option value="avid">Avid Media Composer</option>
-                            </optgroup>
-                            <optgroup label="ProRes Quality">
-                              <option value="prores_proxy">ProRes Proxy</option>
-                              <option value="prores_lt">ProRes LT</option>
-                              <option value="prores_hq">ProRes HQ</option>
-                              <option value="prores_4444">ProRes 4444 (Alpha)</option>
-                            </optgroup>
-                            <optgroup label="Lossless / Archive">
-                              <option value="archive">Archive (FFV1)</option>
-                              <option value="utvideo_alpha">UTVideo (Alpha)</option>
-                            </optgroup>
-                            <optgroup label="Quick Export">
-                              <option value="mjpeg_preview">MJPEG Preview</option>
-                            </optgroup>
-                          </select>
+                          </div>
+                          <div className="export-chip-row">
+                            {webQualityPresets.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                className={`export-chip${bitrate === preset.value ? ' is-active' : ''}`}
+                                onClick={() => handleQuickBitratePreset(preset.value)}
+                              >
+                                {preset.detail}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="export-slider-control">
+                            <div className="export-slider-head">
+                              <label>Fine Tune</label>
+                              <span className="export-slider-value">{(bitrate / 1_000_000).toFixed(1)} Mbps</span>
+                            </div>
+                            <input
+                              className="export-slider-input"
+                              type="range"
+                              min={1_000_000}
+                              max={100_000_000}
+                              step={500_000}
+                              value={bitrate}
+                              onChange={(e) => setBitrate(Number(e.target.value))}
+                            />
+                          </div>
+                          <div className="export-inline-note">
+                            {webCodecsRateNote}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="export-slider-control">
+                          <div className="export-slider-head">
+                            <label>MJPEG</label>
+                            <span className="export-slider-value">
+                              {ffmpegQuality} {ffmpegQuality <= 5 ? '(High)' : ffmpegQuality <= 10 ? '(Good)' : ffmpegQuality <= 20 ? '(Med)' : '(Low)'}
+                            </span>
+                          </div>
+                          <input
+                            className="export-slider-input"
+                            type="range"
+                            min={1}
+                            max={31}
+                            value={ffmpegQuality}
+                            onChange={(e) => setFfmpegQuality(parseInt(e.target.value))}
+                          />
                         </div>
                       )}
+                    </div>
+                    )}
 
-                      <div className="control-row">
-                        <label>Codec</label>
-                        {isWebCodecsEncoder ? (
-                          <select
-                            value={videoCodec}
-                            onChange={(e) => setVideoCodec(e.target.value as VideoCodec)}
-                          >
-                            {FrameExporter.getVideoCodecs(containerFormat).map(({ id, label }) => (
-                              <option key={id} value={id} disabled={!codecSupport[id]}>
-                                {label} {!codecSupport[id] ? '(not supported)' : ''}
-                              </option>
+                    <div className="export-field-card export-subcard" data-export-target="video-codec">
+                      <div className="export-field-head">
+                        <span>Codec</span>
+                        <strong>{currentCodecLabel}</strong>
+                      </div>
+                      <div className="export-chip-row">
+                        {isWebCodecsEncoder
+                          ? FrameExporter.getVideoCodecs(containerFormat).map(({ id, label }) => (
+                              <button
+                                key={id}
+                                type="button"
+                                className={`export-chip${videoCodec === id ? ' is-active' : ''}`}
+                                onClick={() => setVideoCodec(id as VideoCodec)}
+                                disabled={!codecSupport[id]}
+                              >
+                                {label}
+                              </button>
+                            ))
+                          : getCodecsForContainer(ffmpegContainer).map((codec) => (
+                              <button
+                                key={codec.id}
+                                type="button"
+                                className={`export-chip${ffmpegCodec === codec.id ? ' is-active' : ''}`}
+                                onClick={() => handleFFmpegCodecChange(codec.id as FFmpegVideoCodec)}
+                              >
+                                {codec.name}
+                              </button>
                             ))}
-                          </select>
-                        ) : (
-                          <CodecSelector
-                            container={ffmpegContainer}
-                            value={ffmpegCodec}
-                            onChange={handleFFmpegCodecChange}
-                          />
-                        )}
                       </div>
 
                       {encoder === 'ffmpeg' && ffmpegCodecInfo && (
@@ -1217,105 +1778,37 @@ export function ExportPanel() {
                       )}
 
                       {encoder === 'ffmpeg' && ffmpegCodec === 'prores' && (
-                        <div className="control-row">
-                          <label>Profile</label>
-                          <select
-                            value={proresProfile}
-                            onChange={(e) => setProresProfile(e.target.value as ProResProfile)}
-                          >
-                            {PRORES_PROFILES.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} - {p.description}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="export-chip-row">
+                          {PRORES_PROFILES.map((profile) => (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              className={`export-chip${proresProfile === profile.id ? ' is-active' : ''}`}
+                              onClick={() => setProresProfile(profile.id as ProResProfile)}
+                            >
+                              {profile.name}
+                            </button>
+                          ))}
                         </div>
                       )}
 
                       {encoder === 'ffmpeg' && ffmpegCodec === 'dnxhd' && (
-                        <div className="control-row">
-                          <label>Profile</label>
-                          <select
-                            value={dnxhrProfile}
-                            onChange={(e) => setDnxhrProfile(e.target.value as DnxhrProfile)}
-                          >
-                            {DNXHR_PROFILES.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} - {p.description}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      {isWebCodecsEncoder ? (
-                        <>
-                          <div className="control-row">
-                            <label>Rate Control</label>
-                            <select
-                              value={rateControl}
-                              onChange={(e) => setRateControl(e.target.value as 'vbr' | 'cbr')}
+                        <div className="export-chip-row">
+                          {DNXHR_PROFILES.map((profile) => (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              className={`export-chip${dnxhrProfile === profile.id ? ' is-active' : ''}`}
+                              onClick={() => setDnxhrProfile(profile.id as DnxhrProfile)}
                             >
-                              <option value="vbr">VBR (Variable Bitrate)</option>
-                              <option value="cbr">CBR (Constant Bitrate)</option>
-                            </select>
-                          </div>
-
-                          <div className="control-row">
-                            <label>{rateControl === 'cbr' ? 'Bitrate' : 'Target Bitrate'}</label>
-                            <select
-                              value={bitrate}
-                              onChange={(e) => setBitrate(Number(e.target.value))}
-                            >
-                              <option value={5_000_000}>5 Mbps (Low)</option>
-                              <option value={10_000_000}>10 Mbps (Medium)</option>
-                              <option value={15_000_000}>15 Mbps (High)</option>
-                              <option value={20_000_000}>20 Mbps</option>
-                              <option value={25_000_000}>25 Mbps (Very High)</option>
-                              <option value={35_000_000}>35 Mbps</option>
-                              <option value={50_000_000}>50 Mbps (Max)</option>
-                            </select>
-                          </div>
-
-                          <div className="control-row">
-                            <label>Fine Tune</label>
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flex: 1 }}>
-                              <input
-                                type="range"
-                                min={1_000_000}
-                                max={100_000_000}
-                                step={500_000}
-                                value={bitrate}
-                                onChange={(e) => setBitrate(Number(e.target.value))}
-                                style={{ flex: 1 }}
-                              />
-                              <span style={{ minWidth: '70px', fontSize: '12px', textAlign: 'right' }}>
-                                {(bitrate / 1_000_000).toFixed(1)} Mbps
-                              </span>
-                            </div>
-                          </div>
-                        </>
-                      ) : showFFmpegQualityControl && (
-                        <div className="control-row">
-                          <label>Quality</label>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                            <input
-                              type="range"
-                              min={1}
-                              max={31}
-                              value={ffmpegQuality}
-                              onChange={(e) => setFfmpegQuality(parseInt(e.target.value))}
-                              style={{ flex: 1 }}
-                            />
-                            <span style={{ minWidth: '60px', textAlign: 'right', fontSize: '12px' }}>
-                              {ffmpegQuality} {ffmpegQuality <= 5 ? '(High)' : ffmpegQuality <= 10 ? '(Good)' : ffmpegQuality <= 20 ? '(Med)' : '(Low)'}
-                            </span>
-                          </div>
+                              {profile.name}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
 
-                    <div className="export-field-card export-subcard">
+                    <div className="export-field-card export-subcard" data-export-target="video-alpha">
                       <div className="export-field-head">
                         <span>Alpha</span>
                         <strong>{stackedAlpha ? 'Stacked' : 'Off'}</strong>
@@ -1355,7 +1848,7 @@ export function ExportPanel() {
                             <strong>{frameCount}</strong>
                           </div>
                           <div className="export-stat-card">
-                            <span>Est. Size</span>
+                            <span>{sizeStatLabel}</span>
                             <strong>{estimatedSizeLabel}</strong>
                           </div>
                         </div>
@@ -1364,100 +1857,79 @@ export function ExportPanel() {
                   </>
                 ) : (
                   <div className="export-inline-note">
-                    Video export is disabled. The primary action switches to audio export when audio is enabled.
+                    Visual export is disabled. Switch to Video or Image, or use Audio-only export.
                   </div>
                 )}
               </div>
 
-              <div className={`export-channel-card${includeAudio ? '' : ' is-disabled'}`}>
+              <div className={`export-channel-card${isImageMode || (!includeAudio && !isXmlMode) ? ' is-disabled' : ''}`} data-export-target="audio-section">
                 <div className="export-channel-head">
                   <div className="export-channel-title">
                     <span>Audio</span>
-                    <strong>{includeAudio ? `${audioSampleRate / 1000} kHz` : 'Disabled'}</strong>
+                    <strong>{isXmlMode ? (includeAudio ? 'Track references included' : 'No audio references') : !isImageMode && includeAudio ? `${currentAudioCodecLabel} / ${audioSampleRate / 1000} kHz` : 'Disabled'}</strong>
                   </div>
                   <button
                     type="button"
-                    className={`export-toggle${includeAudio ? ' is-active' : ''}`}
+                    className={`export-toggle${(isXmlMode ? includeAudio : !isImageMode && includeAudio) ? ' is-active' : ''}`}
                     onClick={() => setIncludeAudio(!includeAudio)}
-                    disabled={isWebCodecsEncoder && !isAudioSupported}
+                    disabled={isImageMode || (!isXmlMode && isWebCodecsEncoder && !isAudioSupported)}
                   >
-                    {includeAudio ? 'On' : 'Off'}
+                    {(isXmlMode ? includeAudio : !isImageMode && includeAudio) ? 'On' : 'Off'}
                   </button>
                 </div>
 
-                {includeAudio ? (
+                {isImageMode ? (
+                  <div className="export-inline-note">
+                    Image export ignores audio and renders only the current playhead frame.
+                  </div>
+                ) : isXmlMode ? (
+                  <div className="export-inline-note">
+                    XML export can include or omit audio track references, but it does not encode audio files.
+                  </div>
+                ) : includeAudio ? (
                   <>
-                    {showSharedFileInAudio && (
-                      <div className="export-field-card export-subcard">
-                        <div className="export-field-head">
-                          <span>Output</span>
-                          <strong>.{audioExtension}</strong>
-                        </div>
-                        <div className="control-row">
-                          <label>Name</label>
-                          <div className="export-input-group">
-                            <input
-                              type="text"
-                              value={filename}
-                              onChange={(e) => setFilename(e.target.value)}
-                              placeholder="export"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="export-chip-row">
-                      {audioSummaryBadges.map((badge) => (
-                        <span key={badge} className="export-chip export-chip-static">{badge}</span>
-                      ))}
-                    </div>
-
-                    <div className="export-field-card export-subcard">
+                    <div className="export-field-card export-subcard" data-export-target="audio-format">
                       <div className="export-field-head">
                         <span>Format</span>
-                        <strong>{audioCodecLabel}</strong>
+                        <strong>{currentAudioCodecLabel}</strong>
                       </div>
-                      <div className="export-audio-grid">
-                        <div className="control-row">
-                          <label>Sample Rate</label>
-                          <select
-                            value={audioSampleRate}
-                            onChange={(e) => setAudioSampleRate(Number(e.target.value) as 44100 | 48000)}
+                      <div className="export-chip-row">
+                        <span className="export-chip export-chip-static">
+                          {currentAudioCodecLabel}{videoEnabled && encoder === 'ffmpeg' ? ' auto' : ''}
+                        </span>
+                        {audioSampleRatePresets.map((preset) => (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            className={`export-chip${audioSampleRate === preset.value ? ' is-active' : ''}`}
+                            onClick={() => setAudioSampleRate(preset.value)}
                           >
-                            <option value={48000}>48 kHz (Video)</option>
-                            <option value={44100}>44.1 kHz (CD)</option>
-                          </select>
-                        </div>
-
-                        <div className="control-row">
-                          <label>Quality</label>
-                          <select
-                            value={audioBitrate}
-                            onChange={(e) => setAudioBitrate(Number(e.target.value))}
-                          >
-                            <option value={128000}>128 kbps</option>
-                            <option value={192000}>192 kbps</option>
-                            <option value={256000}>256 kbps (High)</option>
-                            <option value={320000}>320 kbps (Max)</option>
-                          </select>
-                        </div>
-
-                        {encoder === 'ffmpeg' && (
-                          <div className="control-row">
-                            <label>Audio Codec</label>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              {ffmpegContainer === 'mov' ? 'AAC' :
-                               ffmpegContainer === 'mkv' ? 'FLAC' :
-                               ffmpegContainer === 'avi' ? 'PCM' :
-                               ffmpegContainer === 'mxf' ? 'PCM' : 'AAC'} (auto)
-                            </span>
-                          </div>
-                        )}
+                            {preset.label}
+                          </button>
+                        ))}
                       </div>
                     </div>
 
-                    <div className="export-field-card export-subcard">
+                    <div className="export-field-card export-subcard" data-export-target="audio-quality">
+                      <div className="export-field-head">
+                        <span>Quality</span>
+                        <strong>{Math.round(audioBitrate / 1000)} kbps</strong>
+                      </div>
+                      <div className="export-chip-row">
+                        {audioBitratePresets.map((preset) => (
+                          <button
+                            type="button"
+                            key={preset.value}
+                            className={`export-chip${audioBitrate === preset.value ? ' is-active' : ''}`}
+                            onClick={() => setAudioBitrate(preset.value)}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="export-field-card export-subcard" data-export-target="audio-processing">
                       <div className="export-field-head">
                         <span>Processing</span>
                         <strong>{normalizeAudio ? 'Normalized' : 'Direct'}</strong>
@@ -1491,14 +1963,14 @@ export function ExportPanel() {
                         <div className="export-stats-grid export-stats-grid-compact">
                           <div className="export-stat-card">
                             <span>Output</span>
-                            <strong>{audioCodecLabel} only</strong>
+                            <strong>{currentAudioCodecLabel} only</strong>
                           </div>
                           <div className="export-stat-card">
                             <span>Duration</span>
                             <strong>{formatTime(endTime - startTime)}</strong>
                           </div>
                           <div className="export-stat-card">
-                            <span>Est. Size</span>
+                            <span>{sizeStatLabel}</span>
                             <strong>{estimatedSizeLabel}</strong>
                           </div>
                         </div>
@@ -1507,7 +1979,7 @@ export function ExportPanel() {
                   </>
                 ) : (
                   <div className="export-inline-note">
-                    Audio export is disabled. The video export stays silent unless you turn audio back on.
+                    Audio export is disabled. Video export stays silent until you turn audio back on.
                   </div>
                 )}
               </div>
@@ -1553,35 +2025,6 @@ export function ExportPanel() {
                 </select>
               </div>
             </div>
-
-            {/* FFmpeg Preset - only for FFmpeg */}
-            {encoder === 'ffmpeg' && (
-              <div className="control-row">
-                <label>Preset</label>
-                <select value={ffmpegPreset} onChange={(e) => applyFFmpegPreset(e.target.value)}>
-                  <option value="">Custom</option>
-                  <optgroup label="Professional NLEs">
-                    <option value="premiere">Adobe Premiere</option>
-                    <option value="finalcut">Final Cut Pro</option>
-                    <option value="davinci">DaVinci Resolve</option>
-                    <option value="avid">Avid Media Composer</option>
-                  </optgroup>
-                  <optgroup label="ProRes Quality">
-                    <option value="prores_proxy">ProRes Proxy</option>
-                    <option value="prores_lt">ProRes LT</option>
-                    <option value="prores_hq">ProRes HQ</option>
-                    <option value="prores_4444">ProRes 4444 (Alpha)</option>
-                  </optgroup>
-                  <optgroup label="Lossless / Archive">
-                    <option value="archive">Archive (FFV1)</option>
-                    <option value="utvideo_alpha">UTVideo (Alpha)</option>
-                  </optgroup>
-                  <optgroup label="Quick Export">
-                    <option value="mjpeg_preview">MJPEG Preview</option>
-                  </optgroup>
-                </select>
-              </div>
-            )}
 
             {/* Video Codec */}
             <div className="control-row">

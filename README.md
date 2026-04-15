@@ -61,10 +61,12 @@ Decoding depends on what the **browser** supports — the container is just the 
 <tr><td><b>Gaussian Splats</b></td><td>PLY, SPLAT</td></tr>
 <tr><td><b>Download</b></td><td>YouTube, TikTok, Instagram, Twitter/X, Vimeo + <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md">all yt-dlp sites</a> via Native Helper</td></tr>
 <tr><th colspan="2">Export (Encode)</th></tr>
-<tr><td><b>Containers</b></td><td>MP4, WebM</td></tr>
+<tr><td><b>Video containers</b></td><td>MP4, WebM via WebCodecs / HTMLVideo; MOV, MKV, AVI, MXF via FFmpeg WASM</td></tr>
+<tr><td><b>FFmpeg codecs</b></td><td>ProRes, DNxHR, FFV1, UTVideo, MJPEG</td></tr>
 <tr><td><b>Video codecs</b></td><td>H.264, H.265¹, VP9, AV1 — GPU-accelerated via WebCodecs</td></tr>
-<tr><td><b>Audio codecs</b></td><td>AAC (MP4), Opus (WebM)</td></tr>
-<tr><td><b>Interchange</b></td><td>FCPXML (Final Cut Pro / DaVinci Resolve), PNG sequence</td></tr>
+<tr><td><b>Image export</b></td><td>PNG, JPG/JPEG, WebP, BMP (current playhead frame)</td></tr>
+<tr><td><b>Audio-only export</b></td><td>AAC or OGG/Opus depending on browser codec support</td></tr>
+<tr><td><b>Interchange</b></td><td>FCPXML (Final Cut Pro / DaVinci Resolve)</td></tr>
 </table>
 
 ¹ H.265 decode/encode depends on OS & hardware — full support on Windows, partial on macOS/Linux.
@@ -140,7 +142,7 @@ This requires the Native Helper to be running, a MasterSelects editor tab to be 
 | [**AI Integration**](docs/Features/AI-Integration.md) | Built-in OpenAI chat, 79 exported tool-callable edit actions, and local/native bridges for external agents |
 | [**FlashBoard**](docs/Features/FlashBoard.md) | Node-based AI canvas for text-to-video, image-to-video, and image generation |
 | [**Multicam AI**](docs/Features/Multicam-AI.md) | Sync cameras, transcribe footage, and generate Claude-powered multicam EDLs *(experimental)* |
-| [**Export Pipeline**](docs/Features/Export.md) | WebCodecs Fast/Precise, FFmpeg WASM *(experimental / WIP)*, FCPXML, and PNG sequence export |
+| [**Export Pipeline**](docs/Features/Export.md) | WebCodecs Fast/Precise, FFmpeg intermediates, image/audio-only export, FCPXML, and project-persistent presets |
 | [**Live EQ & Audio**](docs/Features/Audio.md) | 10-band parametric EQ with real-time Web Audio preview |
 | [**Download Panel**](docs/Features/Download-Panel.md) | YouTube, TikTok, Instagram, Twitter/X, Vimeo, and other yt-dlp-supported sites via Native Helper |
 | [**Vector Animation**](docs/Features/Vector-Animation.md) | `.lottie` and Lottie JSON clips with loop controls, fit, and deterministic preview/export |
@@ -232,7 +234,7 @@ If something breaks, refresh. If it's still broken, [open an issue](https://gith
 
 - **Frontend:** React 19, TypeScript, Zustand, Vite 7.2
 - **Rendering:** WebGPU + 2,500+ lines of WGSL shaders
-- **Video:** WebCodecs, mp4box, mp4-muxer, webm-muxer, HTMLVideo fallback, experimental FFmpeg WASM export path
+- **Video:** WebCodecs, MediaBunny, mp4box, HTMLVideo fallback, and experimental FFmpeg WASM export path
 - **Audio:** Web Audio API with 10-band live EQ, element-synced playback, drift correction, and waveform extraction
 - **AI:** Built-in OpenAI editor chat with 79 exported tools, Native Helper HTTP bridge for Claude Code / external agents, Claude/Anthropic for experimental multicam EDLs, SAM2 via ONNX Runtime, MatAnyone2 via Native Helper, local Whisper via Hugging Face Transformers, and Kie.ai / hosted cloud / PiAPI-backed generation flows
 - **Native:** Rust helper for Firefox storage backend, native decode/encode, and yt-dlp downloads

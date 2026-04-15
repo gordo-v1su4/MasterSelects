@@ -56,7 +56,7 @@ The docs in this folder were re-audited against the current codebase and now tra
 | [3D Layers](./3D-Layers.md) | Three.js scene path, native Gaussian splats, cameras, and splat effectors |
 | [Vector Animation](./Vector-Animation.md) | Lottie import, runtime playback, looping, and export behavior |
 | [Audio](./Audio.md) | Playback sync, EQ, waveform extraction, audio clip behavior, and export |
-| [Export](./Export.md) | WebCodecs fast/precise export, FFmpeg WASM path, and interchange output |
+| [Export](./Export.md) | WebCodecs fast/precise export, FFmpeg intermediates, image/audio-only export, FCPXML, and project-persistent presets |
 | [Proxy System](./Proxy-System.md) | Proxy generation, on-disk frame layout, audio proxies, and warmup behavior |
 | [Media Panel](./Media-Panel.md) | Import flow, RAW-copy promotion, folders, compositions, and relinking |
 | [Project Persistence](./Project-Persistence.md) | Save/load model, IndexedDB handle cache, continuous save, interval save mode, relink, and project roots |

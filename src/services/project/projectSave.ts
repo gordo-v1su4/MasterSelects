@@ -7,6 +7,7 @@ import { useYouTubeStore } from '../../stores/youtubeStore';
 import { useDockStore } from '../../stores/dockStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useFlashBoardStore } from '../../stores/flashboardStore';
+import { getExportStoreData, useExportStore } from '../../stores/exportStore';
 import type {
   FlashBoardGenerationMetadata,
   FlashBoardStoreState,
@@ -347,6 +348,7 @@ export async function syncStoresToProject(): Promise<void> {
         showTranscriptMarkers: timelineState.showTranscriptMarkers,
         showChangelogOnStartup: settingsState.showChangelogOnStartup,
         lastSeenChangelogVersion: settingsState.lastSeenChangelogVersion,
+        exportState: getExportStoreData(useExportStore.getState()),
       };
 
       // Save generated media items
