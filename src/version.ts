@@ -1,6 +1,6 @@
 // App version
 // Format: MAJOR.MINOR.PATCH
-export const APP_VERSION = '1.5.2';
+export const APP_VERSION = '1.5.3';
 
 export interface ChangelogNotice {
   type: 'info' | 'warning' | 'success' | 'danger';

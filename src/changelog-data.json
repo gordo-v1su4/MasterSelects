@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-04-15",
+    "type": "fix",
+    "title": "README Startup Size and Three.js Bundle Notes Were Corrected",
+    "description": "The README now reflects the current production startup footprint more accurately and no longer claims that Three.js is fully lazy-loaded when parts of the 3D and splat renderer still ship in the main bundle.",
+    "section": "Documentation"
+  },
+  {
+    "date": "2026-04-15",
     "type": "improve",
     "title": "Managed Billing Flows and Account UI Are Now Live",
     "description": "Hosted billing now supports guided plan upgrades, downgrades, cancellations, proration-aware Stripe webhooks, instant hosted credit balance sync, and a richer account and pricing surface in the app.",

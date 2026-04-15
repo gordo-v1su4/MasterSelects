@@ -7,7 +7,7 @@
 <br>
 
 <table><tr><td align="center" style="border:none;background:#0d1117;">
-<h1>&#9889; 660 KB <sub>gzip</sub></h1>
+<h1>&#9889; ~1.5 MB <sub>gzip</sub></h1>
 <sup><b>initial load</b></sup>
 </td></tr></table>
 
@@ -76,7 +76,9 @@ Decoding depends on what the **browser** supports — the container is just the 
 
 Most browser-based video editors share a pattern: Canvas 2D compositing, heavyweight dependency trees, and CPU-bound rendering that falls apart at scale. This project takes a fundamentally different approach.
 
-**GPU-first architecture.** Preview, scrubbing, and export all run through the same **WebGPU ping-pong compositor**. Video textures are imported as `texture_external` (**zero-copy**, no CPU roundtrip). **37 blend modes**, 3D rotation, and inline color effects all execute in a **single WGSL composite shader** per layer. **Three.js** is lazily loaded only for 3D model rendering — no GSAP, no Canvas 2D fallback in the hot path.
+**GPU-first architecture.** Preview, scrubbing, and export all run through the same **WebGPU ping-pong compositor**. Video textures are imported as `texture_external` (**zero-copy**, no CPU roundtrip). **37 blend modes**, 3D rotation, and inline color effects all execute in a **single WGSL composite shader** per layer. **Three.js** powers the 3D model path, and model-specific loaders such as OBJ/GLTF stay lazy-loaded, but parts of the 3D / splat renderer currently still contribute to the main startup bundle — no GSAP, no Canvas 2D fallback in the hot path.
+
+**Current startup footprint.** The production app shell is currently about **1.5 MB gzip** on first load. The largest contributors are **Three.js**, the 3D / gaussian-splat render path, and browser-side media parsing/runtime code. Reducing the initial bundle again is an active optimization target.
 
 **Zero-copy export pipeline.** Frames are captured as `new VideoFrame(offscreenCanvas)` directly from the GPU canvas. **No `readPixels()`**, no `getImageData()`, no staging buffers in the default path. The GPU renders, **WebCodecs encodes**. That's it.
 
