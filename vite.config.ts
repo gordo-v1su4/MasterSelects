@@ -739,6 +739,7 @@ export default defineConfig(({ command }) => {
       __DEV_ALLOWED_FILE_ROOTS__: JSON.stringify(isDevServer ? allowedFileRoots : []),
     },
     server: {
+      allowedHosts: ['localhost', '.localhost', '127.0.0.1'],
       headers: {
         // Required for SharedArrayBuffer (FFmpeg multi-threaded, cross-tab sync)
         // Using 'credentialless' instead of 'require-corp' to allow CDN resources

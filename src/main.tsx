@@ -1,27 +1,14 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
-import { useTimelineStore } from './stores/timeline'
-import { executeAITool, AI_TOOLS, getQuickTimelineSummary } from './services/aiTools'
+import RootApp from './RootApp.tsx'
+import { resolveEntryExperience } from './routing/entryExperience'
 
-// Expose AI tools API for browser console, Claude skills, and external agents
-// Only available in development mode to prevent production exposure
-if (import.meta.env.DEV) {
-  (window as any).aiTools = {
-    execute: (tool: string, args: Record<string, unknown>) => executeAITool(tool, args, 'console'),
-    list: () => AI_TOOLS,
-    status: getQuickTimelineSummary,
-  };
-}
+const initialExperience = resolveEntryExperience(window.location);
 
-// Bridge: allow external agents to call aiTools via HTTP POST /api/ai-tools
-import('./services/aiTools/bridge');
-
-// Expose store for debugging
-if (import.meta.env.DEV) {
-  (window as unknown as { store: typeof useTimelineStore }).store = useTimelineStore;
+if (initialExperience === 'editor') {
+  void import('./editorBoot');
 }
 
 // Note: StrictMode disabled for WebGPU compatibility in development
 // StrictMode causes double-mounting which breaks external texture references
-createRoot(document.getElementById('root')!).render(<App />)
+createRoot(document.getElementById('root')!).render(<RootApp initialExperience={initialExperience} />)
