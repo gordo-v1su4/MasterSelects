@@ -18,6 +18,48 @@ export type TimelineSourceType =
   | 'splat-effector'
   | VectorAnimationProvider;
 
+export type ModelSequencePlaybackMode = 'clamp' | 'loop';
+
+export interface ModelSequenceFrame {
+  name: string;
+  projectPath?: string;
+  sourcePath?: string;
+  absolutePath?: string;
+  file?: File;
+  modelUrl?: string;
+}
+
+export interface ModelSequenceData {
+  fps: number;
+  frameCount: number;
+  playbackMode?: ModelSequencePlaybackMode;
+  sequenceName?: string;
+  frames: ModelSequenceFrame[];
+}
+
+export interface GaussianSplatSequenceFrame {
+  name: string;
+  projectPath?: string;
+  sourcePath?: string;
+  absolutePath?: string;
+  file?: File;
+  splatUrl?: string;
+}
+
+export interface GaussianSplatBounds {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+export interface GaussianSplatSequenceData {
+  fps: number;
+  frameCount: number;
+  playbackMode?: ModelSequencePlaybackMode;
+  sequenceName?: string;
+  sharedBounds?: GaussianSplatBounds;
+  frames: GaussianSplatSequenceFrame[];
+}
+
 export interface Layer {
   id: string;
   name: string;
@@ -88,6 +130,9 @@ export type BlendMode =
 export interface LayerSource {
   type: 'video' | 'image' | 'camera' | 'color' | 'text' | 'solid' | 'model' | 'gaussian-avatar' | 'gaussian-splat';
   modelUrl?: string;  // Blob URL to 3D model file (OBJ/glTF/GLB)
+  modelSequence?: ModelSequenceData;
+  gaussianSplatSequence?: GaussianSplatSequenceData;
+  threeDEffectorsEnabled?: boolean;  // Whether shared-scene 3D effectors can affect this layer
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type (cube, sphere, etc.)
   file?: File;
   videoElement?: HTMLVideoElement;
@@ -117,6 +162,7 @@ export interface LayerSource {
   gaussianSplatUrl?: string;
   gaussianSplatFileName?: string;
   gaussianSplatFileHash?: string;
+  gaussianSplatRuntimeKey?: string;
   gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;
   cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;
   // Nested composition support - pre-rendered layers from nested comp
@@ -440,6 +486,9 @@ export interface TimelineClip {
   source: {
     type: TimelineSourceType;
     modelUrl?: string;  // Blob URL to 3D model file
+    modelSequence?: ModelSequenceData;
+    gaussianSplatSequence?: GaussianSplatSequenceData;
+    threeDEffectorsEnabled?: boolean;  // Whether shared-scene 3D effectors can affect this clip
     meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;  // Primitive mesh type
     text3DProperties?: Text3DProperties;
     cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;  // Shared-scene camera settings
@@ -449,6 +498,7 @@ export interface TimelineClip {
     gaussianSplatUrl?: string;  // URL to gaussian splat scene file
     gaussianSplatFileName?: string;  // Original filename for format detection after blob URL conversion
     gaussianSplatFileHash?: string;  // Stable content hash for cached/exported splat runtimes
+    gaussianSplatRuntimeKey?: string;  // Stable per-frame cache key for splat sequences
     gaussianSplatSettings?: import('../engine/gaussian/types').GaussianSplatSettings;  // Gaussian splat render settings
     videoElement?: HTMLVideoElement;
     audioElement?: HTMLAudioElement;
@@ -457,6 +507,7 @@ export interface TimelineClip {
     nativeDecoder?: import('../services/nativeHelper/NativeDecoder').NativeDecoder;
     naturalDuration?: number;
     mediaFileId?: string;  // Reference to MediaFile for proxy lookup
+    file?: File;
     textCanvas?: HTMLCanvasElement;  // Pre-rendered text/solid canvas for text and solid clips
     vectorAnimationSettings?: VectorAnimationClipSettings;
     filePath?: string;  // Path to original file (for native helper to access directly)
@@ -599,6 +650,9 @@ export interface SerializableClip {
   transitionOut?: TimelineTransition;
   // 3D layer support
   is3D?: boolean;
+  modelSequence?: ModelSequenceData;
+  gaussianSplatSequence?: GaussianSplatSequenceData;
+  threeDEffectorsEnabled?: boolean;
   meshType?: import('../stores/mediaStore/types').MeshPrimitiveType;
   cameraSettings?: import('../stores/mediaStore/types').SceneCameraSettings;
   splatEffectorSettings?: import('./splatEffector').SplatEffectorSettings;

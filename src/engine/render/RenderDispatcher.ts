@@ -34,7 +34,7 @@ import { buildSplatCamera, resolveOrbitCameraPose } from '../gaussian/core/Splat
 import { loadGaussianSplatAssetCached } from '../gaussian/loaders';
 import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../gaussian/types';
 import { DEFAULT_SPLAT_EFFECTOR_SETTINGS } from '../../types/splatEffector';
-import { waitForTargetPreparedSplatRuntime } from '../three/splatRuntimeCache';
+import { waitForBasePreparedSplatRuntime, waitForTargetPreparedSplatRuntime } from '../three/splatRuntimeCache';
 
 const log = Logger.create('RenderDispatcher');
 const GAUSSIAN_PLAYBACK_SORT_FREQUENCY = 6;
@@ -388,6 +388,8 @@ export class RenderDispatcher {
       file?: File;
       url?: string;
       fileName: string;
+      gaussianSplatSequence?: NonNullable<Layer['source']>['gaussianSplatSequence'];
+      preferBaseRuntime: boolean;
       requestedMaxSplats: number;
     }>();
     const modelAssets = new Map<string, { url: string; fileName: string }>();
@@ -434,12 +436,17 @@ export class RenderDispatcher {
           : mediaFile?.file && (typeof mediaFile.file.size !== 'number' || mediaFile.file.size > 0)
             ? mediaFile.file
             : undefined;
-      const fileHash = source.gaussianSplatFileHash ?? mediaFile?.fileHash;
+      const gaussianSplatSequence = source.gaussianSplatSequence ?? mediaFile?.gaussianSplatSequence;
+      const preferBaseRuntime = !!gaussianSplatSequence;
+      const fileHash = preferBaseRuntime ? undefined : (source.gaussianSplatFileHash ?? mediaFile?.fileHash);
       const requestedMaxSplats = source.gaussianSplatSettings?.render.maxSplats ?? 0;
-      const cacheKey =
-        fileHash ??
-        mediaFileId ??
+      const runtimeCacheKey =
+        source.gaussianSplatRuntimeKey ??
         `${fileName || source.gaussianSplatUrl || layer.id}|${source.gaussianSplatUrl || layer.id}`;
+      const cacheKey =
+        preferBaseRuntime
+          ? runtimeCacheKey
+          : (fileHash ?? mediaFileId ?? runtimeCacheKey);
 
       if (this.isNativeGaussianSplatSource(source)) {
         if (!source.gaussianSplatUrl) {
@@ -463,6 +470,8 @@ export class RenderDispatcher {
         file,
         url: source.gaussianSplatUrl,
         fileName,
+        gaussianSplatSequence,
+        preferBaseRuntime,
         requestedMaxSplats,
       });
     }
@@ -501,17 +510,28 @@ export class RenderDispatcher {
         }
         this.exportReadyModelUrls.add(url);
       }),
-      ...[...threeSplats.values()].map(async ({ cacheKey, fileHash, file, url, fileName, requestedMaxSplats }) => {
-        const threeSplatKey = `${cacheKey}|${requestedMaxSplats}`;
+      ...[...threeSplats.values()].map(async ({
+        cacheKey,
+        fileHash,
+        file,
+        url,
+        fileName,
+        gaussianSplatSequence,
+        preferBaseRuntime,
+        requestedMaxSplats,
+      }) => {
+        const variant = preferBaseRuntime ? 'base' : 'target';
+        const threeSplatKey = `${cacheKey}|${variant}|${requestedMaxSplats}`;
         if (this.exportReadyThreeSplatKeys.has(threeSplatKey)) {
           return;
         }
-        await waitForTargetPreparedSplatRuntime({
+        await (preferBaseRuntime ? waitForBasePreparedSplatRuntime : waitForTargetPreparedSplatRuntime)({
           cacheKey,
           fileHash,
           file,
           url,
           fileName,
+          gaussianSplatSequence,
           requestedMaxSplats,
         });
         this.exportReadyThreeSplatKeys.add(threeSplatKey);
@@ -1009,6 +1029,7 @@ export class RenderDispatcher {
           z: rot.z * radToDeg,
         },
         scale: { x: layer.scale.x, y: layer.scale.y, z: layer.scale.z ?? 1 },
+        threeDEffectorsEnabled: src?.threeDEffectorsEnabled,
         opacity: layer.opacity,
         blendMode: layer.blendMode,
         sourceWidth: stableSourceSize.sourceWidth,
@@ -1022,9 +1043,13 @@ export class RenderDispatcher {
         meshType: src?.meshType ?? undefined,
         text3DProperties: src?.text3DProperties ?? undefined,
         wireframe: layer.wireframe,
+        gaussianSplatFile: src?.file ?? undefined,
         gaussianSplatUrl: src?.gaussianSplatUrl ?? undefined,
         gaussianSplatFileName: src?.gaussianSplatFileName ?? undefined,
         gaussianSplatFileHash: src?.gaussianSplatFileHash ?? undefined,
+        gaussianSplatRuntimeKey: src?.gaussianSplatRuntimeKey ?? undefined,
+        gaussianSplatIsSequence: !!src?.gaussianSplatSequence,
+        gaussianSplatSequence: src?.gaussianSplatSequence ?? undefined,
         gaussianSplatMediaFileId: src?.mediaFileId ?? undefined,
         gaussianSplatSettings: src?.gaussianSplatSettings ?? undefined,
         preciseSplatSorting,

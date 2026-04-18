@@ -2,8 +2,9 @@ import { Logger } from '../../services/logger';
 import { useMediaStore } from '../../stores/mediaStore';
 import { useTimelineStore } from '../../stores/timeline';
 import type { TimelineClip, TimelineTrack } from '../../stores/timeline/types';
+import type { GaussianSplatSequenceData } from '../../types';
 import { engine } from '../WebGPUEngine';
-import { waitForTargetPreparedSplatRuntime } from '../three/splatRuntimeCache';
+import { waitForBasePreparedSplatRuntime, waitForTargetPreparedSplatRuntime } from '../three/splatRuntimeCache';
 import { DEFAULT_GAUSSIAN_SPLAT_SETTINGS } from '../gaussian/types';
 
 const log = Logger.create('ExportAssetPreload');
@@ -105,6 +106,8 @@ export async function preloadGaussianSplatsForExport(options: PreloadOptions): P
     fileName: string;
     fileHash?: string;
     file?: File;
+    gaussianSplatSequence?: GaussianSplatSequenceData;
+    isSequence: boolean;
     useNativeRenderer: boolean;
   }>();
   for (const clip of clips) {
@@ -125,7 +128,11 @@ export async function preloadGaussianSplatsForExport(options: PreloadOptions): P
       : mediaFile?.file && (typeof mediaFile.file.size !== 'number' || mediaFile.file.size > 0)
         ? mediaFile.file
       : undefined;
-    const fileHash = clip.source?.gaussianSplatFileHash ?? mediaFile?.fileHash;
+    const gaussianSplatSequence = clip.source?.gaussianSplatSequence ?? mediaFile?.gaussianSplatSequence;
+    const isSequence = !!gaussianSplatSequence;
+    const fileHash = isSequence
+      ? undefined
+      : (clip.source?.gaussianSplatFileHash ?? mediaFile?.fileHash);
     const useNativeRenderer =
       clip.source?.gaussianSplatSettings?.render.useNativeRenderer ??
       DEFAULT_GAUSSIAN_SPLAT_SETTINGS.render.useNativeRenderer;
@@ -137,6 +144,8 @@ export async function preloadGaussianSplatsForExport(options: PreloadOptions): P
       fileName,
       fileHash,
       file,
+      gaussianSplatSequence,
+      isSequence,
       useNativeRenderer,
     });
   }
@@ -162,13 +171,14 @@ export async function preloadGaussianSplatsForExport(options: PreloadOptions): P
       log.warn('Three.js renderer could not be initialized for gaussian splat export preloading');
     } else {
       threeResults = await Promise.allSettled(
-        threeSplats.map(({ cacheKey, fileHash, file, url, fileName }) =>
-          waitForTargetPreparedSplatRuntime({
+        threeSplats.map(({ cacheKey, fileHash, file, url, fileName, gaussianSplatSequence, isSequence }) =>
+          (isSequence ? waitForBasePreparedSplatRuntime : waitForTargetPreparedSplatRuntime)({
             cacheKey,
             fileHash,
             file,
             url,
             fileName,
+            gaussianSplatSequence,
             // Export should build the full splat runtime, regardless of preview cap.
             requestedMaxSplats: 0,
           }),
